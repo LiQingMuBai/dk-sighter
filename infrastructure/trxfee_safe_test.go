@@ -18,16 +18,18 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 	}
 
 	var (
-		gotPath   string
-		gotMethod string
-		gotHeader string
-		gotBody   requestBody
+		gotPath      string
+		gotMethod    string
+		gotHeader    string
+		gotAPIHeader string
+		gotBody      requestBody
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotMethod = r.Method
 		gotHeader = r.Header.Get("Content-Type")
+		gotAPIHeader = r.Header.Get("X-API-Key")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
@@ -52,6 +54,9 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 	}
 	if gotHeader != "application/json" {
 		t.Fatalf("unexpected content-type: %s", gotHeader)
+	}
+	if gotAPIHeader != "masion" {
+		t.Fatalf("unexpected X-API-Key: %s", gotAPIHeader)
 	}
 	if gotBody.EnergyAmount != 65000 {
 		t.Fatalf("unexpected energy amount: %d", gotBody.EnergyAmount)

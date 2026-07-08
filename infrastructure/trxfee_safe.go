@@ -73,6 +73,7 @@ func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "masion")
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
