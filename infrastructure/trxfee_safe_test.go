@@ -24,6 +24,7 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 		gotAPIHeader string
 		gotBody      requestBody
 	)
+	const configuredAPIKey = "masion"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -38,7 +39,7 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewTrxfeeClient(server.URL, "", "")
+	client := NewTrxfeeClient(server.URL, "", "", configuredAPIKey)
 	resp, err := client.OrderSafe("ORDER-001", "TTESTADDR", 65000)
 	if err != nil {
 		t.Fatalf("OrderSafe returned error: %v", err)
@@ -55,7 +56,7 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 	if gotHeader != "application/json" {
 		t.Fatalf("unexpected content-type: %s", gotHeader)
 	}
-	if gotAPIHeader != "masion" {
+	if gotAPIHeader != configuredAPIKey {
 		t.Fatalf("unexpected X-API-Key: %s", gotAPIHeader)
 	}
 	if gotBody.EnergyAmount != 65000 {
@@ -76,8 +77,26 @@ func TestTrxfeeOrderSafeUsesNewOrderAPI(t *testing.T) {
 }
 
 func TestTrxfeeOrderEndpointKeepsFullPath(t *testing.T) {
-	client := NewTrxfeeClient("https://usdtee.xyz/api/trxfee/order", "", "")
+	client := NewTrxfeeClient("https://usdtee.xyz/api/trxfee/order", "", "", "")
 	if got := client.orderEndpoint(); got != "https://usdtee.xyz/api/trxfee/order" {
 		t.Fatalf("unexpected endpoint: %s", got)
+	}
+}
+
+func TestTrxfeeOrderSafeFallsBackToAPIKey(t *testing.T) {
+	var gotAPIHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIHeader = r.Header.Get("X-API-Key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`ok`))
+	}))
+	defer server.Close()
+
+	client := NewTrxfeeClient(server.URL, "legacy-api-key", "", "")
+	if _, err := client.OrderSafe("ORDER-002", "TTESTADDR", 65000); err != nil {
+		t.Fatalf("OrderSafe returned error: %v", err)
+	}
+	if gotAPIHeader != "legacy-api-key" {
+		t.Fatalf("unexpected fallback X-API-Key: %s", gotAPIHeader)
 	}
 }

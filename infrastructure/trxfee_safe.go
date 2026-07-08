@@ -10,11 +10,12 @@ import (
 	"time"
 )
 
-func NewTrxfeeClient(url, apiKey, apiSecret string) *TrxfeeClient {
+func NewTrxfeeClient(url, apiKey, apiSecret, xAPIKey string) *TrxfeeClient {
 	return &TrxfeeClient{
 		URL:       strings.TrimRight(strings.TrimSpace(url), "/"),
 		APIKey:    strings.TrimSpace(apiKey),
 		APISecret: strings.TrimSpace(apiSecret),
+		XAPIKey:   strings.TrimSpace(xAPIKey),
 	}
 }
 
@@ -73,7 +74,9 @@ func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", "masion")
+	if apiKey := c.requestAPIKey(); apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
@@ -104,4 +107,14 @@ func (c *TrxfeeClient) orderEndpoint() string {
 		return baseURL
 	}
 	return baseURL + "/api/trxfee/order"
+}
+
+func (c *TrxfeeClient) requestAPIKey() string {
+	if c == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(c.XAPIKey); value != "" {
+		return value
+	}
+	return strings.TrimSpace(c.APIKey)
 }

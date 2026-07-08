@@ -72,6 +72,7 @@ type TrxfeeConfig struct {
 	URL       string `yaml:"url"`
 	APIKey    string `yaml:"api_key"`
 	APISecret string `yaml:"api_secret"`
+	XAPIKey   string `yaml:"x_api_key"`
 }
 
 type EnergyConfig struct {

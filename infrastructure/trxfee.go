@@ -18,6 +18,7 @@ import (
 type TrxfeeClient struct {
 	APIKey    string
 	APISecret string
+	XAPIKey   string
 	URL       string
 }
 

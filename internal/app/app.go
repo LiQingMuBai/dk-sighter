@@ -295,7 +295,7 @@ func resolveDataDir() string {
 
 func buildEnergyProviders(cfg *config.Config) map[string]infrastructure.EnergyOrderProvider {
 	return map[string]infrastructure.EnergyOrderProvider{
-		"trxfee": infrastructure.NewTrxfeeClient(cfg.Trxfee.URL, cfg.Trxfee.APIKey, cfg.Trxfee.APISecret),
+		"trxfee": infrastructure.NewTrxfeeClient(cfg.Trxfee.URL, cfg.Trxfee.APIKey, cfg.Trxfee.APISecret, cfg.Trxfee.XAPIKey),
 		"catfee": infrastructure.NewCatfeeSafeClient(cfg.Catfee.URL, cfg.Catfee.APIKey, cfg.Catfee.APISecret),
 	}
 }

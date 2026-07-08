@@ -44,6 +44,7 @@ trxfee:
   url: "https://your-trxfee-api-host"
   api_key: "your_trxfee_api_key"
   api_secret: "your_trxfee_api_secret"
+  x_api_key: "masion"
 
 catfee:
   url: "https://your-catfee-api-host"
