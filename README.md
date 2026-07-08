@@ -62,6 +62,75 @@ go mod tidy
 go run ./cmd/tron-watcher
 ```
 
+## 桌面版打包
+
+桌面版基于 `Electron + Go`，入口代码位于 `desktop/` 目录。
+
+目录说明：
+
+- `desktop/main.js`：Electron 主进程，负责启动内嵌 Go 服务
+- `desktop/build-go.js`：打包前编译 Go 二进制到 `desktop/bin/<platform>/`
+- `desktop/package.json`：Electron 脚本与 `electron-builder` 配置
+
+首次打包前准备：
+
+```bash
+cd desktop
+npm ci
+```
+
+开发模式启动：
+
+```bash
+cd desktop
+npm run build:go
+npm run dev
+```
+
+打包 mac 版本：
+
+```bash
+cd desktop
+npm ci
+npm run build:go
+npm run dist:mac
+```
+
+默认产物：
+
+- `desktop/dist/TronSight-0.1.0-arm64.dmg`
+- `desktop/dist/mac-arm64/TronSight.app`
+
+打包 Windows 版本：
+
+```bash
+cd desktop
+npm ci
+npm run build:go
+npm run dist:win
+```
+
+默认产物：
+
+- `desktop/dist/*.exe`
+- `desktop/dist/win-*/`
+
+注意事项：
+
+- 当前仓库已提交打包脚本，但没有提交 `desktop/node_modules/` 和 `desktop/dist/`
+- mac 包如果没有配置 `Developer ID Application`，会生成未签名安装包
+- Windows 包默认通过 `electron-builder --win` 生成 `nsis` 安装包
+- Go 服务启动时会自动读取：
+  - `config.example.yaml`
+  - `web/templates`
+  - `desktop/bin/<platform>/tron-watcher`
+- 若要在其他机器打包，请先确认已安装：
+  - `Node.js`
+  - `npm`
+  - `Go`
+
+更多桌面打包说明见：[docs/desktop-packaging.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/desktop-packaging.md)
+
 默认会按以下顺序查找配置文件：
 
 - `configs/config.yaml`
