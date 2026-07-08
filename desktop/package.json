@@ -22,8 +22,8 @@
     ],
     "extraResources": [
       {
-        "from": "../configs/config.example.yaml",
-        "to": "config.example.yaml"
+        "from": "../configs/config.yaml",
+        "to": "config.yaml"
       },
       {
         "from": "../web/templates",

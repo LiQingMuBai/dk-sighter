@@ -71,6 +71,7 @@ go run ./cmd/tron-watcher
 - `desktop/main.js`：Electron 主进程，负责启动内嵌 Go 服务
 - `desktop/build-go.js`：打包前编译 Go 二进制到 `desktop/bin/<platform>/`
 - `desktop/package.json`：Electron 脚本与 `electron-builder` 配置
+- `configs/config.yaml`：桌面版打包时会被直接带入安装包
 
 首次打包前准备：
 
@@ -95,6 +96,11 @@ npm ci
 npm run build:go
 npm run dist:mac
 ```
+
+说明：
+
+- 桌面版打包现在要求必须存在 `configs/config.yaml`
+- 首次启动桌面版时，会将包内 `config.yaml` 复制到用户目录作为运行配置
 
 默认产物：
 

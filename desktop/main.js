@@ -42,12 +42,16 @@ function ensureUserConfig() {
   const cfgPath = path.join(userDir, "config.yaml")
   if (fs.existsSync(cfgPath)) return cfgPath
 
-  const examplePath = app.isPackaged
-    ? path.join(process.resourcesPath, "config.example.yaml")
-    : path.join(repoRoot(), "configs", "config.example.yaml")
+  const bundledConfigPath = app.isPackaged
+    ? path.join(process.resourcesPath, "config.yaml")
+    : path.join(repoRoot(), "configs", "config.yaml")
+
+  if (!fs.existsSync(bundledConfigPath)) {
+    throw new Error(`桌面版启动失败：缺少 config.yaml (${bundledConfigPath})`)
+  }
 
   fs.mkdirSync(userDir, { recursive: true })
-  fs.copyFileSync(examplePath, cfgPath)
+  fs.copyFileSync(bundledConfigPath, cfgPath)
   return cfgPath
 }
 

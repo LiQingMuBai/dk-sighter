@@ -96,17 +96,18 @@ npm run dist:win
 
 `electron-builder` 会额外打进这些资源：
 
-- `configs/config.example.yaml`
+- `configs/config.yaml`
 - `web/templates`
 - `desktop/bin`
 
 因此桌面版运行时不依赖源码目录中的模板相对路径。
+首次启动时，桌面端会把包内的 `config.yaml` 复制到用户目录下继续使用；如果打包时缺少 `configs/config.yaml`，桌面版将无法正常启动。
 
 ## 注意事项
 
 - `desktop/node_modules/` 不提交到 Git
 - `desktop/dist/` 为本地产物目录，不提交到 Git
+- `configs/config.yaml` 现在属于桌面版打包必需文件，请在打包前确认其中配置已填写正确
 - mac 未签名时，系统可能提示无法直接打开
 - 若要正式分发 mac 包，建议后续补 `Developer ID` 签名和 notarization
 - 若要正式分发 Windows 包，建议在 Windows 环境下完成最终打包验证
-
