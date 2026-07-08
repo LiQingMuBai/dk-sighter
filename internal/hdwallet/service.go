@@ -120,11 +120,13 @@ type Service struct {
 	energyProviders       map[string]infrastructure.EnergyOrderProvider
 	defaultEnergyProvider string
 
-	mu              sync.Mutex
-	ioMu            sync.Mutex
-	job             JobState
-	tronSyncRunning bool
-	bscSyncRunning  bool
+	mu                      sync.Mutex
+	ioMu                    sync.Mutex
+	job                     JobState
+	tronSyncRunning         bool
+	bscSyncRunning          bool
+	tronLastScheduledSyncAt string
+	bscLastScheduledSyncAt  string
 }
 
 func NewService(dataDir string, count int, tronClient *tron.Client, bscClient *bsc.Client) *Service {
@@ -382,6 +384,10 @@ func (s *Service) runScheduledSync(ctx context.Context, chain string) error {
 		}
 	}()
 
+	if s.repo != nil {
+		return s.runScheduledSyncFromDB(ctx, chain)
+	}
+
 	cfg, err := s.loadConfig()
 	if err != nil {
 		return err
@@ -600,6 +606,19 @@ func (s *Service) finishSuccess(message string) {
 	defer s.mu.Unlock()
 	s.job.Running = false
 	s.job.Stage = "done"
+	s.job.LastError = ""
+	s.job.Message = message
+	s.job.Current = s.job.Total
+	s.job.UpdatedAt = nowString()
+	s.job.FinishedAt = nowString()
+}
+
+func (s *Service) finishSuccessWithLastError(message, lastError string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.job.Running = false
+	s.job.Stage = "done"
+	s.job.LastError = strings.TrimSpace(lastError)
 	s.job.Message = message
 	s.job.Current = s.job.Total
 	s.job.UpdatedAt = nowString()
@@ -1016,5 +1035,16 @@ func (s *Service) setChainSyncRunning(chain string, running bool) {
 		s.tronSyncRunning = running
 	case "bsc":
 		s.bscSyncRunning = running
+	}
+}
+
+func (s *Service) setChainLastScheduledSyncAt(chain, value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch chain {
+	case "tron":
+		s.tronLastScheduledSyncAt = value
+	case "bsc":
+		s.bscLastScheduledSyncAt = value
 	}
 }

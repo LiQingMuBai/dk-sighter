@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -27,9 +26,7 @@ func (c *TrxfeeClient) IsConfigured() bool {
 	if c == nil {
 		return false
 	}
-	return strings.TrimSpace(c.URL) != "" &&
-		strings.TrimSpace(c.APIKey) != "" &&
-		strings.TrimSpace(c.APISecret) != ""
+	return strings.TrimSpace(c.URL) != ""
 }
 
 func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount int) (string, error) {
@@ -49,21 +46,20 @@ func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount
 		return "", fmt.Errorf("energyAmount must be greater than 0")
 	}
 
-	time.Sleep(1 * time.Second)
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-
 	data := struct {
 		EnergyAmount   int    `json:"energy_amount"`
 		Period         string `json:"period"`
 		ReceiveAddress string `json:"receive_address"`
 		CallbackURL    string `json:"callback_url"`
 		OutTradeNo     string `json:"out_trade_no"`
+		AutoActivation bool   `json:"auto_activation"`
 	}{
 		EnergyAmount:   energyAmount,
 		Period:         "1H",
 		ReceiveAddress: receiveAddress,
 		CallbackURL:    "",
 		OutTradeNo:     outTradeNo,
+		AutoActivation: true,
 	}
 
 	bodyBytes, err := json.Marshal(data)
@@ -71,17 +67,11 @@ func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount
 		return "", fmt.Errorf("marshal trxfee order body: %w", err)
 	}
 
-	message := timestamp + "&" + string(bodyBytes)
-	signature := createHmac(message, c.APISecret)
-
-	req, err := http.NewRequest(http.MethodPost, c.URL+"/v1/api", bytes.NewBuffer(bodyBytes))
+	req, err := http.NewRequest(http.MethodPost, c.orderEndpoint(), bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("build trxfee request: %w", err)
 	}
 
-	req.Header.Set("API-KEY", c.APIKey)
-	req.Header.Set("TIMESTAMP", timestamp)
-	req.Header.Set("SIGNATURE", signature)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 20 * time.Second}
@@ -105,4 +95,12 @@ func (c *TrxfeeClient) OrderSafe(outTradeNo, receiveAddress string, energyAmount
 func (c *TrxfeeClient) OrderEnergy(receiveAddress string, energyAmount int) (string, error) {
 	outTradeNo := fmt.Sprintf("TRXFEE%s", time.Now().UTC().Add(8*time.Hour).Format("20060102150405.000"))
 	return c.OrderSafe(outTradeNo, receiveAddress, energyAmount)
+}
+
+func (c *TrxfeeClient) orderEndpoint() string {
+	baseURL := strings.TrimRight(strings.TrimSpace(c.URL), "/")
+	if strings.HasSuffix(baseURL, "/api/trxfee/order") {
+		return baseURL
+	}
+	return baseURL + "/api/trxfee/order"
 }

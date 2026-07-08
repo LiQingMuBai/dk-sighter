@@ -239,6 +239,16 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	}))
 
+	if isHDWalletMode(a.cfg) && a.wallets != nil {
+		group.Go(a.safeGo("hd-wallet-tron-hourly-refresh", func() error {
+			err := a.wallets.RunTronHourlyRefresh(groupCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
+	}
+
 	if a.notifier != nil {
 		group.Go(a.safeGo("telegram-notifier", func() error {
 			err := a.notifier.Run(groupCtx)

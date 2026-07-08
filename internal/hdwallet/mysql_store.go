@@ -146,6 +146,8 @@ func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 	job := s.job
 	tronSyncRunning := s.tronSyncRunning
 	bscSyncRunning := s.bscSyncRunning
+	tronLastScheduledSyncAt := s.tronLastScheduledSyncAt
+	bscLastScheduledSyncAt := s.bscLastScheduledSyncAt
 	s.mu.Unlock()
 
 	normalizedChain := strings.ToLower(strings.TrimSpace(chain))
@@ -175,20 +177,22 @@ func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 		Config:     cfg,
 		Job:        job,
 		Tron: Summary{
-			Count:            tronSummary.Count,
-			TRXTotal:         tronSummary.TRXTotal.StringFixed(6),
-			USDTTotal:        tronSummary.USDTTotal.StringFixed(6),
-			LastUpdatedAt:    formatNullTime(tronSummary.LastUpdated),
-			ScheduledRunning: tronSyncRunning,
-			LastScannedBlock: tronLastBlock,
+			Count:               tronSummary.Count,
+			TRXTotal:            tronSummary.TRXTotal.StringFixed(6),
+			USDTTotal:           tronSummary.USDTTotal.StringFixed(6),
+			LastUpdatedAt:       formatNullTime(tronSummary.LastUpdated),
+			ScheduledRunning:    tronSyncRunning,
+			LastScheduledSyncAt: tronLastScheduledSyncAt,
+			LastScannedBlock:    tronLastBlock,
 		},
 		BSC: Summary{
-			Count:            bscSummary.Count,
-			BNBTotal:         bscSummary.BNBTotal.StringFixed(6),
-			USDTTotal:        bscSummary.USDTTotal.StringFixed(6),
-			LastUpdatedAt:    formatNullTime(bscSummary.LastUpdated),
-			ScheduledRunning: bscSyncRunning,
-			LastScannedBlock: bscLastBlock,
+			Count:               bscSummary.Count,
+			BNBTotal:            bscSummary.BNBTotal.StringFixed(6),
+			USDTTotal:           bscSummary.USDTTotal.StringFixed(6),
+			LastUpdatedAt:       formatNullTime(bscSummary.LastUpdated),
+			ScheduledRunning:    bscSyncRunning,
+			LastScheduledSyncAt: bscLastScheduledSyncAt,
+			LastScannedBlock:    bscLastBlock,
 		},
 		Page: pageData,
 	}, nil
@@ -267,6 +271,10 @@ func (s *Service) pageDataFromDB(chain string, page, pageSize int) (PageData, er
 }
 
 func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, error) {
+	return s.refreshAddressFromDBWithContext(context.Background(), chain, address)
+}
+
+func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, address string) (AddressRecord, error) {
 	normalizedChain := strings.ToLower(strings.TrimSpace(chain))
 	switch normalizedChain {
 	case "tron":
@@ -280,7 +288,6 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 		if !exists {
 			return AddressRecord{}, fmt.Errorf("address not found")
 		}
-		ctx := context.Background()
 		addressHex, err := tron.Base58ToHex(row.Address)
 		if err != nil {
 			return AddressRecord{}, err
@@ -288,6 +295,9 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 		active, trxBalance, err := s.tronClient.GetAccountState(ctx, addressHex)
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 tron 地址余额失败: %w", err)
+		}
+		if err := waitForBalanceThrottle(ctx); err != nil {
+			return AddressRecord{}, err
 		}
 		if err := s.repo.UpsertBalance(ctx, row.Address, "TRX", trxBalance, 0); err != nil {
 			return AddressRecord{}, err
@@ -297,6 +307,9 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 			value, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
 			if err != nil {
 				return AddressRecord{}, fmt.Errorf("读取 tron 地址 usdt 余额失败: %w", err)
+			}
+			if err := waitForBalanceThrottle(ctx); err != nil {
+				return AddressRecord{}, err
 			}
 			if err := s.repo.UpsertBalance(ctx, row.Address, "USDT", value, 0); err != nil {
 				return AddressRecord{}, err
@@ -322,10 +335,12 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 		if !exists {
 			return AddressRecord{}, fmt.Errorf("address not found")
 		}
-		ctx := context.Background()
 		bnbBalance, err := s.bscClient.GetBNBBalance(ctx, row.Address)
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 bnb 余额失败: %w", err)
+		}
+		if err := waitForBalanceThrottle(ctx); err != nil {
+			return AddressRecord{}, err
 		}
 		if err := repository.UpsertBSCBalance(ctx, s.repo, row.Address, "BNB", bnbBalance.StringFixed(6)); err != nil {
 			return AddressRecord{}, err
@@ -333,6 +348,9 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 		usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, row.Address)
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 usdt 余额失败: %w", err)
+		}
+		if err := waitForBalanceThrottle(ctx); err != nil {
+			return AddressRecord{}, err
 		}
 		if err := repository.UpsertBSCBalance(ctx, s.repo, row.Address, "USDT", usdtBalance.StringFixed(6)); err != nil {
 			return AddressRecord{}, err
@@ -347,6 +365,70 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 		}, nil
 	default:
 		return AddressRecord{}, fmt.Errorf("unsupported chain")
+	}
+}
+
+func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) error {
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return err
+	}
+
+	switch chain {
+	case "tron":
+		if cfg.TronMnemonic == "" || s.tronClient == nil {
+			return nil
+		}
+		s.setChainSyncRunning("tron", true)
+		defer s.setChainSyncRunning("tron", false)
+
+		summary, err := s.repo.GetHDTronSummary(ctx, s.hdSource)
+		if err != nil {
+			return err
+		}
+		if summary.Count == 0 {
+			s.setChainLastScheduledSyncAt("tron", nowString())
+			return nil
+		}
+		rows, _, err := s.repo.ListHDTronDashboardRows(ctx, s.hdSource, summary.Count, 0)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if _, err := s.refreshAddressFromDBWithContext(ctx, "tron", row.Address); err != nil {
+				return err
+			}
+		}
+		s.setChainLastScheduledSyncAt("tron", nowString())
+		return nil
+	case "bsc":
+		if cfg.BSCMnemonic == "" || s.bscClient == nil {
+			return nil
+		}
+		s.setChainSyncRunning("bsc", true)
+		defer s.setChainSyncRunning("bsc", false)
+
+		summary, err := s.repo.GetHDBSCSummary(ctx, s.hdSource)
+		if err != nil {
+			return err
+		}
+		if summary.Count == 0 {
+			s.setChainLastScheduledSyncAt("bsc", nowString())
+			return nil
+		}
+		rows, _, err := s.repo.ListHDBSCDashboardRows(ctx, s.hdSource, summary.Count, 0)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if _, err := s.refreshAddressFromDBWithContext(ctx, "bsc", row.Address); err != nil {
+				return err
+			}
+		}
+		s.setChainLastScheduledSyncAt("bsc", nowString())
+		return nil
+	default:
+		return nil
 	}
 }
 
@@ -474,6 +556,7 @@ func (s *Service) runSweepFromDB(chain, destination string) {
 	successCount := 0
 	failedCount := 0
 	skippedCount := 0
+	firstFailureReason := ""
 
 	for index, candidate := range candidates {
 		s.setProgress("sweep", chain, index+1, fmt.Sprintf("%s 归集中 %d/%d", strings.ToUpper(chain), index+1, len(candidates)))
@@ -496,6 +579,9 @@ func (s *Service) runSweepFromDB(chain, destination string) {
 				skippedCount++
 			} else {
 				failedCount++
+				if firstFailureReason == "" {
+					firstFailureReason = err.Error()
+				}
 				s.logSweepAddressError(chain, candidate.Address, index+1, len(candidates), err)
 			}
 			s.setProgress("sweep", chain, index+1, fmt.Sprintf("%s 地址 %s 归集失败: %v", strings.ToUpper(chain), candidate.Address, err))
@@ -510,7 +596,12 @@ func (s *Service) runSweepFromDB(chain, destination string) {
 		s.setProgress("sweep", chain, index+1, successMessage)
 	}
 
-	s.finishSuccess(fmt.Sprintf("%s 归集完成，成功 %d，失败 %d，跳过 %d", strings.ToUpper(chain), successCount, failedCount, skippedCount))
+	message := fmt.Sprintf("%s 归集完成，成功 %d，失败 %d，跳过 %d", strings.ToUpper(chain), successCount, failedCount, skippedCount)
+	if firstFailureReason != "" {
+		s.finishSuccessWithLastError(message, firstFailureReason)
+		return
+	}
+	s.finishSuccess(message)
 }
 
 func formatNullTime(value sql.NullTime) string {

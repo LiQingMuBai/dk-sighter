@@ -69,3 +69,23 @@ func TestLoadConfigSupportsLegacyPlaintext(t *testing.T) {
 		t.Fatalf("expected default thresholds for legacy config")
 	}
 }
+
+func TestFinishSuccessWithLastErrorKeepsErrorDetail(t *testing.T) {
+	service := NewService(t.TempDir(), 10000, nil, nil)
+	if ok := service.beginJob("sweep-tron", "tron", 1, "开始归集"); !ok {
+		t.Fatalf("beginJob returned false")
+	}
+
+	service.finishSuccessWithLastError("TRON 归集完成，成功 0，失败 1，跳过 0", "broadcast transaction failed: code=SIGERROR")
+
+	state, err := service.State("tron", 1, 50)
+	if err != nil {
+		t.Fatalf("State returned error: %v", err)
+	}
+	if state.Job.Stage != "done" {
+		t.Fatalf("unexpected stage: %s", state.Job.Stage)
+	}
+	if state.Job.LastError != "broadcast transaction failed: code=SIGERROR" {
+		t.Fatalf("unexpected last error: %s", state.Job.LastError)
+	}
+}

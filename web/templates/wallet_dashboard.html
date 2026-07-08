@@ -515,7 +515,7 @@
         </div>
 
         <div class="form-actions" style="margin-top: 16px;">
-          <button id="saveBtn" class="primary-btn" type="button">保存助记词</button>
+          <button id="saveBtn" class="primary-btn" type="button">保存助记词和配置</button>
           <button id="syncBtn" class="ghost-btn" type="button">生成 200 个地址</button>
           <button id="sweepBtn" class="ghost-btn" type="button">一键归集当前链 USDT</button>
         </div>
@@ -758,12 +758,14 @@
     function showJobResultModal(job) {
       const stage = (job && job.stage) || "done"
       const isFailed = stage === "failed"
+      const lastError = job && job.last_error ? job.last_error : ""
       jobResultTitle.textContent = isFailed ? "归集失败" : "归集完毕"
-      jobResultSubtitle.textContent = isFailed ? "当前归集任务已结束，请检查失败原因。" : "当前归集任务已处理完成。"
+      jobResultSubtitle.textContent = (isFailed || lastError) ? "当前归集任务已结束，请检查失败原因。" : "当前归集任务已处理完成。"
       jobResultBody.innerHTML = `
         <div class="modal-preview-row"><div class="modal-preview-label">状态</div><div class="modal-preview-value">${job && job.stage ? job.stage : "-"}</div></div>
         <div class="modal-preview-row"><div class="modal-preview-label">链</div><div class="modal-preview-value">${job && job.chain ? job.chain.toUpperCase() : "-"}</div></div>
         <div class="modal-preview-row"><div class="modal-preview-label">结果</div><div class="modal-preview-value">${job && job.message ? job.message : "-"}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">错误原因</div><div class="modal-preview-value">${lastError || "-"}</div></div>
       `
       jobResultModal.classList.add("show")
       jobResultModal.setAttribute("aria-hidden", "false")
