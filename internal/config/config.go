@@ -92,16 +92,18 @@ type WatcherConfig struct {
 	StartBlock                   int64 `yaml:"start_block"`
 	TXWorkers                    int   `yaml:"tx_workers"`
 	DisableBlockSync             bool  `yaml:"disable_block_sync"`
+	DisableScheduledBalanceSync  bool  `yaml:"disable_scheduled_balance_sync"`
 }
 
 type BSCConfig struct {
-	RPCHTTPURL               string `yaml:"rpc_http_url"`
-	RPCWSSURL                string `yaml:"rpc_wss_url"`
-	USDTContract             string `yaml:"usdt_contract"`
-	StartBlock               int64  `yaml:"start_block"`
-	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
-	Confirmations            int    `yaml:"confirmations"`
-	DisableBlockSync         bool   `yaml:"disable_block_sync"`
+	RPCHTTPURL                  string `yaml:"rpc_http_url"`
+	RPCWSSURL                   string `yaml:"rpc_wss_url"`
+	USDTContract                string `yaml:"usdt_contract"`
+	StartBlock                  int64  `yaml:"start_block"`
+	BlockPollIntervalSeconds    int    `yaml:"block_poll_interval_seconds"`
+	Confirmations               int    `yaml:"confirmations"`
+	DisableBlockSync            bool   `yaml:"disable_block_sync"`
+	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
 }
 
 func Load(path string) (*Config, error) {

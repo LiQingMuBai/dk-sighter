@@ -248,13 +248,17 @@ func (a *App) Run(ctx context.Context) error {
 	}))
 
 	if isHDWalletMode(a.cfg) && a.wallets != nil {
-		group.Go(a.safeGo("hd-wallet-tron-hourly-refresh", func() error {
-			err := a.wallets.RunTronHourlyRefresh(groupCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				return err
-			}
-			return nil
-		}))
+		if isTronScheduledBalanceSyncEnabled(a.cfg) {
+			group.Go(a.safeGo("hd-wallet-tron-hourly-refresh", func() error {
+				err := a.wallets.RunTronHourlyRefresh(groupCtx)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					return err
+				}
+				return nil
+			}))
+		} else {
+			log.Printf("hd wallet tron hourly refresh disabled by config: watcher.disable_scheduled_balance_sync=true")
+		}
 	}
 
 	if a.notifier != nil {
@@ -267,13 +271,27 @@ func (a *App) Run(ctx context.Context) error {
 		}))
 	}
 
-	group.Go(a.safeGo("hourly-balance-refresh", func() error {
-		err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
+	if isTronScheduledBalanceSyncEnabled(a.cfg) || isBSCScheduledBalanceSyncEnabled(a.cfg) {
+		tronClient := a.tronClient
+		tronBalances := a.balances
+		bscScanner := a.bscScanner
+		if !isTronScheduledBalanceSyncEnabled(a.cfg) {
+			tronClient = nil
+			tronBalances = nil
 		}
-		return nil
-	}))
+		if !isBSCScheduledBalanceSyncEnabled(a.cfg) {
+			bscScanner = nil
+		}
+		group.Go(a.safeGo("hourly-balance-refresh", func() error {
+			err := service.RunHourlyBalanceRefresh(groupCtx, tronClient, tronBalances, bscScanner)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
+	} else {
+		log.Printf("scheduled balance refresh disabled by config: watcher.disable_scheduled_balance_sync=true bsc.disable_scheduled_balance_sync=true")
+	}
 
 	return group.Wait()
 }
@@ -300,6 +318,14 @@ func isTronBlockSyncEnabled(cfg *config.Config) bool {
 
 func isBSCBlockSyncEnabled(cfg *config.Config) bool {
 	return cfg != nil && !cfg.BSC.DisableBlockSync
+}
+
+func isTronScheduledBalanceSyncEnabled(cfg *config.Config) bool {
+	return cfg != nil && !cfg.Watcher.DisableScheduledBalanceSync
+}
+
+func isBSCScheduledBalanceSyncEnabled(cfg *config.Config) bool {
+	return cfg != nil && !cfg.BSC.DisableScheduledBalanceSync
 }
 
 func resolveDataDir() string {

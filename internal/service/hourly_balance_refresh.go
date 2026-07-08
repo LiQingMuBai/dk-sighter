@@ -25,13 +25,17 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 		}
 
 		runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-		solid, err := tronClient.GetSolidBlockNumber(runCtx)
-		if err != nil {
-			loggerTron.Printf("hourly refresh failed: load solid block err=%v", err)
+		if tronClient != nil && tronBalances != nil {
+			solid, err := tronClient.GetSolidBlockNumber(runCtx)
+			if err != nil {
+				loggerTron.Printf("hourly refresh failed: load solid block err=%v", err)
+			} else {
+				loggerTron.Printf("hourly refresh start: solid=%d throttle=%s", solid, perCallDelay)
+				tronBalances.RefreshAllThrottled(runCtx, solid, perCallDelay)
+				loggerTron.Printf("hourly refresh done: solid=%d", solid)
+			}
 		} else {
-			loggerTron.Printf("hourly refresh start: solid=%d throttle=%s", solid, perCallDelay)
-			tronBalances.RefreshAllThrottled(runCtx, solid, perCallDelay)
-			loggerTron.Printf("hourly refresh done: solid=%d", solid)
+			loggerTron.Printf("hourly refresh skipped: tron scheduled sync disabled")
 		}
 
 		if bscScanner != nil {
