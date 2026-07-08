@@ -91,6 +91,7 @@ type WatcherConfig struct {
 	Confirmations                int   `yaml:"confirmations"`
 	StartBlock                   int64 `yaml:"start_block"`
 	TXWorkers                    int   `yaml:"tx_workers"`
+	DisableBlockSync             bool  `yaml:"disable_block_sync"`
 }
 
 type BSCConfig struct {
@@ -100,6 +101,7 @@ type BSCConfig struct {
 	StartBlock               int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
 	Confirmations            int    `yaml:"confirmations"`
+	DisableBlockSync         bool   `yaml:"disable_block_sync"`
 }
 
 func Load(path string) (*Config, error) {

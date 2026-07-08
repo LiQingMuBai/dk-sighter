@@ -169,23 +169,38 @@ func (a *App) Run(ctx context.Context) error {
 		log.Printf("websocket disabled, using http polling only")
 	}
 
-	group.Go(a.safeGo("address-cache", func() error {
-		err := a.cache.Run(groupCtx, a.cfg.AddressReloadInterval())
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
-	}))
+	if isTronBlockSyncEnabled(a.cfg) {
+		group.Go(a.safeGo("address-cache", func() error {
+			err := a.cache.Run(groupCtx, a.cfg.AddressReloadInterval())
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
 
-	group.Go(a.safeGo("scanner", func() error {
-		err := a.scanner.Run(groupCtx, a.cfg.BlockPollInterval())
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
-	}))
+		group.Go(a.safeGo("scanner", func() error {
+			err := a.scanner.Run(groupCtx, a.cfg.BlockPollInterval())
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
 
-	if a.bscEnabled && a.bscCache != nil && a.bscScanner != nil {
+		group.Go(a.safeGo("new-heads-subscriber", func() error {
+			err := a.tronClient.SubscribeNewHeads(groupCtx, func() {
+				a.scanner.Trigger()
+			})
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("websocket listener stopped, fallback to polling only: %v", err)
+			}
+			<-groupCtx.Done()
+			return nil
+		}))
+	} else {
+		log.Printf("tron scanner disabled by config: watcher.disable_block_sync=true")
+	}
+
+	if a.bscEnabled && a.bscCache != nil && a.bscScanner != nil && isBSCBlockSyncEnabled(a.cfg) {
 		if a.cfg.BSC.RPCWSSURL == "" {
 			log.Printf("bsc websocket disabled, using http polling only")
 		}
@@ -217,19 +232,12 @@ func (a *App) Run(ctx context.Context) error {
 			return nil
 		}))
 	} else {
-		log.Printf("bsc scanner disabled: rpc_http_url not configured")
-	}
-
-	group.Go(a.safeGo("new-heads-subscriber", func() error {
-		err := a.tronClient.SubscribeNewHeads(groupCtx, func() {
-			a.scanner.Trigger()
-		})
-		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("websocket listener stopped, fallback to polling only: %v", err)
+		if !a.bscEnabled || a.bscCache == nil || a.bscScanner == nil {
+			log.Printf("bsc scanner disabled: rpc_http_url not configured")
+		} else {
+			log.Printf("bsc scanner disabled by config: bsc.disable_block_sync=true")
 		}
-		<-groupCtx.Done()
-		return nil
-	}))
+	}
 
 	group.Go(a.safeGo("web-server", func() error {
 		err := a.webServer.Run(groupCtx)
@@ -284,6 +292,14 @@ func isBSCEnabled(rpcURL string) bool {
 
 func isHDWalletMode(cfg *config.Config) bool {
 	return strings.EqualFold(strings.TrimSpace(cfg.App.Mode), "hd_wallet")
+}
+
+func isTronBlockSyncEnabled(cfg *config.Config) bool {
+	return cfg != nil && !cfg.Watcher.DisableBlockSync
+}
+
+func isBSCBlockSyncEnabled(cfg *config.Config) bool {
+	return cfg != nil && !cfg.BSC.DisableBlockSync
 }
 
 func resolveDataDir() string {
