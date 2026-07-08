@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>BSC币安链监控平台</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --line: #e5e7eb;
+      --text: #111827;
+      --subtext: #6b7280;
+      --brand: #f59e0b;
+      --brand-soft: #fffbeb;
+      --action: #4b5563;
+      --action-soft: #f3f4f6;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 20px 14px 32px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .brand-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+      padding: 12px 14px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(20, 24, 40, 0.94), rgba(8, 12, 24, 0.88));
+      border: 1px solid rgba(105, 120, 255, 0.16);
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 22px rgba(23, 241, 255, 0.08);
+    }
+
+    .brand-logo {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      object-fit: cover;
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.24), 0 0 24px rgba(0, 245, 255, 0.28), 0 0 38px rgba(255, 0, 153, 0.14), 0 10px 24px rgba(15, 23, 42, 0.22);
+      background: #0b1120;
+      flex-shrink: 0;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      color: #f5f7ff;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-shadow: -1px 0 rgba(255, 46, 166, 0.68), 1px 0 rgba(23, 241, 255, 0.68), 0 0 18px rgba(23, 241, 255, 0.16);
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: #98a5c4;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .nav a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    .add-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .add-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .add-subtitle {
+      margin: 8px 0 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .add-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .add-label {
+      display: block;
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .add-textarea {
+      width: 100%;
+      min-height: 120px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.7;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .button-brand {
+      background: var(--brand-soft);
+      color: var(--brand);
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .toolbar-text {
+      color: var(--subtext);
+      font-size: 14px;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .sort-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .sort-label {
+      color: var(--subtext);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .sort-select {
+      min-width: 180px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .button-danger {
+      background: var(--action-soft);
+      color: var(--action);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-size: 14px;
+      vertical-align: middle;
+    }
+
+    th {
+      color: var(--subtext);
+      font-weight: 600;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      word-break: break-all;
+    }
+
+    .delete-link {
+      border: 0;
+      background: transparent;
+      color: var(--action);
+      padding: 0;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--subtext);
+      padding: 26px 0 10px;
+      font-size: 14px;
+    }
+
+    .pager {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .pager-info {
+      color: var(--subtext);
+      font-size: 14px;
+    }
+
+    .pager-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pager-nav a,
+    .pager-nav span {
+      min-width: 84px;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+    }
+
+    .pager-nav .disabled {
+      color: #9ca3af;
+      background: #f9fafb;
+    }
+
+    .mobile-list {
+      display: none;
+      gap: 12px;
+      flex-direction: column;
+    }
+
+    .mobile-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .mobile-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    .mobile-label {
+      color: var(--subtext);
+      min-width: 86px;
+    }
+
+    .mobile-actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .balance-link {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--brand);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-color: rgba(245, 158, 11, 0.35);
+      text-underline-offset: 3px;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      background: rgba(17, 24, 39, 0.94);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 999px;
+      font-size: 14px;
+      display: none;
+      z-index: 20;
+      max-width: calc(100vw - 28px);
+      text-align: center;
+    }
+
+    .dialog-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 30;
+    }
+
+    .dialog {
+      width: min(420px, 100%);
+      background: #fff;
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+    }
+
+    .dialog-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .dialog-text {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .dialog-actions {
+      margin-top: 16px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .dialog-actions button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .dialog-cancel {
+      background: #f3f4f6;
+      color: var(--text);
+    }
+
+    .dialog-ok {
+      background: var(--action);
+      color: #fff;
+    }
+
+    .transfer-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.52);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 40;
+    }
+
+    .transfer-mask.show {
+      display: flex;
+    }
+
+    .transfer-dialog {
+      width: min(980px, 100%);
+      max-height: min(88vh, 920px);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-radius: 22px;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+    }
+
+    .transfer-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .transfer-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .transfer-meta {
+      margin: 8px 0 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .transfer-close {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .transfer-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 20px 0;
+    }
+
+    .transfer-tabs {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .transfer-tab {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .transfer-tab.active {
+      background: var(--brand-soft);
+      border-color: var(--brand);
+      color: var(--brand);
+    }
+
+    .transfer-summary {
+      color: var(--subtext);
+      font-size: 13px;
+    }
+
+    .transfer-content {
+      flex: 1;
+      overflow: auto;
+      padding: 14px 20px 0;
+    }
+
+    .transfer-loading,
+    .transfer-empty {
+      padding: 42px 16px;
+      text-align: center;
+      color: var(--subtext);
+      font-size: 14px;
+    }
+
+    .transfer-table-wrap {
+      overflow-x: auto;
+    }
+
+    .transfer-table {
+      min-width: 900px;
+    }
+
+    .transfer-table .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      word-break: break-all;
+    }
+
+    .transfer-table .amount {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .transfer-status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--brand-soft);
+      color: var(--brand);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .transfer-pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 16px 20px 20px;
+      border-top: 1px solid var(--line);
+    }
+
+    .transfer-pager-info {
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .transfer-pager-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .transfer-pager-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .transfer-pager-btn:disabled {
+      cursor: not-allowed;
+      color: #9ca3af;
+      background: #f3f4f6;
+    }
+
+    @media (max-width: 900px) {
+      .topbar {
+        flex-direction: column;
+      }
+
+      .add-form {
+        grid-template-columns: 1fr;
+      }
+
+      .table-wrap {
+        display: none;
+      }
+
+      .mobile-list {
+        display: flex;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+
+      .transfer-head,
+      .transfer-toolbar,
+      .transfer-pager {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .transfer-head,
+      .transfer-toolbar,
+      .transfer-content,
+      .transfer-pager {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .transfer-close {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="brand-head">
+        <img
+          class="brand-logo"
+          src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=dark%20cyberpunk%20nightclub%20logo%2C%20glowing%20wireframe%20hexagon%20blockchain%20symbol%2C%20neon%20magenta%20and%20cyan%20glitch%20effect%2C%20black%20background%2C%20sharp%20futuristic%20lines%2C%20punk%20tech%20branding%2C%20clean%20centered%20icon%2C%20no%20text%2C%20bold%20high%20contrast&image_size=square_hd"
+          alt="TronSight Logo">
+        <div>
+          <h1 class="title">BSC币安链监控平台</h1>
+          <p class="subtitle">页面生成时间：{{ .GeneratedAt }}</p>
+        </div>
+      </div>
+      <div class="nav">
+        <a href="/">返回Tron后台</a>
+        <a href="/docs">API文档</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="add-head">
+        <div>
+          <h2 class="add-title">增加地址</h2>
+          <p class="add-subtitle">支持单个或批量添加，多个地址请每行一个，必须是 0x 开头的 BSC 地址。</p>
+        </div>
+      </div>
+      <div class="add-form">
+        <div>
+          <label class="add-label" for="addressInput">地址列表</label>
+          <textarea id="addressInput" class="add-textarea" placeholder="0x0000000000000000000000000000000000000000&#10;0x1111111111111111111111111111111111111111"></textarea>
+        </div>
+        <button id="addBtn" class="button button-brand" type="button" onclick="handleAddAddresses()">添加地址</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
+        <div class="toolbar-actions">
+          <form class="sort-form" method="get" action="/bsc">
+            <input type="hidden" name="page" value="1">
+            <label class="sort-label" for="sortSelect">Sort 排序</label>
+            <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
+              <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
+              <option value="usdt_asc" {{ if eq .Sort "usdt_asc" }}selected{{ end }}>USDT 余额 从小到大</option>
+              <option value="bnb_desc" {{ if eq .Sort "bnb_desc" }}selected{{ end }}>BNB 余额 从大到小</option>
+              <option value="bnb_asc" {{ if eq .Sort "bnb_asc" }}selected{{ end }}>BNB 余额 从小到大</option>
+            </select>
+          </form>
+          <button class="button button-danger" type="button" onclick="handleBatchDelete()">批量删除地址</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 48px;"><input id="selectAll" type="checkbox"></th>
+              <th>地址</th>
+              <th>BNB</th>
+              <th>USDT</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ if .Records }}
+              {{ range .Records }}
+                <tr>
+                  <td><input class="address-checkbox" type="checkbox" value="{{ .Address }}"></td>
+                  <td class="mono">{{ .Address }}</td>
+                  <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
+                  <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
+                  <td>{{ .UpdatedAt }}</td>
+                  <td><button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button></td>
+                </tr>
+              {{ end }}
+            {{ else }}
+              <tr>
+                <td class="empty" colspan="6">暂无 BSC 监控地址</td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mobile-list">
+        {{ if .Records }}
+          {{ range .Records }}
+            <div class="mobile-card">
+              <div class="mobile-row">
+                <label><input class="address-checkbox" type="checkbox" value="{{ .Address }}"> 选择</label>
+              </div>
+              <div class="mobile-row">
+                <div class="mobile-label">地址</div>
+                <div class="mono">{{ .Address }}</div>
+              </div>
+              <div class="mobile-row">
+                <div class="mobile-label">BNB</div>
+                <div><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></div>
+              </div>
+              <div class="mobile-row">
+                <div class="mobile-label">USDT</div>
+                <div><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></div>
+              </div>
+              <div class="mobile-row">
+                <div class="mobile-label">更新时间</div>
+                <div>{{ .UpdatedAt }}</div>
+              </div>
+              <div class="mobile-actions">
+                <button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button>
+              </div>
+            </div>
+          {{ end }}
+        {{ end }}
+      </div>
+
+      <div class="pager">
+        <div class="pager-info">第 {{ .Page }} / {{ .TotalPages }} 页，每页 {{ .PageSize }} 条</div>
+        <div class="pager-nav">
+          {{ if .HasPrev }}
+            <a href="/bsc?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+          {{ else }}
+            <span class="disabled">上一页</span>
+          {{ end }}
+          {{ if .HasNext }}
+            <a href="/bsc?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+          {{ else }}
+            <span class="disabled">下一页</span>
+          {{ end }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="confirmMask" class="dialog-mask">
+    <div class="dialog">
+      <h3 id="confirmTitle" class="dialog-title">确认操作</h3>
+      <p id="confirmText" class="dialog-text"></p>
+      <div class="dialog-actions">
+        <button id="confirmCancel" class="dialog-cancel" type="button">取消</button>
+        <button id="confirmOk" class="dialog-ok" type="button">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="transferMask" class="transfer-mask">
+    <div class="transfer-dialog">
+      <div class="transfer-head">
+        <div>
+          <h3 id="transferTitle" class="transfer-title">流水记录</h3>
+          <p id="transferMeta" class="transfer-meta"></p>
+        </div>
+        <button class="transfer-close" type="button" onclick="closeTransferModal()">关闭</button>
+      </div>
+      <div class="transfer-toolbar">
+        <div class="transfer-tabs">
+          <button id="transferTabIn" class="transfer-tab active" type="button" onclick="switchTransferDirection('in')">转入</button>
+          <button id="transferTabOut" class="transfer-tab" type="button" onclick="switchTransferDirection('out')">转出</button>
+        </div>
+        <div id="transferSummary" class="transfer-summary"></div>
+      </div>
+      <div class="transfer-content">
+        <div id="transferLoading" class="transfer-loading">加载中...</div>
+        <div id="transferEmpty" class="transfer-empty" style="display:none;">记录为空</div>
+        <div id="transferTableWrap" class="transfer-table-wrap" style="display:none;">
+          <table class="transfer-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>区块</th>
+                <th>金额</th>
+                <th>From</th>
+                <th>To</th>
+                <th>交易哈希</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="transferTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="transferPager" class="transfer-pager" style="display:none;">
+        <div id="transferPagerInfo" class="transfer-pager-info"></div>
+        <div class="transfer-pager-actions">
+          <button id="transferPrevBtn" class="transfer-pager-btn" type="button" onclick="changeTransferPage(-1)">上一页</button>
+          <button id="transferNextBtn" class="transfer-pager-btn" type="button" onclick="changeTransferPage(1)">下一页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const transferState = {
+      chain: 'bsc',
+      address: '',
+      asset: '',
+      direction: 'in',
+      page: 1,
+      pageSize: 10,
+      totalCount: 0,
+      requestId: 0
+    };
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.style.display = 'block';
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => {
+        toast.style.display = 'none';
+      }, 2200);
+    }
+
+    function escapeHTML(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatTransferTime(value) {
+      const number = Number(value);
+      if (!number) {
+        return '-';
+      }
+      const date = new Date(number);
+      if (Number.isNaN(date.getTime())) {
+        return '-';
+      }
+      return date.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function closeTransferModal() {
+      document.getElementById('transferMask').classList.remove('show');
+    }
+
+    function openTransferModal(address, asset) {
+      transferState.address = String(address || '').trim();
+      transferState.asset = String(asset || '').trim().toUpperCase();
+      transferState.direction = 'in';
+      transferState.page = 1;
+      document.getElementById('transferMask').classList.add('show');
+      loadTransferPage();
+    }
+
+    function switchTransferDirection(direction) {
+      if (direction !== 'in' && direction !== 'out') {
+        return;
+      }
+      if (transferState.direction === direction) {
+        return;
+      }
+      transferState.direction = direction;
+      transferState.page = 1;
+      loadTransferPage();
+    }
+
+    function changeTransferPage(delta) {
+      const totalPages = Math.max(1, Math.ceil(transferState.totalCount / transferState.pageSize));
+      const nextPage = transferState.page + delta;
+      if (nextPage < 1 || nextPage > totalPages) {
+        return;
+      }
+      transferState.page = nextPage;
+      loadTransferPage();
+    }
+
+    function renderTransferModal(records) {
+      const title = document.getElementById('transferTitle');
+      const meta = document.getElementById('transferMeta');
+      const summary = document.getElementById('transferSummary');
+      const loading = document.getElementById('transferLoading');
+      const empty = document.getElementById('transferEmpty');
+      const tableWrap = document.getElementById('transferTableWrap');
+      const tableBody = document.getElementById('transferTableBody');
+      const pager = document.getElementById('transferPager');
+      const pagerInfo = document.getElementById('transferPagerInfo');
+      const prevBtn = document.getElementById('transferPrevBtn');
+      const nextBtn = document.getElementById('transferNextBtn');
+      const totalPages = Math.max(1, Math.ceil(transferState.totalCount / transferState.pageSize));
+
+      title.textContent = `${transferState.asset} ${transferState.direction === 'in' ? '转入记录' : '转出记录'}`;
+      meta.textContent = `监控地址：${transferState.address}`;
+      summary.textContent = `共 ${transferState.totalCount} 条，当前第 ${transferState.page} / ${totalPages} 页`;
+      document.getElementById('transferTabIn').classList.toggle('active', transferState.direction === 'in');
+      document.getElementById('transferTabOut').classList.toggle('active', transferState.direction === 'out');
+
+      loading.style.display = 'none';
+      if (!records.length) {
+        empty.textContent = '记录为空';
+        empty.style.display = 'block';
+        tableWrap.style.display = 'none';
+        pager.style.display = 'none';
+        return;
+      }
+
+      empty.style.display = 'none';
+      tableWrap.style.display = 'block';
+      pager.style.display = 'flex';
+      tableBody.innerHTML = records.map((record) => `
+        <tr>
+          <td>${escapeHTML(formatTransferTime(record.block_time))}</td>
+          <td>${escapeHTML(record.block_number)}</td>
+          <td class="amount">${escapeHTML(record.amount)} ${escapeHTML(record.asset_code)}</td>
+          <td class="mono">${escapeHTML(record.from_address)}</td>
+          <td class="mono">${escapeHTML(record.to_address)}</td>
+          <td class="mono">${escapeHTML(record.tx_hash)}</td>
+          <td><span class="transfer-status">${escapeHTML(record.status || '-')}</span></td>
+        </tr>
+      `).join('');
+      pagerInfo.textContent = `共 ${transferState.totalCount} 条，每页 ${transferState.pageSize} 条`;
+      prevBtn.disabled = transferState.page <= 1;
+      nextBtn.disabled = transferState.page >= totalPages;
+    }
+
+    async function loadTransferPage() {
+      const loading = document.getElementById('transferLoading');
+      const empty = document.getElementById('transferEmpty');
+      const tableWrap = document.getElementById('transferTableWrap');
+      const pager = document.getElementById('transferPager');
+      const currentRequestId = transferState.requestId + 1;
+      transferState.requestId = currentRequestId;
+
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      tableWrap.style.display = 'none';
+      pager.style.display = 'none';
+
+      const offset = (transferState.page - 1) * transferState.pageSize;
+      const params = new URLSearchParams({
+        watch_address: transferState.address,
+        asset_code: transferState.asset,
+        limit: String(transferState.pageSize),
+        offset: String(offset)
+      });
+
+      try {
+        const resp = await fetch(`/api/${transferState.chain}/transfers/${transferState.direction}?${params.toString()}`);
+        const data = await resp.json();
+        if (transferState.requestId !== currentRequestId) {
+          return;
+        }
+        if (!resp.ok || !data.success) {
+          throw new Error((data && data.message) || '加载流水失败');
+        }
+        transferState.totalCount = Number(data.total_count || 0);
+        renderTransferModal(Array.isArray(data.records) ? data.records : []);
+      } catch (error) {
+        if (transferState.requestId !== currentRequestId) {
+          return;
+        }
+        transferState.totalCount = 0;
+        loading.style.display = 'none';
+        empty.style.display = 'block';
+        empty.textContent = '记录为空';
+      }
+    }
+
+    function normalizeInputAddresses(value) {
+      const raw = String(value || '')
+        .split(/[\n\r,;\t ]+/g)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      return Array.from(new Set(raw));
+    }
+
+    async function handleAddAddresses() {
+      const textarea = document.getElementById('addressInput');
+      const btn = document.getElementById('addBtn');
+      const addresses = normalizeInputAddresses(textarea ? textarea.value : '');
+      if (!addresses.length) {
+        showToast('请先输入地址');
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '提交中...';
+      }
+
+      try {
+        const resp = await fetch('/api/bsc/watch-addresses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addresses })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '添加失败');
+          return;
+        }
+        const invalidCount = (data.invalid_addresses || []).length;
+        const duplicateCount = (data.duplicate_addresses || []).length;
+        if (invalidCount || duplicateCount) {
+          showToast(`添加成功 ${data.count || 0} 个，重复 ${duplicateCount} 个，无效 ${invalidCount} 个`);
+        } else {
+          showToast('添加成功');
+        }
+        window.setTimeout(() => window.location.reload(), 400);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '添加地址';
+        }
+      }
+    }
+
+    function getUniqueSelectedAddresses() {
+      const boxes = Array.from(document.querySelectorAll('.address-checkbox:checked'));
+      return Array.from(new Set(boxes.map((box) => box.value).filter(Boolean)));
+    }
+
+    function syncSameAddressCheckboxes(source) {
+      const address = source && source.value ? String(source.value) : '';
+      if (!address) {
+        return;
+      }
+      const checked = Boolean(source.checked);
+      document.querySelectorAll('.address-checkbox').forEach((box) => {
+        if (box === source) {
+          return;
+        }
+        if (String(box.value) !== address) {
+          return;
+        }
+        box.checked = checked;
+      });
+    }
+
+    function updateSelectedCount() {
+      document.getElementById('selectedCount').textContent = String(getUniqueSelectedAddresses().length);
+    }
+
+    function syncSelectAll() {
+      const selectAll = document.getElementById('selectAll');
+      if (!selectAll) {
+        return;
+      }
+      const all = Array.from(new Set(Array.from(document.querySelectorAll('.address-checkbox')).map((box) => box.value).filter(Boolean)));
+      const selected = getUniqueSelectedAddresses();
+      selectAll.checked = all.length > 0 && selected.length === all.length;
+    }
+
+    async function showConfirm(title, message) {
+      return new Promise((resolve) => {
+        const mask = document.getElementById('confirmMask');
+        const titleNode = document.getElementById('confirmTitle');
+        const textNode = document.getElementById('confirmText');
+        const ok = document.getElementById('confirmOk');
+        const cancel = document.getElementById('confirmCancel');
+
+        titleNode.textContent = title;
+        textNode.textContent = message;
+        mask.style.display = 'flex';
+
+        const cleanup = (result) => {
+          mask.style.display = 'none';
+          ok.onclick = null;
+          cancel.onclick = null;
+          mask.onclick = null;
+          resolve(result);
+        };
+
+        ok.onclick = () => cleanup(true);
+        cancel.onclick = () => cleanup(false);
+        mask.onclick = (event) => {
+          if (event.target === mask) {
+            cleanup(false);
+          }
+        };
+      });
+    }
+
+    async function deleteAddresses(addresses) {
+      const resp = await fetch('/api/bsc/delete-addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addresses: addresses })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.message || '删除失败');
+      }
+      return data;
+    }
+
+    async function handleSingleDelete(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址参数缺失');
+        return;
+      }
+      const ok = await showConfirm('删除地址', '删除后该地址将不再参与 BSC 监控，是否继续？');
+      if (!ok) {
+        return;
+      }
+      try {
+        await deleteAddresses([address]);
+        showToast('删除成功');
+        window.setTimeout(() => window.location.reload(), 400);
+      } catch (error) {
+        showToast(error.message || '删除失败');
+      }
+    }
+
+    async function handleBatchDelete() {
+      const addresses = getUniqueSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+      const ok = await showConfirm('批量删除地址', `本次将删除 ${addresses.length} 个 BSC 地址，删除后将不再参与监控。`);
+      if (!ok) {
+        return;
+      }
+      try {
+        await deleteAddresses(addresses);
+        showToast('批量删除成功');
+        window.setTimeout(() => window.location.reload(), 400);
+      } catch (error) {
+        showToast(error.message || '批量删除失败');
+      }
+    }
+
+    document.querySelectorAll('.address-checkbox').forEach((box) => {
+      box.addEventListener('change', () => {
+        syncSameAddressCheckboxes(box);
+        updateSelectedCount();
+        syncSelectAll();
+      });
+    });
+
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        const checked = selectAll.checked;
+        const boxes = Array.from(document.querySelectorAll('.address-checkbox'));
+        boxes.forEach((box) => {
+          box.checked = checked;
+        });
+        updateSelectedCount();
+      });
+    }
+
+    document.getElementById('transferMask').addEventListener('click', (event) => {
+      if (event.target === event.currentTarget) {
+        closeTransferModal();
+      }
+    });
+
+    updateSelectedCount();
+    syncSelectAll();
+  </script>
+</body>
+</html>

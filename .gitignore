@@ -1,0 +1,14 @@
+.DS_Store
+
+.idea/
+.dbg/
+
+configs/config.yaml
+data/
+logs/
+
+desktop/node_modules/
+desktop/dist/
+desktop/bin/darwin/tron-watcher
+desktop/bin/win32/tron-watcher.exe
+

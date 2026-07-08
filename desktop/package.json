@@ -1,0 +1,48 @@
+{
+  "name": "tronsight-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build:go": "node build-go.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.tronsight.tronwatcher",
+    "productName": "TronSight",
+    "files": [
+      "**/*",
+      "!bin/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../configs/config.example.yaml",
+        "to": "config.example.yaml"
+      },
+      {
+        "from": "../web/templates",
+        "to": "web/templates"
+      },
+      {
+        "from": "bin",
+        "to": "bin"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}

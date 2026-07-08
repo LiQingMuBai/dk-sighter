@@ -1,0 +1,1792 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Tron 监控后台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f6fb;
+      --card: #ffffff;
+      --card-soft: #f8fafc;
+      --line: #e5e7eb;
+      --text: #111827;
+      --subtext: #6b7280;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --btn: #f9fafb;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 20px 14px 32px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .brand-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+      padding: 12px 14px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(20, 24, 40, 0.94), rgba(8, 12, 24, 0.88));
+      border: 1px solid rgba(105, 120, 255, 0.16);
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 22px rgba(23, 241, 255, 0.08);
+    }
+
+    .brand-logo {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      object-fit: cover;
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.24), 0 0 24px rgba(0, 245, 255, 0.28), 0 0 38px rgba(255, 0, 153, 0.14), 0 10px 24px rgba(15, 23, 42, 0.22);
+      background: #0b1120;
+      flex-shrink: 0;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      font-weight: 700;
+      color: #f5f7ff;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-shadow: -1px 0 rgba(255, 46, 166, 0.68), 1px 0 rgba(23, 241, 255, 0.68), 0 0 18px rgba(23, 241, 255, 0.16);
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: #98a5c4;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .logout-btn {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .link-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .summary-label {
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .summary-value {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .chart-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .add-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .add-head {
+      margin-bottom: 12px;
+    }
+
+    .add-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .add-subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .add-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .add-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--subtext);
+      font-size: 13px;
+    }
+
+    .add-textarea {
+      width: 100%;
+      min-height: 88px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.6;
+      resize: vertical;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .add-submit {
+      min-width: 120px;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      background: var(--blue);
+      color: #fff;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .chart-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .chart-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .chart-subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .chart-wrap {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .chart-canvas {
+      width: 100%;
+      height: 280px;
+      display: block;
+    }
+
+    .desktop-table {
+      display: block;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 960px;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-size: 14px;
+      vertical-align: middle;
+    }
+
+    th {
+      background: var(--card-soft);
+      color: #475569;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .address {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-all;
+    }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--btn);
+      color: #374151;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .batch-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding: 14px 16px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .batch-info {
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .batch-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .sort-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .sort-label {
+      color: var(--subtext);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .sort-select {
+      min-width: 180px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .check-cell {
+      width: 48px;
+      text-align: center;
+    }
+
+    .check-input {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .mobile-list {
+      display: none;
+      gap: 12px;
+    }
+
+    .wallet-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .wallet-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .wallet-head-left {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .wallet-address {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .tag {
+      flex-shrink: 0;
+      align-self: flex-start;
+      background: var(--blue-soft);
+      color: var(--blue);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .field {
+      background: var(--card-soft);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .field-label {
+      color: var(--subtext);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .field-value {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .field-value.time {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .mobile-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .mobile-actions .btn {
+      width: 100%;
+      min-height: 40px;
+      padding: 10px 8px;
+    }
+
+    .balance-link {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--blue);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-color: rgba(37, 99, 235, 0.35);
+      text-underline-offset: 3px;
+    }
+
+    .transfer-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.52);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1300;
+    }
+
+    .transfer-mask.show {
+      display: flex;
+    }
+
+    .transfer-dialog {
+      width: min(980px, 100%);
+      max-height: min(88vh, 920px);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-radius: 22px;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+    }
+
+    .transfer-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .transfer-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .transfer-meta {
+      margin: 8px 0 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .transfer-close {
+      border: 1px solid var(--line);
+      background: var(--btn);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .transfer-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 20px 0;
+    }
+
+    .transfer-tabs {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .transfer-tab {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .transfer-tab.active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .transfer-summary {
+      color: var(--subtext);
+      font-size: 13px;
+    }
+
+    .transfer-content {
+      flex: 1;
+      overflow: auto;
+      padding: 14px 20px 0;
+    }
+
+    .transfer-loading,
+    .transfer-empty {
+      padding: 42px 16px;
+      text-align: center;
+      color: var(--subtext);
+      font-size: 14px;
+    }
+
+    .transfer-table-wrap {
+      overflow-x: auto;
+    }
+
+    .transfer-table {
+      min-width: 900px;
+    }
+
+    .transfer-table .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-all;
+    }
+
+    .transfer-table .amount {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .transfer-table .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .transfer-pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 16px 20px 20px;
+      border-top: 1px solid var(--line);
+    }
+
+    .transfer-pager-info {
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .transfer-pager-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .transfer-pager-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .transfer-pager-btn:disabled {
+      cursor: not-allowed;
+      color: #9ca3af;
+      background: #f3f4f6;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%) translateY(20px);
+      min-width: 220px;
+      max-width: calc(100vw - 28px);
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: rgba(17, 24, 39, 0.92);
+      color: #fff;
+      font-size: 14px;
+      line-height: 1.5;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      z-index: 999;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .confirm-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1200;
+    }
+
+    .confirm-mask.show {
+      display: flex;
+    }
+
+    .confirm-dialog {
+      width: 100%;
+      max-width: 380px;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+      padding: 18px;
+    }
+
+    .confirm-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .confirm-text {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+
+    .confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .confirm-btn {
+      min-width: 88px;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+
+    .confirm-btn.danger {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: #fff;
+    }
+
+    .mnemonic-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.48);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1250;
+    }
+
+    .mnemonic-mask.show {
+      display: flex;
+    }
+
+    .mnemonic-dialog {
+      width: 100%;
+      max-width: 460px;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+      padding: 18px;
+    }
+
+    .mnemonic-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .mnemonic-text {
+      margin: 0 0 12px;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .mnemonic-textarea {
+      width: 100%;
+      min-height: 120px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.7;
+      resize: vertical;
+      background: #fff;
+      color: var(--text);
+      font-family: inherit;
+    }
+
+    .mnemonic-error {
+      min-height: 20px;
+      margin-top: 10px;
+      color: #dc2626;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .mnemonic-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .empty {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      text-align: center;
+      padding: 52px 16px;
+      color: var(--subtext);
+      font-size: 14px;
+    }
+
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .pager-info {
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .pager-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pager-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      min-width: 84px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .pager-btn.disabled {
+      color: #9ca3af;
+      background: #f3f4f6;
+      pointer-events: none;
+    }
+
+    @media (max-width: 860px) {
+      .page {
+        padding: 16px 12px 28px;
+      }
+
+      .topbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+
+      .desktop-table {
+        display: none;
+      }
+
+      .mobile-list {
+        display: grid;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mobile-actions {
+        grid-template-columns: 1fr;
+      }
+
+      .pager {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .pager-actions {
+        justify-content: space-between;
+      }
+
+      .batch-bar {
+        align-items: stretch;
+      }
+
+      .batch-actions {
+        justify-content: space-between;
+      }
+
+      .add-form {
+        grid-template-columns: 1fr;
+      }
+
+      .transfer-head,
+      .transfer-toolbar,
+      .transfer-pager {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .transfer-head,
+      .transfer-toolbar,
+      .transfer-content,
+      .transfer-pager {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .transfer-close {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="brand-head">
+        <img
+          class="brand-logo"
+          src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=dark%20cyberpunk%20nightclub%20logo%2C%20glowing%20wireframe%20hexagon%20blockchain%20symbol%2C%20neon%20magenta%20and%20cyan%20glitch%20effect%2C%20black%20background%2C%20sharp%20futuristic%20lines%2C%20punk%20tech%20branding%2C%20clean%20centered%20icon%2C%20no%20text%2C%20bold%20high%20contrast&image_size=square_hd"
+          alt="TronSight Logo">
+        <div>
+          <h1 class="title">Tron 监控后台</h1>
+          <p class="subtitle">地址余额看板 | 页面生成时间：{{ .GeneratedAt }}</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="link-btn" href="/bsc">BSC币安链监控平台</a>
+        <a class="link-btn" href="/docs">API 文档</a>
+        <form method="post" action="/logout">
+          <button class="logout-btn" type="submit">退出登录</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="summary-card">
+        <div class="summary-label">监控地址数</div>
+        <div class="summary-value">{{ .TotalCount }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">显示模式</div>
+        <div class="summary-value">H5</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">页面状态</div>
+        <div class="summary-value">运行中</div>
+      </div>
+    </div>
+
+    <div class="add-card">
+      <div class="add-head">
+        <h2 class="add-title">增加地址</h2>
+        <p class="add-subtitle">支持单个或批量添加，多个地址请每行一个，必须是 T 开头的 Tron 地址。</p>
+      </div>
+      <div class="add-form">
+        <div>
+          <label class="add-label" for="addressInput">地址列表</label>
+          <textarea id="addressInput" class="add-textarea" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&#10;Tyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"></textarea>
+        </div>
+        <button class="add-submit" type="button" onclick="handleAddAddresses()">添加地址</button>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-head">
+        <div>
+          <h2 class="chart-title">每日发能折线图</h2>
+          <p class="chart-subtitle">横轴按日期，纵轴按发能次数累计。发能一次记 1，发能两次记 2。</p>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas
+          id="energyChart"
+          class="chart-canvas"
+          width="1100"
+          height="280"
+          data-labels='{{ .ChartLabelsJSON }}'
+          data-values='{{ .ChartValuesJSON }}'></canvas>
+      </div>
+    </div>
+
+    <div class="batch-bar">
+      <div class="batch-info">
+        当前页已选 <span id="selectedCount">0</span> 个地址
+      </div>
+      <div class="batch-actions">
+        <form class="sort-form" method="get" action="/">
+          <input type="hidden" name="page" value="1">
+          <label class="sort-label" for="sortSelect">Sort 排序</label>
+          <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
+            <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
+            <option value="usdt_asc" {{ if eq .Sort "usdt_asc" }}selected{{ end }}>USDT 余额 从小到大</option>
+            <option value="trx_desc" {{ if eq .Sort "trx_desc" }}selected{{ end }}>TRX 余额 从大到小</option>
+            <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
+          </select>
+        </form>
+        <button class="btn" type="button" onclick="handleBatchAction('发能一次')">批量发能一次</button>
+        <button class="btn" type="button" onclick="handleBatchAction('发能两次')">批量发能两次</button>
+        <button class="btn" type="button" onclick="handleBatchDelete()">批量删除地址</button>
+      </div>
+    </div>
+
+    {{ if .Rows }}
+    <div class="desktop-table">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="check-cell"><input id="selectAllDesktop" class="check-input" type="checkbox" onchange="toggleSelectAll(this.checked)"></th>
+              <th>地址</th>
+              <th>TRX 余额</th>
+              <th>USDT 余额</th>
+              <th>更新时间</th>
+              <th>功能</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Rows }}
+            <tr>
+              <td class="check-cell">
+                <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
+              </td>
+              <td class="address">{{ .Address }}</td>
+              <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'TRX')">{{ .TRXBalance }}</button></td>
+              <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDTBalance }}</button></td>
+              <td class="num">{{ .LastUpdatedAt }}</td>
+              <td>
+                <div class="actions">
+                  <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
+                  <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
+                  <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
+                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
+                </div>
+              </td>
+            </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mobile-list">
+      {{ range .Rows }}
+      <div class="wallet-card">
+        <div class="wallet-head">
+          <div class="wallet-head-left">
+            <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
+            <div class="wallet-address">{{ .Address }}</div>
+          </div>
+          <div class="tag">监控中</div>
+        </div>
+        <div class="grid">
+          <div class="field">
+            <div class="field-label">TRX 余额</div>
+            <div class="field-value"><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'TRX')">{{ .TRXBalance }}</button></div>
+          </div>
+          <div class="field">
+            <div class="field-label">USDT 余额</div>
+            <div class="field-value"><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDTBalance }}</button></div>
+          </div>
+          <div class="field" style="grid-column: 1 / -1;">
+            <div class="field-label">更新时间</div>
+            <div class="field-value time">{{ .LastUpdatedAt }}</div>
+          </div>
+        </div>
+        <div class="mobile-actions">
+          <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
+          <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
+          <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
+          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
+        </div>
+      </div>
+      {{ end }}
+    </div>
+    {{ else }}
+    <div class="empty">暂无监控地址</div>
+    {{ end }}
+
+    {{ if gt .TotalPages 0 }}
+    <div class="pager">
+      <div class="pager-info">
+        第 {{ .Page }} / {{ .TotalPages }} 页，每页 {{ .PageSize }} 条，共 {{ .TotalCount }} 条
+      </div>
+      <div class="pager-actions">
+        {{ if .HasPrev }}
+        <a class="pager-btn" href="/?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+        {{ else }}
+        <span class="pager-btn disabled">上一页</span>
+        {{ end }}
+
+        {{ if .HasNext }}
+        <a class="pager-btn" href="/?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+        {{ else }}
+        <span class="pager-btn disabled">下一页</span>
+        {{ end }}
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  <div id="toast" class="toast"></div>
+  <div id="confirmMask" class="confirm-mask">
+    <div class="confirm-dialog">
+      <h3 id="confirmTitle" class="confirm-title">确认操作</h3>
+      <p id="confirmText" class="confirm-text"></p>
+      <div class="confirm-actions">
+        <button id="confirmCancelBtn" class="confirm-btn" type="button">取消</button>
+        <button id="confirmOkBtn" class="confirm-btn danger" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+  <div id="mnemonicMask" class="mnemonic-mask">
+    <div class="mnemonic-dialog">
+      <h3 class="mnemonic-title">输入助记词</h3>
+      <p class="mnemonic-text">请输入 12 或 24 个助记词单词。助记词只会存放在服务内存中，最多保留 1 分钟。</p>
+      <textarea id="mnemonicInput" class="mnemonic-textarea" placeholder="请以空格分隔助记词单词"></textarea>
+      <div id="mnemonicError" class="mnemonic-error"></div>
+      <div class="mnemonic-actions">
+        <button id="mnemonicCancelBtn" class="confirm-btn" type="button">取消</button>
+        <button id="mnemonicOkBtn" class="confirm-btn danger" type="button">确认保存</button>
+      </div>
+    </div>
+  </div>
+  <div id="transferMask" class="transfer-mask">
+    <div class="transfer-dialog">
+      <div class="transfer-head">
+        <div>
+          <h3 id="transferTitle" class="transfer-title">流水记录</h3>
+          <p id="transferMeta" class="transfer-meta"></p>
+        </div>
+        <button class="transfer-close" type="button" onclick="closeTransferModal()">关闭</button>
+      </div>
+      <div class="transfer-toolbar">
+        <div class="transfer-tabs">
+          <button id="transferTabIn" class="transfer-tab active" type="button" onclick="switchTransferDirection('in')">转入</button>
+          <button id="transferTabOut" class="transfer-tab" type="button" onclick="switchTransferDirection('out')">转出</button>
+        </div>
+        <div id="transferSummary" class="transfer-summary"></div>
+      </div>
+      <div class="transfer-content">
+        <div id="transferLoading" class="transfer-loading">加载中...</div>
+        <div id="transferEmpty" class="transfer-empty" style="display:none;">记录为空</div>
+        <div id="transferTableWrap" class="transfer-table-wrap" style="display:none;">
+          <table class="transfer-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>区块</th>
+                <th>金额</th>
+                <th>From</th>
+                <th>To</th>
+                <th>交易哈希</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="transferTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="transferPager" class="transfer-pager" style="display:none;">
+        <div id="transferPagerInfo" class="transfer-pager-info"></div>
+        <div class="transfer-pager-actions">
+          <button id="transferPrevBtn" class="transfer-pager-btn" type="button" onclick="changeTransferPage(-1)">上一页</button>
+          <button id="transferNextBtn" class="transfer-pager-btn" type="button" onclick="changeTransferPage(1)">下一页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    let toastTimer = null;
+    let confirmResolver = null;
+    let mnemonicResolver = null;
+    const transferState = {
+      chain: 'tron',
+      address: '',
+      asset: '',
+      direction: 'in',
+      page: 1,
+      pageSize: 10,
+      totalCount: 0,
+      requestId: 0
+    };
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+      }
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2200);
+    }
+
+    function showConfirm(title, message, okText = '确认') {
+      return new Promise((resolve) => {
+        const mask = document.getElementById('confirmMask');
+        const titleNode = document.getElementById('confirmTitle');
+        const textNode = document.getElementById('confirmText');
+        const okBtn = document.getElementById('confirmOkBtn');
+        const cancelBtn = document.getElementById('confirmCancelBtn');
+
+        titleNode.textContent = title;
+        textNode.textContent = message;
+        okBtn.textContent = okText;
+        mask.classList.add('show');
+
+        confirmResolver = (result) => {
+          mask.classList.remove('show');
+          resolve(result);
+        };
+
+        okBtn.onclick = () => confirmResolver && confirmResolver(true);
+        cancelBtn.onclick = () => confirmResolver && confirmResolver(false);
+        mask.onclick = (event) => {
+          if (event.target === mask && confirmResolver) {
+            confirmResolver(false);
+          }
+        };
+      });
+    }
+
+    function showInfoDialog(title, message, okText = '我知道了') {
+      return showConfirm(title, message, okText);
+    }
+
+    function showMnemonicDialog() {
+      return new Promise((resolve) => {
+        const mask = document.getElementById('mnemonicMask');
+        const input = document.getElementById('mnemonicInput');
+        const errorNode = document.getElementById('mnemonicError');
+        const okBtn = document.getElementById('mnemonicOkBtn');
+        const cancelBtn = document.getElementById('mnemonicCancelBtn');
+
+        input.value = '';
+        errorNode.textContent = '';
+        mask.classList.add('show');
+        input.focus();
+
+        mnemonicResolver = (result) => {
+          mask.classList.remove('show');
+          resolve(result);
+        };
+
+        okBtn.onclick = () => {
+          const mnemonic = (input.value || '').trim().replace(/\s+/g, ' ');
+          const words = mnemonic ? mnemonic.split(' ') : [];
+          if (words.length !== 12 && words.length !== 24) {
+            errorNode.textContent = '助记词必须是 12 或 24 个单词';
+            return;
+          }
+          mnemonicResolver && mnemonicResolver(mnemonic);
+        };
+        cancelBtn.onclick = () => mnemonicResolver && mnemonicResolver('');
+        mask.onclick = (event) => {
+          if (event.target === mask && mnemonicResolver) {
+            mnemonicResolver('');
+          }
+        };
+      });
+    }
+
+    function escapeHTML(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatTransferTime(value) {
+      const number = Number(value);
+      if (!number) {
+        return '-';
+      }
+      const date = new Date(number);
+      if (Number.isNaN(date.getTime())) {
+        return '-';
+      }
+      return date.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function closeTransferModal() {
+      document.getElementById('transferMask').classList.remove('show');
+    }
+
+    function openTransferModal(address, asset) {
+      transferState.address = String(address || '').trim();
+      transferState.asset = String(asset || '').trim().toUpperCase();
+      transferState.direction = 'in';
+      transferState.page = 1;
+      document.getElementById('transferMask').classList.add('show');
+      loadTransferPage();
+    }
+
+    function switchTransferDirection(direction) {
+      if (direction !== 'in' && direction !== 'out') {
+        return;
+      }
+      if (transferState.direction === direction) {
+        return;
+      }
+      transferState.direction = direction;
+      transferState.page = 1;
+      loadTransferPage();
+    }
+
+    function changeTransferPage(delta) {
+      const totalPages = Math.max(1, Math.ceil(transferState.totalCount / transferState.pageSize));
+      const nextPage = transferState.page + delta;
+      if (nextPage < 1 || nextPage > totalPages) {
+        return;
+      }
+      transferState.page = nextPage;
+      loadTransferPage();
+    }
+
+    function renderTransferModal(records) {
+      const title = document.getElementById('transferTitle');
+      const meta = document.getElementById('transferMeta');
+      const summary = document.getElementById('transferSummary');
+      const loading = document.getElementById('transferLoading');
+      const empty = document.getElementById('transferEmpty');
+      const tableWrap = document.getElementById('transferTableWrap');
+      const tableBody = document.getElementById('transferTableBody');
+      const pager = document.getElementById('transferPager');
+      const pagerInfo = document.getElementById('transferPagerInfo');
+      const prevBtn = document.getElementById('transferPrevBtn');
+      const nextBtn = document.getElementById('transferNextBtn');
+      const totalPages = Math.max(1, Math.ceil(transferState.totalCount / transferState.pageSize));
+
+      title.textContent = `${transferState.asset} ${transferState.direction === 'in' ? '转入记录' : '转出记录'}`;
+      meta.textContent = `监控地址：${transferState.address}`;
+      summary.textContent = `共 ${transferState.totalCount} 条，当前第 ${transferState.page} / ${totalPages} 页`;
+      document.getElementById('transferTabIn').classList.toggle('active', transferState.direction === 'in');
+      document.getElementById('transferTabOut').classList.toggle('active', transferState.direction === 'out');
+
+      loading.style.display = 'none';
+      if (!records.length) {
+        empty.textContent = '记录为空';
+        empty.style.display = 'block';
+        tableWrap.style.display = 'none';
+        pager.style.display = 'none';
+        return;
+      }
+
+      empty.style.display = 'none';
+      tableWrap.style.display = 'block';
+      pager.style.display = 'flex';
+      tableBody.innerHTML = records.map((record) => `
+        <tr>
+          <td class="num">${escapeHTML(formatTransferTime(record.block_time))}</td>
+          <td class="num">${escapeHTML(record.block_number)}</td>
+          <td class="amount">${escapeHTML(record.amount)} ${escapeHTML(record.asset_code)}</td>
+          <td class="mono">${escapeHTML(record.from_address)}</td>
+          <td class="mono">${escapeHTML(record.to_address)}</td>
+          <td class="mono">${escapeHTML(record.tx_hash)}</td>
+          <td><span class="status">${escapeHTML(record.status || '-')}</span></td>
+        </tr>
+      `).join('');
+      pagerInfo.textContent = `共 ${transferState.totalCount} 条，每页 ${transferState.pageSize} 条`;
+      prevBtn.disabled = transferState.page <= 1;
+      nextBtn.disabled = transferState.page >= totalPages;
+    }
+
+    async function loadTransferPage() {
+      const loading = document.getElementById('transferLoading');
+      const empty = document.getElementById('transferEmpty');
+      const tableWrap = document.getElementById('transferTableWrap');
+      const pager = document.getElementById('transferPager');
+      const currentRequestId = transferState.requestId + 1;
+      transferState.requestId = currentRequestId;
+
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      tableWrap.style.display = 'none';
+      pager.style.display = 'none';
+
+      const offset = (transferState.page - 1) * transferState.pageSize;
+      const params = new URLSearchParams({
+        watch_address: transferState.address,
+        asset_code: transferState.asset,
+        limit: String(transferState.pageSize),
+        offset: String(offset)
+      });
+
+      try {
+        const resp = await fetch(`/api/${transferState.chain}/transfers/${transferState.direction}?${params.toString()}`);
+        const data = await resp.json();
+        if (transferState.requestId !== currentRequestId) {
+          return;
+        }
+        if (!resp.ok || !data.success) {
+          throw new Error((data && data.message) || '加载流水失败');
+        }
+        transferState.totalCount = Number(data.total_count || 0);
+        renderTransferModal(Array.isArray(data.records) ? data.records : []);
+      } catch (error) {
+        if (transferState.requestId !== currentRequestId) {
+          return;
+        }
+        transferState.totalCount = 0;
+        loading.style.display = 'none';
+        empty.style.display = 'block';
+        empty.textContent = '记录为空';
+      }
+    }
+
+    function getSelectedAddresses() {
+      const seen = new Set();
+      Array.from(document.querySelectorAll('.address-checkbox:checked')).forEach((item) => {
+        const address = (item.value || '').trim();
+        if (address) {
+          seen.add(address);
+        }
+      });
+      return Array.from(seen);
+    }
+
+    function syncSameAddressCheckboxes(source) {
+      const address = source && source.value ? String(source.value).trim() : '';
+      if (!address) {
+        return;
+      }
+      const checked = Boolean(source.checked);
+      document.querySelectorAll('.address-checkbox').forEach((box) => {
+        if (box === source) {
+          return;
+        }
+        if (String(box.value || '').trim() !== address) {
+          return;
+        }
+        box.checked = checked;
+      });
+    }
+
+    function handleAddressCheckboxChange(source) {
+      syncSameAddressCheckboxes(source);
+      syncSelectionState();
+    }
+
+    function syncSelectionState() {
+      const allCheckboxes = Array.from(document.querySelectorAll('.address-checkbox'));
+      const selectedAddresses = getSelectedAddresses();
+      const selectedCount = selectedAddresses.length;
+      const totalUniqueCount = new Set(
+        allCheckboxes
+          .map((item) => (item.value || '').trim())
+          .filter((item) => item)
+      ).size;
+      const countNode = document.getElementById('selectedCount');
+      if (countNode) {
+        countNode.textContent = String(selectedCount);
+      }
+      const selectAllDesktop = document.getElementById('selectAllDesktop');
+      if (selectAllDesktop) {
+        selectAllDesktop.checked = totalUniqueCount > 0 && selectedCount === totalUniqueCount;
+      }
+    }
+
+    function toggleSelectAll(checked) {
+      document.querySelectorAll('.address-checkbox').forEach((item) => {
+        item.checked = checked;
+      });
+      syncSelectionState();
+    }
+
+    async function handleActionClick(button) {
+      const action = button.dataset.action || '';
+      const address = button.dataset.address || '';
+      if (!action || !address) {
+        showToast('功能参数缺失');
+        return;
+      }
+
+      if (action === '一键归集') {
+        await showInfoDialog('功能未开发', '一键归集功能暂未开发。');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/action-preview', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: action,
+            address: address
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '功能调用失败');
+          return;
+        }
+        showToast(data.message || ('已点击：' + data.action));
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleBatchAction(action) {
+      const addresses = getSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+
+      if (action === '一键归集') {
+        await showInfoDialog('功能未开发', `一键归集功能暂未开发，当前勾选 ${addresses.length} 个地址。`);
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/action-preview', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: action,
+            addresses: addresses
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '批量操作失败');
+          return;
+        }
+        showToast(data.message || ('已批量执行：' + action));
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleDeleteAddress(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+      const confirmed = await showConfirm(
+        '删除地址',
+        `确认删除地址 ${address} 吗？删除后该地址将不再参与监控。`,
+        '确认删除'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/watch-address/delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            address: address
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '删除地址失败');
+          return;
+        }
+
+        showToast(data.message || '删除地址成功');
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleBatchDelete() {
+      const addresses = getSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+      const confirmed = await showConfirm(
+        '批量删除地址',
+        `确认批量删除当前勾选的 ${addresses.length} 个地址吗？删除后这些地址将不再参与监控。`,
+        '确认批量删除'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/watch-address/delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            addresses: addresses
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '批量删除失败');
+          return;
+        }
+
+        showToast(data.message || '批量删除成功');
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleAddAddresses() {
+      const input = document.getElementById('addressInput');
+      const raw = (input.value || '').trim();
+      if (!raw) {
+        showToast('请输入地址');
+        return;
+      }
+
+      const addresses = raw
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter((item) => item);
+
+      if (!addresses.length) {
+        showToast('请输入有效地址');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/watch-addresses', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            addresses: addresses
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '添加地址失败');
+          return;
+        }
+
+        const duplicateCount = Array.isArray(data.duplicate_addresses) ? data.duplicate_addresses.length : 0;
+        const invalidCount = Array.isArray(data.invalid_addresses) ? data.invalid_addresses.length : 0;
+        const successCount = typeof data.count === 'number' ? data.count : 0;
+        input.value = '';
+        showToast(`新增 ${successCount} 个，重复 ${duplicateCount} 个，无效 ${invalidCount} 个`);
+        setTimeout(() => {
+          window.location.reload();
+        }, 600);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    function drawEnergyChart() {
+      const canvas = document.getElementById('energyChart');
+      if (!canvas || !canvas.getContext) {
+        return;
+      }
+      const energyChartLabels = JSON.parse(canvas.dataset.labels || '[]');
+      const energyChartValues = JSON.parse(canvas.dataset.values || '[]');
+      if (!energyChartLabels.length || !energyChartValues.length) {
+        return;
+      }
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 20, right: 16, bottom: 42, left: 42 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const maxValue = Math.max(...energyChartValues, 1);
+      const stepX = energyChartValues.length > 1 ? chartWidth / (energyChartValues.length - 1) : chartWidth;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, padding.top + chartHeight);
+      ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+      ctx.stroke();
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i <= 4; i++) {
+        const value = Math.round((maxValue / 4) * (4 - i));
+        const y = padding.top + (chartHeight / 4) * i;
+        ctx.strokeStyle = '#f1f5f9';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(padding.left + chartWidth, y);
+        ctx.stroke();
+        ctx.fillText(String(value), padding.left - 8, y);
+      }
+
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      energyChartValues.forEach((value, index) => {
+        const x = padding.left + stepX * index;
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = '#2563eb';
+      energyChartValues.forEach((value, index) => {
+        const x = padding.left + stepX * index;
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const tickStep = energyChartLabels.length > 10 ? Math.ceil(energyChartLabels.length / 6) : 1;
+      energyChartLabels.forEach((label, index) => {
+        if (index % tickStep !== 0 && index !== energyChartLabels.length - 1) {
+          return;
+        }
+        const x = padding.left + stepX * index;
+        ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
+      });
+    }
+
+    document.getElementById('transferMask').addEventListener('click', (event) => {
+      if (event.target === event.currentTarget) {
+        closeTransferModal();
+      }
+    });
+
+    drawEnergyChart();
+    syncSelectionState();
+  </script>
+</body>
+</html>

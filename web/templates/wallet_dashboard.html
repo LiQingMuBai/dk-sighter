@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TronSight HD 钱包</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a2f;
+      --panel-soft: #18233d;
+      --line: rgba(148, 163, 184, 0.18);
+      --text: #e5eefc;
+      --subtext: #94a3b8;
+      --primary: #4f46e5;
+      --primary-soft: rgba(79, 70, 229, 0.16);
+      --success: #10b981;
+      --danger: #ef4444;
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #182445 0%, #0b1020 55%, #070b16 100%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+    .page {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 20px 16px 36px;
+    }
+    .topbar, .grid, .summary-grid, .toolbar { display: grid; gap: 16px; }
+    .topbar { grid-template-columns: 1fr auto; align-items: center; margin-bottom: 16px; }
+    .title { margin: 0; font-size: 30px; }
+    .subtitle { margin: 8px 0 0; color: var(--subtext); font-size: 14px; }
+    .chain-nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .chain-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 120px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .chain-link.active {
+      background: var(--primary-soft);
+      border-color: rgba(99, 102, 241, 0.5);
+      color: #c7d2fe;
+    }
+    .logout-btn, .primary-btn, .ghost-btn, .page-btn {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .logout-btn, .ghost-btn, .page-btn {
+      background: var(--panel);
+      color: var(--text);
+    }
+    .primary-btn {
+      background: var(--primary);
+      color: #fff;
+      border-color: transparent;
+    }
+    .grid { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
+    .card {
+      background: rgba(18, 26, 47, 0.94);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      backdrop-filter: blur(10px);
+    }
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    .card p {
+      margin: 0 0 14px;
+      color: var(--subtext);
+      line-height: 1.6;
+      font-size: 13px;
+    }
+    .label {
+      display: block;
+      margin: 0 0 8px;
+      color: var(--subtext);
+      font-size: 13px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 114px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--text);
+      resize: vertical;
+      font: inherit;
+      line-height: 1.6;
+    }
+    .form-actions, .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .status-box {
+      padding: 14px;
+      border-radius: 14px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      min-height: 80px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      font-size: 13px;
+    }
+    .summary-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-bottom: 16px;
+    }
+    .summary-item {
+      padding: 16px;
+      border-radius: 16px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+    }
+    .summary-label {
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .summary-value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .summary-extra {
+      margin-top: 8px;
+      color: var(--subtext);
+      font-size: 12px;
+    }
+    .toolbar {
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    select {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-soft);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel-soft);
+      color: var(--text);
+      padding: 12px 14px;
+      font-size: 14px;
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(99, 102, 241, 0.6);
+      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      word-break: break-all;
+    }
+    th { color: var(--subtext); font-weight: 600; }
+    .muted { color: var(--subtext); }
+    .pagination {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+      align-items: center;
+      color: var(--subtext);
+      font-size: 13px;
+    }
+    .row-action-btn {
+      min-width: 88px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .row-action-btn[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .row-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: rgba(16, 185, 129, 0.94);
+      color: #fff;
+      display: none;
+      z-index: 10;
+    }
+    .toast.error { background: rgba(239, 68, 68, 0.94); }
+    .job-banner {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(calc(100% - 32px), 920px);
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 18px;
+      border-radius: 16px;
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      background: rgba(15, 23, 42, 0.95);
+      box-shadow: 0 18px 48px rgba(2, 6, 23, 0.45);
+      backdrop-filter: blur(10px);
+      z-index: 20;
+    }
+    .job-banner.chain-tron {
+      border-color: rgba(34, 197, 94, 0.32);
+      background: rgba(6, 23, 17, 0.95);
+      box-shadow: 0 18px 48px rgba(16, 185, 129, 0.18);
+    }
+    .job-banner.chain-bsc {
+      border-color: rgba(250, 204, 21, 0.32);
+      background: rgba(36, 24, 8, 0.95);
+      box-shadow: 0 18px 48px rgba(234, 179, 8, 0.18);
+    }
+    .job-banner.show {
+      display: flex;
+    }
+    .job-banner-text {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-size: 14px;
+    }
+    .job-banner-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.9);
+      flex: 0 0 auto;
+    }
+    .job-banner.chain-tron .job-banner-dot {
+      background: #22c55e;
+      box-shadow: 0 0 14px rgba(34, 197, 94, 0.9);
+    }
+    .job-banner.chain-bsc .job-banner-dot {
+      background: #facc15;
+      box-shadow: 0 0 14px rgba(250, 204, 21, 0.9);
+    }
+    .job-banner-label {
+      color: #dbeafe;
+      white-space: nowrap;
+    }
+    .job-banner.chain-tron .job-banner-label {
+      color: #bbf7d0;
+    }
+    .job-banner.chain-bsc .job-banner-label {
+      color: #fde68a;
+    }
+    .job-banner-message {
+      color: #bfdbfe;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .job-banner.chain-tron .job-banner-message {
+      color: #dcfce7;
+    }
+    .job-banner.chain-bsc .job-banner-message {
+      color: #fef3c7;
+    }
+    .job-banner-close {
+      background: transparent;
+      border: 0;
+      color: #93c5fd;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0;
+      flex: 0 0 auto;
+    }
+    .job-banner.chain-tron .job-banner-close {
+      color: #86efac;
+    }
+    .job-banner.chain-bsc .job-banner-close {
+      color: #fcd34d;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(3, 6, 17, 0.72);
+      backdrop-filter: blur(8px);
+      z-index: 30;
+    }
+    .modal.show { display: flex; }
+    .modal-card {
+      width: min(100%, 520px);
+      background: linear-gradient(180deg, rgba(24, 35, 61, 0.98) 0%, rgba(18, 26, 47, 0.98) 100%);
+      border: 1px solid rgba(99, 102, 241, 0.22);
+      border-radius: 22px;
+      padding: 22px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+    .modal-card.chain-tron {
+      border-color: rgba(34, 197, 94, 0.35);
+      box-shadow: 0 24px 80px rgba(16, 185, 129, 0.12);
+    }
+    .modal-card.chain-bsc {
+      border-color: rgba(250, 204, 21, 0.35);
+      box-shadow: 0 24px 80px rgba(234, 179, 8, 0.14);
+    }
+    .modal-title {
+      margin: 0;
+      font-size: 22px;
+    }
+    .modal-subtitle {
+      margin: 10px 0 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .modal-body {
+      margin-top: 18px;
+    }
+    .input-wrap {
+      position: relative;
+    }
+    .input-hint {
+      margin-top: 8px;
+      color: var(--subtext);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .input-hint.error {
+      color: #fca5a5;
+    }
+    .input-hint.success {
+      color: #86efac;
+    }
+    .modal-preview {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(11, 16, 32, 0.65);
+      border: 1px solid var(--line);
+    }
+    .modal-preview-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .modal-preview-label {
+      color: var(--subtext);
+      flex: 0 0 120px;
+    }
+    .modal-preview-value {
+      text-align: right;
+      word-break: break-all;
+    }
+    .modal-warning {
+      display: none;
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      background: rgba(127, 29, 29, 0.28);
+      color: #fecaca;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .modal-warning.show {
+      display: block;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .chain-input-icon {
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      transform: translateY(-50%);
+      min-width: 68px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(11, 16, 32, 0.9);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      pointer-events: none;
+    }
+    .chain-input-icon.chain-tron {
+      color: #86efac;
+      border-color: rgba(34, 197, 94, 0.32);
+      box-shadow: inset 0 0 18px rgba(34, 197, 94, 0.12);
+    }
+    .chain-input-icon.chain-bsc {
+      color: #fde68a;
+      border-color: rgba(250, 204, 21, 0.32);
+      box-shadow: inset 0 0 18px rgba(250, 204, 21, 0.12);
+    }
+    .chain-input-icon-mark {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 14px currentColor;
+      background: currentColor;
+      opacity: 0.9;
+    }
+    @media (max-width: 960px) {
+      .grid, .summary-grid, .topbar { grid-template-columns: 1fr; }
+      .toolbar { align-items: stretch; }
+      .pagination { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <div id="jobBanner" class="job-banner" aria-live="polite">
+    <div class="job-banner-text">
+      <span class="job-banner-dot"></span>
+      <span id="jobBannerLabel" class="job-banner-label">归集中</span>
+      <span id="jobBannerMessage" class="job-banner-message">请耐心等待，正在归集中</span>
+    </div>
+    <button id="jobBannerCloseBtn" class="job-banner-close" type="button">隐藏</button>
+  </div>
+
+  <div class="page">
+    <div class="topbar">
+      <div>
+        <h1 id="pageTitle" class="title">TronSight Tron 余额看板</h1>
+        <p class="subtitle">登录后填写 Tron/BSC 助记词，各自派生 10000 个地址，地址生成结果与余额结果全部写入本地文件。页面生成时间：{{.GeneratedAt}}</p>
+        <div class="chain-nav">
+          <a id="tronNav" class="chain-link" href="/?chain=tron">Tron 余额看板</a>
+          <a id="bscNav" class="chain-link" href="/?chain=bsc">BSC 余额看板</a>
+        </div>
+      </div>
+      <form method="post" action="/logout">
+        <button type="submit" class="logout-btn">退出登录</button>
+      </form>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>助记词配置</h2>
+        <p>保存后点击“生成地址”，后台会按 `m/44'/195'/0'/0/i` 与 `m/44'/60'/0'/0/i` 分别派生地址，并把结果写入 MySQL。每次点击追加生成 200 个地址，并标注来源助记词标识。</p>
+
+        <label class="label" for="tronMnemonic">Tron 助记词</label>
+        <textarea id="tronMnemonic" placeholder="请输入 12 或 24 个英文单词"></textarea>
+
+        <label class="label" for="bscMnemonic" style="margin-top: 14px;">BSC 助记词</label>
+        <textarea id="bscMnemonic" placeholder="请输入 12 或 24 个英文单词"></textarea>
+
+        <div class="summary-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 16px;">
+          <div>
+            <label class="label" for="tronThreshold">Tron USDT 归集阈值</label>
+            <input id="tronThreshold" type="text" value="10" placeholder="例如 10" />
+          </div>
+          <div>
+            <label class="label" for="bscThreshold">BSC USDT 归集阈值</label>
+            <input id="bscThreshold" type="text" value="10" placeholder="例如 10" />
+          </div>
+        </div>
+
+        <div class="form-actions" style="margin-top: 16px;">
+          <button id="saveBtn" class="primary-btn" type="button">保存助记词</button>
+          <button id="syncBtn" class="ghost-btn" type="button">生成 200 个地址</button>
+          <button id="sweepBtn" class="ghost-btn" type="button">一键归集当前链 USDT</button>
+        </div>
+
+        <div id="statusBox" class="status-box" style="margin-top: 16px;">尚未开始任务</div>
+      </section>
+
+      <section class="card">
+        <div class="summary-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+          <div class="summary-item">
+            <div id="countLabel" class="summary-label">Tron 地址数</div>
+            <div id="chainCount" class="summary-value">0</div>
+            <div id="chainUpdated" class="summary-extra">最近更新时间：-</div>
+          </div>
+          <div class="summary-item">
+            <div id="assetLabel" class="summary-label">Tron 总 TRX / USDT</div>
+            <div id="chainTotals" class="summary-value">0 / 0</div>
+            <div id="assetSource" class="summary-extra">来源：Tron 本地文件结果</div>
+          </div>
+          <div class="summary-item">
+            <div id="statusLabel" class="summary-label">当前链区块同步状态</div>
+            <div id="chainScheduledStatus" class="summary-value" style="font-size: 18px;">Tron：空闲</div>
+            <div id="chainScheduledAt" class="summary-extra">上次 Tron 区块同步时间：-</div>
+            <div id="chainSyncedBlock" class="summary-extra">当前链已同步到区块高度：-</div>
+            <div id="chainLatestBlock" class="summary-extra">链上最新区块高度 / 同步差：- / -</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">看板说明</div>
+            <div id="chainHint" class="summary-value" style="font-size: 18px;">TRX / USDT</div>
+            <div id="chainHintExtra" class="summary-extra">当前页面只展示 Tron 链资产与地址结果</div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="form-actions">
+            <select id="pageSizeSelect">
+              <option value="50">每页 50</option>
+              <option value="100">每页 100</option>
+              <option value="200">每页 200</option>
+            </select>
+          </div>
+          <div class="muted" id="pageMeta">第 1 / 1 页，共 0 条</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 70px;">序号</th>
+              <th>地址</th>
+              <th style="width: 110px;">助记词标识</th>
+              <th id="assetColumn1">TRX</th>
+              <th id="assetColumn2">USDT</th>
+              <th>更新时间</th>
+              <th style="width: 220px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr><td colspan="7" class="muted">暂无数据</td></tr>
+          </tbody>
+        </table>
+
+        <div class="pagination">
+          <button id="prevBtn" type="button" class="page-btn">上一页</button>
+          <span id="pageInfo">1 / 1</span>
+          <button id="nextBtn" type="button" class="page-btn">下一页</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="sweepModal" class="modal" aria-hidden="true">
+    <div id="sweepModalCard" class="modal-card chain-tron">
+      <h3 id="sweepModalTitle" class="modal-title">Tron USDT 一键归集</h3>
+      <p id="sweepModalSubtitle" class="modal-subtitle">请输入归集地址，系统会先预览符合阈值的地址数量和预计归集总额，确认后再执行。</p>
+      <div class="modal-body">
+        <label id="sweepDestinationLabel" class="label" for="sweepDestinationInput">归集地址</label>
+        <div class="input-wrap">
+          <input id="sweepDestinationInput" type="text" placeholder="请输入归集地址" style="padding-right: 92px;" />
+          <div id="sweepChainIcon" class="chain-input-icon chain-tron">
+            <span class="chain-input-icon-mark"></span>
+            <span id="sweepChainIconText">TRON</span>
+          </div>
+        </div>
+        <div id="sweepDestinationHint" class="input-hint">请输入有效的 Tron 归集地址</div>
+        <div id="sweepPreview" class="modal-preview" style="display: none;"></div>
+        <div id="sweepWarning" class="modal-warning">风险提示：确认归集后会发起真实链上交易，目标地址错误、链选错或手续费不足都可能导致资产无法按预期到账，请在执行前再次核对。</div>
+      </div>
+      <div class="modal-actions">
+        <button id="sweepCancelBtn" class="ghost-btn" type="button">取消</button>
+        <button id="sweepConfirmBtn" class="primary-btn" type="button">下一步</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="jobResultModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <h3 id="jobResultTitle" class="modal-title">归集完毕</h3>
+      <p id="jobResultSubtitle" class="modal-subtitle">当前归集任务已处理完成。</p>
+      <div class="modal-body">
+        <div id="jobResultBody" class="modal-preview" style="display: grid;"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="jobResultConfirmBtn" class="primary-btn" type="button">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const urlChain = new URLSearchParams(window.location.search).get("chain")
+    const state = {
+      chain: urlChain === "bsc" ? "bsc" : "tron",
+      page: 1,
+      pageSize: 50,
+      pollTimer: null,
+      jobRunning: false,
+      waitingSweepResult: false,
+      sweepStep: "input",
+      sweepPreview: null,
+      refreshingAddress: "",
+      energyActionKey: ""
+    }
+
+    const tronMnemonicInput = document.getElementById("tronMnemonic")
+    const bscMnemonicInput = document.getElementById("bscMnemonic")
+    const tronThresholdInput = document.getElementById("tronThreshold")
+    const bscThresholdInput = document.getElementById("bscThreshold")
+    const statusBox = document.getElementById("statusBox")
+    const toast = document.getElementById("toast")
+    const pageSizeSelect = document.getElementById("pageSizeSelect")
+    const tableBody = document.getElementById("tableBody")
+    const tronNav = document.getElementById("tronNav")
+    const bscNav = document.getElementById("bscNav")
+    const sweepModal = document.getElementById("sweepModal")
+    const sweepModalCard = document.getElementById("sweepModalCard")
+    const sweepModalTitle = document.getElementById("sweepModalTitle")
+    const sweepModalSubtitle = document.getElementById("sweepModalSubtitle")
+    const sweepDestinationLabel = document.getElementById("sweepDestinationLabel")
+    const sweepDestinationInput = document.getElementById("sweepDestinationInput")
+    const sweepChainIcon = document.getElementById("sweepChainIcon")
+    const sweepChainIconText = document.getElementById("sweepChainIconText")
+    const sweepDestinationHint = document.getElementById("sweepDestinationHint")
+    const sweepPreview = document.getElementById("sweepPreview")
+    const sweepWarning = document.getElementById("sweepWarning")
+    const sweepConfirmBtn = document.getElementById("sweepConfirmBtn")
+    const sweepCancelBtn = document.getElementById("sweepCancelBtn")
+    const jobResultModal = document.getElementById("jobResultModal")
+    const jobResultTitle = document.getElementById("jobResultTitle")
+    const jobResultSubtitle = document.getElementById("jobResultSubtitle")
+    const jobResultBody = document.getElementById("jobResultBody")
+    const jobResultConfirmBtn = document.getElementById("jobResultConfirmBtn")
+    const jobBanner = document.getElementById("jobBanner")
+    const jobBannerLabel = document.getElementById("jobBannerLabel")
+    const jobBannerMessage = document.getElementById("jobBannerMessage")
+    const jobBannerCloseBtn = document.getElementById("jobBannerCloseBtn")
+
+    function showToast(message, isError) {
+      toast.textContent = message
+      toast.className = "toast" + (isError ? " error" : "")
+      toast.style.display = "block"
+      clearTimeout(showToast.timer)
+      showToast.timer = setTimeout(() => {
+        toast.style.display = "none"
+      }, 2600)
+    }
+
+    function currentChainName() {
+      return state.chain === "bsc" ? "BSC" : "Tron"
+    }
+
+    function buildEnergyActionKey(address, action) {
+      return `${action}:${address}`
+    }
+
+    function isValidDestination(chain, value) {
+      if (!value) {
+        return false
+      }
+      if (chain === "bsc") {
+        return /^0x[a-fA-F0-9]{40}$/.test(value)
+      }
+      return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value)
+    }
+
+    function renderDestinationHint() {
+      const value = sweepDestinationInput.value.trim()
+      const chainName = currentChainName()
+      if (!value) {
+        sweepDestinationHint.className = "input-hint"
+        sweepDestinationHint.textContent = `请输入有效的 ${chainName} 归集地址`
+        return
+      }
+      if (isValidDestination(state.chain, value)) {
+        sweepDestinationHint.className = "input-hint success"
+        sweepDestinationHint.textContent = `${chainName} 地址格式校验通过`
+        return
+      }
+      sweepDestinationHint.className = "input-hint error"
+      sweepDestinationHint.textContent = state.chain === "bsc"
+        ? "地址格式不正确，请输入 0x 开头的 42 位 BSC 地址"
+        : "地址格式不正确，请输入 T 开头的 34 位 Tron 地址"
+    }
+
+    function openSweepModal() {
+      const chainName = currentChainName()
+      state.sweepStep = "input"
+      state.sweepPreview = null
+      sweepModalCard.classList.toggle("chain-tron", state.chain === "tron")
+      sweepModalCard.classList.toggle("chain-bsc", state.chain === "bsc")
+      sweepChainIcon.classList.toggle("chain-tron", state.chain === "tron")
+      sweepChainIcon.classList.toggle("chain-bsc", state.chain === "bsc")
+      sweepChainIconText.textContent = state.chain === "bsc" ? "BSC" : "TRON"
+      sweepModalTitle.textContent = `${chainName} USDT 一键归集`
+      sweepModalSubtitle.textContent = state.chain === "tron"
+        ? "请输入归集地址，系统会先预览 TRX 大于 1 且 USDT 达到阈值的地址数量，执行时会先发能一次，再发起 USDT 归集。"
+        : "请输入归集地址，系统会先预览符合阈值的地址数量和预计归集总额，确认后再执行。"
+      sweepDestinationLabel.textContent = `${chainName} 归集地址`
+      sweepDestinationInput.placeholder = `请输入 ${chainName} 归集地址`
+      sweepDestinationInput.value = ""
+      sweepDestinationInput.disabled = false
+      sweepDestinationHint.className = "input-hint"
+      sweepWarning.classList.remove("show")
+      sweepPreview.style.display = "none"
+      sweepPreview.innerHTML = ""
+      sweepConfirmBtn.textContent = "下一步"
+      renderDestinationHint()
+      sweepModal.classList.add("show")
+      sweepModal.setAttribute("aria-hidden", "false")
+      setTimeout(() => sweepDestinationInput.focus(), 0)
+    }
+
+    function closeSweepModal() {
+      sweepModal.classList.remove("show")
+      sweepModal.setAttribute("aria-hidden", "true")
+      state.sweepStep = "input"
+      state.sweepPreview = null
+    }
+
+    function showJobResultModal(job) {
+      const stage = (job && job.stage) || "done"
+      const isFailed = stage === "failed"
+      jobResultTitle.textContent = isFailed ? "归集失败" : "归集完毕"
+      jobResultSubtitle.textContent = isFailed ? "当前归集任务已结束，请检查失败原因。" : "当前归集任务已处理完成。"
+      jobResultBody.innerHTML = `
+        <div class="modal-preview-row"><div class="modal-preview-label">状态</div><div class="modal-preview-value">${job && job.stage ? job.stage : "-"}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">链</div><div class="modal-preview-value">${job && job.chain ? job.chain.toUpperCase() : "-"}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">结果</div><div class="modal-preview-value">${job && job.message ? job.message : "-"}</div></div>
+      `
+      jobResultModal.classList.add("show")
+      jobResultModal.setAttribute("aria-hidden", "false")
+    }
+
+    function closeJobResultModal() {
+      jobResultModal.classList.remove("show")
+      jobResultModal.setAttribute("aria-hidden", "true")
+    }
+
+    function showJobBanner(message, chain) {
+      const normalizedChain = chain === "bsc" ? "bsc" : "tron"
+      const chainName = normalizedChain === "bsc" ? "BSC" : "Tron"
+      jobBanner.classList.toggle("chain-tron", normalizedChain === "tron")
+      jobBanner.classList.toggle("chain-bsc", normalizedChain === "bsc")
+      jobBannerLabel.textContent = `${chainName} 归集中`
+      jobBannerMessage.textContent = message || "请耐心等待，正在归集中"
+      jobBanner.classList.add("show")
+    }
+
+    function hideJobBanner() {
+      jobBanner.classList.remove("show")
+      jobBanner.classList.remove("chain-tron", "chain-bsc")
+    }
+
+    function renderSweepPreview(preview) {
+      const chainName = currentChainName()
+      sweepModalTitle.textContent = `${chainName} USDT 归集确认`
+      sweepModalSubtitle.textContent = "请再次核对归集目标地址、阈值和预计归集总额，确认后将立即启动归集任务。"
+      sweepDestinationInput.value = preview.destination || ""
+      sweepDestinationInput.disabled = true
+      sweepDestinationHint.className = "input-hint success"
+      sweepDestinationHint.textContent = `${chainName} 目标地址已通过格式校验`
+      sweepPreview.innerHTML = `
+        <div class="modal-preview-row"><div class="modal-preview-label">目标地址</div><div class="modal-preview-value">${preview.destination || "-"}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">归集阈值</div><div class="modal-preview-value">${preview.threshold || "-"}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">符合地址数</div><div class="modal-preview-value">${preview.eligible_count || 0}</div></div>
+        <div class="modal-preview-row"><div class="modal-preview-label">预计归集总额</div><div class="modal-preview-value">${preview.eligible_total_usdt || "0"} USDT</div></div>
+      `
+      sweepPreview.style.display = "grid"
+      sweepWarning.classList.add("show")
+      sweepConfirmBtn.textContent = "确认归集"
+    }
+
+    async function request(url, options) {
+      const res = await fetch(url, options)
+      if (!res.ok) {
+        throw new Error(await res.text() || "request failed")
+      }
+      return res.json()
+    }
+
+    function renderStatus(job) {
+      if (!job) {
+        statusBox.textContent = "尚未开始任务"
+        return
+      }
+      const lines = []
+      lines.push(`状态：${job.stage || "-"}`)
+      lines.push(`链：${job.chain || "-"}`)
+      lines.push(`进度：${job.current || 0} / ${job.total || 0}`)
+      lines.push(`信息：${job.message || "-"}`)
+      if (job.last_error) lines.push(`错误：${job.last_error}`)
+      if (job.updated_at) lines.push(`更新时间：${job.updated_at}`)
+      statusBox.textContent = lines.join("\n")
+    }
+
+    function renderSummary(data) {
+      const chainData = state.chain === "bsc" ? data.bsc : data.tron
+      const chainName = state.chain === "bsc" ? "BSC" : "Tron"
+      const asset1 = state.chain === "bsc" ? "BNB" : "TRX"
+      const total1 = state.chain === "bsc" ? (chainData.bnb_total || "0") : (chainData.trx_total || "0")
+      const total2 = chainData.usdt_total || "0"
+
+      document.getElementById("pageTitle").textContent = `TronSight ${chainName} 余额看板`
+      tronNav.classList.toggle("active", state.chain === "tron")
+      bscNav.classList.toggle("active", state.chain === "bsc")
+      document.getElementById("countLabel").textContent = `${chainName} 地址数`
+      document.getElementById("chainCount").textContent = chainData.count || 0
+      document.getElementById("chainUpdated").textContent = `最近更新时间：${chainData.last_updated_at || "-"}`
+      document.getElementById("assetLabel").textContent = `${chainName} 总 ${asset1} / USDT`
+      document.getElementById("chainTotals").textContent = `${total1} / ${total2}`
+      document.getElementById("assetSource").textContent = `来源：${chainName} MySQL 结果`
+      document.getElementById("chainScheduledStatus").textContent = chainData.scheduled_running ? `${chainName} 区块同步中` : `${chainName}：空闲`
+      document.getElementById("chainScheduledAt").textContent = `上次 ${chainName} 区块同步时间：${chainData.last_scheduled_sync_at || "-"}`
+      document.getElementById("chainSyncedBlock").textContent = `当前链已同步到区块高度：${chainData.last_scanned_block || 0}`
+      document.getElementById("chainLatestBlock").textContent = `链上最新区块高度 / 同步差：${chainData.latest_chain_block || 0} / ${chainData.sync_lag || 0}`
+      document.getElementById("chainHint").textContent = `${asset1} / USDT`
+      document.getElementById("chainHintExtra").textContent = `当前页面只展示 ${chainName} 链资产与地址结果`
+      document.getElementById("assetColumn1").textContent = asset1
+      document.getElementById("assetColumn2").textContent = "USDT"
+      if (data.config) {
+        tronMnemonicInput.value = data.config.tron_mnemonic || ""
+        bscMnemonicInput.value = data.config.bsc_mnemonic || ""
+        tronThresholdInput.value = data.config.tron_usdt_threshold || "10"
+        bscThresholdInput.value = data.config.bsc_usdt_threshold || "10"
+      }
+    }
+
+    function renderTable(data) {
+      const items = (data.page && data.page.items) || []
+      if (!items.length) {
+        tableBody.innerHTML = `<tr><td colspan="7" class="muted">暂无数据</td></tr>`
+      } else {
+        tableBody.innerHTML = items.map((item) => `
+          ${(() => {
+            const disableRefresh = !!state.refreshingAddress || !!state.energyActionKey
+            const onceKey = buildEnergyActionKey(item.address, "发能一次")
+            const twiceKey = buildEnergyActionKey(item.address, "发能两次")
+            const actions = [
+              `<button class="row-action-btn" type="button" data-refresh-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.refreshingAddress === item.address ? "更新中..." : "更新余额"}</button>`
+            ]
+            if (state.chain === "tron") {
+              actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能一次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === onceKey ? "发能中..." : "发能一次"}</button>`)
+              actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能两次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === twiceKey ? "发能中..." : "发能两次"}</button>`)
+            }
+            return `
+          <tr>
+            <td>${item.index}</td>
+            <td>${item.address}</td>
+            <td>${item.mnemonic_tag || "-"}</td>
+            <td>${state.chain === "bsc" ? (item.bnb_balance || "-") : (item.trx_balance || "-")}</td>
+            <td>${item.usdt_balance || "-"}</td>
+            <td>${item.updated_at || "-"}</td>
+            <td><div class="row-actions">${actions.join("")}</div></td>
+          </tr>
+        `
+          })()}
+        `).join("")
+      }
+      const totalPages = data.page ? data.page.total_pages : 1
+      const page = data.page ? data.page.page : 1
+      const totalCount = data.page ? data.page.total_count : 0
+      document.getElementById("pageMeta").textContent = `第 ${page} / ${totalPages} 页，共 ${totalCount} 条`
+      document.getElementById("pageInfo").textContent = `${page} / ${totalPages}`
+      document.getElementById("prevBtn").disabled = page <= 1
+      document.getElementById("nextBtn").disabled = page >= totalPages
+    }
+
+    async function loadState() {
+      const data = await request(`/api/hd-wallet/state?chain=${state.chain}&page=${state.page}&page_size=${state.pageSize}`)
+      renderSummary(data)
+      renderStatus(data.job)
+      renderTable(data)
+      if (data.job && data.job.running && String(data.job.stage || "").includes("sweep")) {
+        showJobBanner(data.job.message || "请耐心等待，正在归集中", data.job.chain || state.chain)
+      } else if (!state.waitingSweepResult) {
+        hideJobBanner()
+      }
+      if (state.waitingSweepResult && data.job && !data.job.running && ["done", "failed", "skipped"].includes(data.job.stage || "")) {
+        state.waitingSweepResult = false
+        hideJobBanner()
+        showJobResultModal(data.job)
+      }
+      state.jobRunning = !!(data.job && data.job.running)
+      updatePolling()
+    }
+
+    function updatePolling() {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer)
+        state.pollTimer = null
+      }
+      if (state.jobRunning) {
+        state.pollTimer = setInterval(() => {
+          loadState().catch((err) => showToast(err.message, true))
+        }, 3000)
+      }
+    }
+
+    async function saveConfig() {
+      const resp = await request("/api/hd-wallet/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tron_mnemonic: tronMnemonicInput.value,
+          bsc_mnemonic: bscMnemonicInput.value,
+          tron_usdt_threshold: tronThresholdInput.value,
+          bsc_usdt_threshold: bscThresholdInput.value
+        })
+      })
+      showToast(resp.message || "已加密保存在本地文件")
+      await loadState()
+    }
+
+    async function startSync() {
+      await request("/api/hd-wallet/sync", { method: "POST" })
+      showToast("地址生成任务已启动")
+      await loadState()
+    }
+
+    async function refreshAddress(address) {
+      state.refreshingAddress = address
+      await loadState()
+      try {
+        await request("/api/hd-wallet/refresh-address", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chain: state.chain,
+            address
+          })
+        })
+        showToast("地址余额更新成功")
+      } finally {
+        state.refreshingAddress = ""
+        await loadState()
+      }
+    }
+
+    async function triggerEnergy(action, address) {
+      if (state.chain !== "tron") {
+        return
+      }
+      state.energyActionKey = buildEnergyActionKey(address, action)
+      await loadState()
+      try {
+        const resp = await request("/api/action-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            address
+          })
+        })
+        showToast(resp.message || `${action}成功`)
+      } finally {
+        state.energyActionKey = ""
+        await loadState()
+      }
+    }
+
+    async function confirmSweep() {
+      if (state.sweepStep === "input") {
+        const destination = sweepDestinationInput.value.trim()
+        if (!destination) {
+          showToast("请输入归集地址", true)
+          sweepDestinationInput.focus()
+          return
+        }
+        if (!isValidDestination(state.chain, destination)) {
+          renderDestinationHint()
+          showToast("归集地址格式不正确", true)
+          sweepDestinationInput.focus()
+          return
+        }
+        const previewResp = await request("/api/hd-wallet/sweep/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chain: state.chain,
+            destination
+          })
+        })
+        state.sweepStep = "preview"
+        state.sweepPreview = previewResp.preview
+        renderSweepPreview(state.sweepPreview)
+        return
+      }
+
+      if (!state.sweepPreview) {
+        showToast("归集预览不存在，请重新输入", true)
+        closeSweepModal()
+        return
+      }
+
+      const resp = await request("/api/hd-wallet/sweep/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chain: state.chain,
+          destination: state.sweepPreview.destination
+        })
+      })
+      state.waitingSweepResult = true
+      state.jobRunning = true
+      updatePolling()
+      closeSweepModal()
+      showJobBanner(resp.message || "请耐心等待，正在归集中", state.chain)
+      showToast(resp.message || "请耐心等待，正在归集中")
+      loadState().catch((err) => showToast(err.message, true))
+    }
+
+    document.getElementById("saveBtn").addEventListener("click", () => {
+      saveConfig().catch((err) => showToast(err.message, true))
+    })
+
+    document.getElementById("syncBtn").addEventListener("click", () => {
+      startSync().catch((err) => showToast(err.message, true))
+    })
+
+    document.getElementById("sweepBtn").addEventListener("click", () => {
+      openSweepModal()
+    })
+
+    tableBody.addEventListener("click", (event) => {
+      const refreshButton = event.target.closest("[data-refresh-address]")
+      if (refreshButton) {
+        const address = refreshButton.getAttribute("data-refresh-address") || ""
+        if (!address || state.refreshingAddress || state.energyActionKey) {
+          return
+        }
+        refreshAddress(address).catch((err) => {
+          state.refreshingAddress = ""
+          showToast(err.message, true)
+          loadState().catch(() => {})
+        })
+        return
+      }
+
+      const energyButton = event.target.closest("[data-energy-action]")
+      if (!energyButton) {
+        return
+      }
+      const action = energyButton.getAttribute("data-energy-action") || ""
+      const address = energyButton.getAttribute("data-energy-address") || ""
+      if (!action || !address || state.refreshingAddress || state.energyActionKey) {
+        return
+      }
+      triggerEnergy(action, address).catch((err) => {
+        state.energyActionKey = ""
+        showToast(err.message, true)
+        loadState().catch(() => {})
+      })
+    })
+
+    sweepConfirmBtn.addEventListener("click", () => {
+      confirmSweep().catch((err) => showToast(err.message, true))
+    })
+
+    sweepCancelBtn.addEventListener("click", closeSweepModal)
+    jobResultConfirmBtn.addEventListener("click", closeJobResultModal)
+    jobBannerCloseBtn.addEventListener("click", hideJobBanner)
+
+    sweepModal.addEventListener("click", (event) => {
+      if (event.target === sweepModal) {
+        closeSweepModal()
+      }
+    })
+
+    jobResultModal.addEventListener("click", (event) => {
+      if (event.target === jobResultModal) {
+        closeJobResultModal()
+      }
+    })
+
+    sweepDestinationInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        confirmSweep().catch((err) => showToast(err.message, true))
+      }
+    })
+
+    sweepDestinationInput.addEventListener("input", renderDestinationHint)
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && sweepModal.classList.contains("show")) {
+        closeSweepModal()
+      }
+      if (event.key === "Escape" && jobResultModal.classList.contains("show")) {
+        closeJobResultModal()
+      }
+    })
+
+    pageSizeSelect.addEventListener("change", () => {
+      state.pageSize = Number(pageSizeSelect.value) || 50
+      state.page = 1
+      loadState().catch((err) => showToast(err.message, true))
+    })
+
+    document.getElementById("prevBtn").addEventListener("click", () => {
+      if (state.page > 1) {
+        state.page -= 1
+        loadState().catch((err) => showToast(err.message, true))
+      }
+    })
+
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      state.page += 1
+      loadState().catch((err) => showToast(err.message, true))
+    })
+
+    tronNav.addEventListener("click", (event) => {
+      event.preventDefault()
+      state.chain = "tron"
+      state.page = 1
+      window.history.replaceState({}, "", "/?chain=tron")
+      loadState().catch((err) => showToast(err.message, true))
+    })
+
+    bscNav.addEventListener("click", (event) => {
+      event.preventDefault()
+      state.chain = "bsc"
+      state.page = 1
+      window.history.replaceState({}, "", "/?chain=bsc")
+      loadState().catch((err) => showToast(err.message, true))
+    })
+
+    loadState().catch((err) => showToast(err.message, true))
+  </script>
+</body>
+</html>

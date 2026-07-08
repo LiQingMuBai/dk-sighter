@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>API 文档 - Tron 监控后台</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --line: #e5e7eb;
+      --text: #111827;
+      --subtext: #6b7280;
+      --green: #10b981;
+      --green-soft: #ecfdf5;
+      --blue: #2563eb;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 14px 32px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .nav a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+    }
+
+    .download-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--blue);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .method {
+      background: var(--green-soft);
+      color: var(--green);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      word-break: break-all;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .label {
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .text {
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f172a;
+      color: #e5e7eb;
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.7;
+      overflow: auto;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    @media (max-width: 860px) {
+      .topbar {
+        flex-direction: column;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div>
+        <h1 class="title">API 文档</h1>
+        <p class="subtitle">这是一个内置的 Swagger 风格页面，用于查看当前对外接口、鉴权方式和请求示例。</p>
+      </div>
+      <div class="nav">
+        <a href="/">返回后台</a>
+        <a href="/docs">刷新文档</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">基础信息</h2>
+      <div class="grid">
+        <div>
+          <div class="label">服务地址</div>
+          <div class="text">
+            <code>{{ .HTTPURL }}</code><br>
+            <code>{{ .HTTPSURL }}</code><br>
+            当前访问：<code>{{ .BaseURL }}</code>
+          </div>
+        </div>
+        <div>
+          <div class="label">鉴权方式</div>
+          <div class="text">
+            请求头 <code>X-API-Key</code><br>
+            或 <code>Authorization: Bearer &lt;api_key&gt;</code>
+          </div>
+        </div>
+      </div>
+      <div class="text" style="margin-top: 12px; color: var(--subtext);">
+        如果服务前面挂了反向代理或证书，接口可通过 <code>https</code> 协议访问。
+      </div>
+      <div class="download-row">
+        <a class="download-link" href="/openapi.json" target="_blank">查看 OpenAPI JSON</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/tron/watch-addresses</span>
+      </div>
+      <h2 class="section-title">新增 Tron 监控地址</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        支持单个地址或批量地址写入。地址必须是合法的 TRON Base58 地址，即 <code>T</code> 开头。
+        已存在的地址不会重复插入，只会在服务日志中记录为重复地址。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">请求体</div>
+          <pre><code>{
+  "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">批量请求体</div>
+          <pre><code>{
+  "addresses": [
+    "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">请求说明</h2>
+      <ul class="list">
+        <li>只支持 <code>POST</code>。</li>
+        <li>请求头必须带 <code>Content-Type: application/json</code>。</li>
+        <li>如果配置了 <code>web.api_key</code>，则必须带 API Key。</li>
+        <li>同一请求中的重复地址会自动去重。</li>
+        <li>写入成功后会立即刷新内存地址缓存。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <div class="label">成功响应</div>
+          <pre><code>{
+  "success": true,
+  "message": "ok",
+  "count": 2,
+  "addresses": [
+    "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+  ],
+  "invalid_addresses": []
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">错误响应</div>
+          <pre><code>{
+  "success": false,
+  "message": "no valid addresses",
+  "invalid_addresses": [
+    "bad-address"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">curl 示例</h2>
+      <pre><code>curl -X POST '{{ .BaseURL }}/api/tron/watch-addresses' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "addresses": [
+      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    ]
+  }'</code></pre>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/tron/delete-addresses</span>
+      </div>
+      <h2 class="section-title">删除 Tron 监控地址</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        支持单个删除或批量删除（软删除）。该接口支持 API Key 调用或后台登录态调用。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">请求体（单个地址）</div>
+          <pre><code>{
+  "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">请求体（批量地址）</div>
+          <pre><code>{
+  "addresses": [
+    "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">curl 示例</h2>
+      <pre><code>curl -X POST '{{ .BaseURL }}/api/tron/delete-addresses' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "addresses": [
+      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    ]
+  }'</code></pre>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/bsc/watch-addresses</span>
+      </div>
+      <h2 class="section-title">新增 BSC 监控地址</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        支持单个地址或批量地址写入。地址必须是合法的 BSC 地址，即 <code>0x</code> 开头的 40 位十六进制。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">请求体（单个地址）</div>
+          <pre><code>{
+  "address": "0x1111111111111111111111111111111111111111"
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">请求体（批量地址）</div>
+          <pre><code>{
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">curl 示例</h2>
+      <pre><code>curl -X POST '{{ .BaseURL }}/api/bsc/watch-addresses' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "addresses": [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222"
+    ]
+  }'</code></pre>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/bsc/delete-addresses</span>
+      </div>
+      <h2 class="section-title">删除 BSC 监控地址</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        支持单个删除或批量删除（软删除）。该接口支持 API Key 调用或后台登录态调用。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">请求体（单个地址）</div>
+          <pre><code>{
+  "address": "0x1111111111111111111111111111111111111111"
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">请求体（批量地址）</div>
+          <pre><code>{
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <div class="label">成功响应</div>
+          <pre><code>{
+  "success": true,
+  "message": "删除成功",
+  "count": 2,
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ],
+  "deleted_count": 2
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">错误响应</div>
+          <pre><code>{
+  "success": false,
+  "message": "请先选择要删除的地址"
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">curl 示例</h2>
+      <pre><code>curl -X POST '{{ .BaseURL }}/api/bsc/delete-addresses' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "addresses": [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222"
+    ]
+  }'</code></pre>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">GET</span>
+        <span class="path">/api/tron/balances</span>
+      </div>
+      <h2 class="section-title">Tron 余额列表</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        按分页列出 Tron 监控地址余额（TRX/USDT）。支持排序。
+      </div>
+      <div class="grid">
+        <div>
+          <div class="label">查询参数</div>
+          <ul class="list">
+            <li><code>address</code>：指定地址（可选，传入时返回单条记录）</li>
+            <li><code>limit</code>：每页条数（默认 20，最大 200）</li>
+            <li><code>offset</code>：偏移（默认 0）</li>
+            <li><code>sort</code>：<code>usdt_desc/usdt_asc/trx_desc/trx_asc</code>（可选）</li>
+          </ul>
+        </div>
+        <div>
+          <div class="label">curl 示例</div>
+          <pre><code>curl '{{ .BaseURL }}/api/tron/balances?limit=20&amp;offset=0&amp;sort=usdt_desc' \
+  -H 'X-API-Key: your_api_key'</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">GET</span>
+        <span class="path">/api/bsc/balances</span>
+      </div>
+      <h2 class="section-title">BSC 余额列表</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        按分页列出 BSC 监控地址余额（BNB/USDT）。支持排序。
+      </div>
+      <div class="grid">
+        <div>
+          <div class="label">查询参数</div>
+          <ul class="list">
+            <li><code>address</code>：指定地址（可选，传入时返回单条记录）</li>
+            <li><code>limit</code>：每页条数（默认 20，最大 200）</li>
+            <li><code>offset</code>：偏移（默认 0）</li>
+            <li><code>sort</code>：<code>usdt_desc/usdt_asc/bnb_desc/bnb_asc</code>（可选）</li>
+          </ul>
+        </div>
+        <div>
+          <div class="label">curl 示例</div>
+          <pre><code>curl '{{ .BaseURL }}/api/bsc/balances?limit=20&amp;offset=0&amp;sort=usdt_desc' \
+  -H 'X-API-Key: your_api_key'</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">GET</span>
+        <span class="path">/api/tron/transfers/in<br>/api/tron/transfers/out</span>
+      </div>
+      <h2 class="section-title">Tron 转入 / 转出流水查询</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        按监控地址查询转入或转出流水，支持分页与时间范围过滤。返回字段包含 <code>watch_address</code>（命中监控的地址）。
+      </div>
+      <div class="grid">
+        <div>
+          <div class="label">查询参数</div>
+          <ul class="list">
+            <li><code>watch_address</code>：监控地址（必填，Tron Base58）</li>
+            <li><code>asset_code</code>：<code>TRX</code> / <code>USDT</code>（可选）</li>
+            <li><code>start_time</code>：起始时间（毫秒时间戳或 RFC3339，可选）</li>
+            <li><code>end_time</code>：结束时间（毫秒时间戳或 RFC3339，可选）</li>
+            <li><code>limit</code>：每页条数（默认 20，最大 200）</li>
+            <li><code>offset</code>：偏移（默认 0）</li>
+          </ul>
+        </div>
+        <div>
+          <div class="label">curl 示例</div>
+          <pre><code>curl '{{ .BaseURL }}/api/tron/transfers/in?watch_address=TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&amp;asset_code=USDT&amp;start_time=2026-07-06T00:00:00%2B08:00&amp;end_time=2026-07-07T00:00:00%2B08:00&amp;limit=20&amp;offset=0' \
+  -H 'X-API-Key: your_api_key'</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">GET</span>
+        <span class="path">/api/bsc/transfers/in<br>/api/bsc/transfers/out</span>
+      </div>
+      <h2 class="section-title">BSC 转入 / 转出流水查询</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        按监控地址查询转入或转出流水，支持分页与时间范围过滤。返回字段包含 <code>watch_address</code>（命中监控的地址）。
+      </div>
+      <div class="grid">
+        <div>
+          <div class="label">查询参数</div>
+          <ul class="list">
+            <li><code>watch_address</code>：监控地址（必填，0x...）</li>
+            <li><code>asset_code</code>：<code>BNB</code> / <code>USDT</code>（可选）</li>
+            <li><code>start_time</code>：起始时间（毫秒时间戳或 RFC3339，可选）</li>
+            <li><code>end_time</code>：结束时间（毫秒时间戳或 RFC3339，可选）</li>
+            <li><code>limit</code>：每页条数（默认 20，最大 200）</li>
+            <li><code>offset</code>：偏移（默认 0）</li>
+          </ul>
+        </div>
+        <div>
+          <div class="label">curl 示例</div>
+          <pre><code>curl '{{ .BaseURL }}/api/bsc/transfers/out?watch_address=0x1111111111111111111111111111111111111111&amp;asset_code=USDT&amp;start_time=1735718400000&amp;end_time=1735804800000&amp;limit=20&amp;offset=0' \
+  -H 'X-API-Key: your_api_key'</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

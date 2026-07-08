@@ -1,0 +1,1031 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Tron Watcher API",
+    "description": "Tron + BSC 监控服务对外接口文档（同库同站点）。",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "{{ .HTTPURL }}"
+    },
+    {
+      "url": "{{ .HTTPSURL }}"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "AddWatchAddressesRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "单个 Tron 地址，T 开头"
+          },
+          "addresses": {
+            "type": "array",
+            "description": "批量 Tron 地址列表，T 开头",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AddWatchAddressesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicate_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "invalid_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeleteTronWatchAddressesRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "单个 Tron 地址，T 开头"
+          },
+          "addresses": {
+            "type": "array",
+            "description": "批量 Tron 地址列表，T 开头",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeleteTronWatchAddressesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "total_count": {
+            "type": "integer"
+          },
+          "success_count": {
+            "type": "integer"
+          },
+          "failed_count": {
+            "type": "integer"
+          },
+          "failed_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BSCAddWatchAddressesRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "单个 BSC 地址（0x...）"
+          },
+          "addresses": {
+            "type": "array",
+            "description": "批量 BSC 地址列表（0x...）",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BSCAddWatchAddressesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicate_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "invalid_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BSCDeleteAddressesRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "单个 BSC 地址（0x...）"
+          },
+          "addresses": {
+            "type": "array",
+            "description": "批量 BSC 地址列表（0x...）",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BSCDeleteAddressesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "description": "本次实际删除（软删除）数量"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "deleted_count": {
+            "type": "integer",
+            "description": "兼容字段，等同 count"
+          }
+        }
+      },
+      "BalanceRecord": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "trx": {
+            "type": "string"
+          },
+          "bnb": {
+            "type": "string"
+          },
+          "usdt": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "RFC3339 时间"
+          }
+        }
+      },
+      "ListBalancesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "total_count": {
+            "type": "integer"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BalanceRecord"
+            }
+          }
+        }
+      },
+      "TransferRecord": {
+        "type": "object",
+        "properties": {
+          "tx_hash": {
+            "type": "string"
+          },
+          "block_number": {
+            "type": "integer"
+          },
+          "block_time": {
+            "type": "integer",
+            "description": "区块时间戳（毫秒）"
+          },
+          "asset_code": {
+            "type": "string"
+          },
+          "contract_address": {
+            "type": "string"
+          },
+          "watch_address": {
+            "type": "string",
+            "description": "命中监控的地址（同一笔转账可能对不同监控地址分别产出记录）"
+          },
+          "from_address": {
+            "type": "string"
+          },
+          "to_address": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "log_index": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC3339 时间"
+          }
+        }
+      },
+      "ListTransfersResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "total_count": {
+            "type": "integer"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransferRecord"
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/watch-addresses": {
+      "post": {
+        "summary": "新增监控地址",
+        "description": "支持单个或批量新增 Tron 监控地址。写入成功后会立即刷新内存地址缓存。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddWatchAddressesRequest"
+              },
+              "examples": {
+                "single": {
+                  "summary": "单个地址",
+                  "value": {
+                    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                  }
+                },
+                "batch": {
+                  "summary": "批量地址",
+                  "value": {
+                    "addresses": [
+                      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+                      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "写入成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddWatchAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求体错误或没有有效地址"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/tron/watch-addresses": {
+      "post": {
+        "summary": "新增 Tron 监控地址",
+        "description": "支持单个或批量新增 Tron 监控地址。写入成功后会立即刷新内存地址缓存。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddWatchAddressesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "写入成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddWatchAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求体错误或没有有效地址"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/tron/delete-addresses": {
+      "post": {
+        "summary": "删除 Tron 监控地址",
+        "description": "支持单个/批量删除 Tron 监控地址（软删除）。支持 API Key 调用或后台登录态调用。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteTronWatchAddressesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteTronWatchAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求体错误或没有有效地址"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/bsc/watch-addresses": {
+      "post": {
+        "summary": "新增 BSC 监控地址",
+        "description": "支持单个或批量新增 BSC 监控地址。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BSCAddWatchAddressesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "写入成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BSCAddWatchAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求体错误或没有有效地址"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/bsc/delete-addresses": {
+      "post": {
+        "summary": "删除 BSC 监控地址",
+        "description": "支持单个/批量删除 BSC 监控地址（软删除）。支持 API Key 调用或后台登录态调用。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BSCDeleteAddressesRequest"
+              },
+              "examples": {
+                "single": {
+                  "summary": "单个地址",
+                  "value": {
+                    "address": "0x1111111111111111111111111111111111111111"
+                  }
+                },
+                "batch": {
+                  "summary": "批量地址",
+                  "value": {
+                    "addresses": [
+                      "0x1111111111111111111111111111111111111111",
+                      "0x2222222222222222222222222222222222222222"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "删除成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BSCDeleteAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求体错误或没有有效地址"
+          },
+          "401": {
+            "description": "未登录"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/tron/balances": {
+      "get": {
+        "summary": "Tron 余额列表",
+        "description": "按分页列出 Tron 监控地址余额（TRX/USDT）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "按地址查询（可选，传入时返回单条记录）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "usdt_desc/usdt_asc/trx_desc/trx_asc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBalancesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bsc/balances": {
+      "get": {
+        "summary": "BSC 余额列表",
+        "description": "按分页列出 BSC 监控地址余额（BNB/USDT）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "按地址查询（可选，传入时返回单条记录）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "usdt_desc/usdt_asc/bnb_desc/bnb_asc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBalancesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tron/transfers/in": {
+      "get": {
+        "summary": "Tron 转入流水",
+        "description": "查询指定监控地址的转入流水（来自 transfer_in_records）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "watch_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "asset_code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "TRX/USDT（可选）"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "起始时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "结束时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransfersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tron/transfers/out": {
+      "get": {
+        "summary": "Tron 转出流水",
+        "description": "查询指定监控地址的转出流水（来自 transfer_out_records）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "watch_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "asset_code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "TRX/USDT（可选）"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "起始时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "结束时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransfersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bsc/transfers/in": {
+      "get": {
+        "summary": "BSC 转入流水",
+        "description": "查询指定监控地址的转入流水（来自 bsc_transfer_in_records）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "watch_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "asset_code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "BNB/USDT（可选）"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "起始时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "结束时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransfersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bsc/transfers/out": {
+      "get": {
+        "summary": "BSC 转出流水",
+        "description": "查询指定监控地址的转出流水（来自 bsc_transfer_out_records）。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "watch_address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "asset_code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "BNB/USDT（可选）"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "起始时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "结束时间（毫秒时间戳或 RFC3339，可选）"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransfersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "summary": "查看内置 API 文档页面",
+        "description": "返回 Swagger 风格的内置文档页面。",
+        "responses": {
+          "200": {
+            "description": "文档页面"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "获取 OpenAPI 文档",
+        "description": "返回机器可读的 OpenAPI JSON。",
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON"
+          }
+        }
+      }
+    }
+  }
+}

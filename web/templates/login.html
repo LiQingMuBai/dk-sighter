@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>登录 - Tron 监控后台</title>
+  <style>
+    :root {
+      --bg: radial-gradient(circle at top, #1e1633 0%, #090b14 42%, #05070d 100%);
+      --card: rgba(10, 14, 27, 0.82);
+      --text: #f5f7ff;
+      --subtext: #98a5c4;
+      --line: rgba(100, 116, 139, 0.32);
+      --blue: linear-gradient(90deg, #ff2ea6 0%, #17f1ff 100%);
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 14px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 16px;
+      padding: 18px 18px 14px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, rgba(20, 24, 40, 0.92), rgba(8, 12, 24, 0.84));
+      border: 1px solid rgba(105, 120, 255, 0.18);
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 24px rgba(23, 241, 255, 0.08);
+    }
+
+    .brand-logo {
+      width: 72px;
+      height: 72px;
+      display: block;
+      margin: 0 auto 12px;
+      border-radius: 20px;
+      object-fit: cover;
+      box-shadow: 0 0 0 1px rgba(255, 0, 153, 0.25), 0 0 24px rgba(0, 245, 255, 0.3), 0 0 42px rgba(255, 0, 153, 0.18), 0 16px 36px rgba(0, 0, 0, 0.28);
+      background: #0b1120;
+    }
+
+    .brand-title {
+      margin: 0 0 8px;
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-shadow: -1px 0 rgba(255, 46, 166, 0.72), 1px 0 rgba(23, 241, 255, 0.72), 0 0 18px rgba(23, 241, 255, 0.18);
+    }
+
+    .brand-subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(100, 116, 139, 0.18);
+    }
+
+    .group {
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 16px;
+      background: rgba(7, 10, 20, 0.9);
+      color: var(--text);
+      outline: none;
+    }
+
+    input:focus {
+      border-color: rgba(23, 241, 255, 0.45);
+      box-shadow: 0 0 0 4px rgba(23, 241, 255, 0.08);
+    }
+
+    .captcha-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(7, 10, 20, 0.72);
+      border: 1px solid rgba(100, 116, 139, 0.22);
+      margin-bottom: 8px;
+    }
+
+    .captcha-label {
+      color: var(--subtext);
+      font-size: 13px;
+    }
+
+    .captcha-value {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .error {
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      background: #fef2f2;
+      color: #b91c1c;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .submit-btn {
+      width: 100%;
+      border: 0;
+      border-radius: 14px;
+      background: var(--blue);
+      color: #fff;
+      padding: 14px 16px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 0 18px rgba(255, 46, 166, 0.18);
+    }
+
+    .tips {
+      margin-top: 14px;
+      color: var(--subtext);
+      font-size: 12px;
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        align-items: stretch;
+      }
+
+      .shell {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .brand-title {
+        font-size: 26px;
+      }
+
+      .card {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="brand">
+      <img
+        class="brand-logo"
+        src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=dark%20cyberpunk%20nightclub%20logo%2C%20glowing%20wireframe%20hexagon%20blockchain%20symbol%2C%20neon%20magenta%20and%20cyan%20glitch%20effect%2C%20black%20background%2C%20sharp%20futuristic%20lines%2C%20punk%20tech%20branding%2C%20clean%20centered%20icon%2C%20no%20text%2C%20bold%20high%20contrast&image_size=square_hd"
+        alt="TronSight Logo">
+      <h1 class="brand-title">Tron 监控后台</h1>
+      <p class="brand-subtitle">请输入账号、密码和验证码后登录</p>
+    </div>
+
+    <div class="card">
+      {{ if .Error }}
+      <div class="error">{{ .Error }}</div>
+      {{ end }}
+
+      <form method="post" action="/login">
+        <input name="captcha_token" type="hidden" value="{{ .CaptchaToken }}">
+
+        <div class="group">
+          <label for="username">账号</label>
+          <input id="username" name="username" type="text" autocomplete="username" required>
+        </div>
+
+        <div class="group">
+          <label for="password">密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+
+        <div class="group">
+          <label for="captcha">验证码</label>
+          <div class="captcha-box">
+            <div class="captcha-label">请计算</div>
+            <div class="captcha-value">{{ .CaptchaQuestion }}</div>
+          </div>
+          <input id="captcha" name="captcha" type="text" inputmode="numeric" autocomplete="off" required>
+        </div>
+
+        <button class="submit-btn" type="submit">登录</button>
+      </form>
+
+      <div class="tips">后台为响应式 H5 布局，支持手机浏览器访问。</div>
+    </div>
+  </div>
+</body>
+</html>
