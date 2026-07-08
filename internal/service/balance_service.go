@@ -208,6 +208,77 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 	}
 }
 
+func (s *BalanceService) RefreshAllActivatedThrottled(ctx context.Context, blockNumber int64, perCallDelay time.Duration) {
+	addresses := s.cache.List()
+	for _, addressBase58 := range addresses {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		addressHex, err := tron.Base58ToHex(addressBase58)
+		if err != nil {
+			s.logger.Printf("convert address to hex failed: %s err=%v", addressBase58, err)
+			continue
+		}
+
+		active, trxBalance, err := s.tronClient.GetAccountState(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh tron account state failed: %s err=%v", addressBase58, err)
+			continue
+		}
+		if !active {
+			s.logger.Printf("skip hourly balance refresh for inactive tron address: address=%s block=%d", addressBase58, blockNumber)
+			if perCallDelay > 0 {
+				timer := time.NewTimer(perCallDelay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+			continue
+		}
+
+		if err := s.repo.UpsertBalance(ctx, addressBase58, "TRX", trxBalance, blockNumber); err != nil {
+			s.logger.Printf("save trx balance failed: %s err=%v", addressBase58, err)
+			continue
+		}
+		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", addressBase58, trxBalance.String(), blockNumber)
+		if perCallDelay > 0 {
+			timer := time.NewTimer(perCallDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+
+		usdtBalance, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh usdt balance failed: %s err=%v", addressBase58, err)
+			continue
+		}
+		if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
+			s.logger.Printf("save usdt balance failed: %s err=%v", addressBase58, err)
+			continue
+		}
+		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+		if perCallDelay > 0 {
+			timer := time.NewTimer(perCallDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}
+}
+
 func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTask, blockNumber int64) {
 	switch task.asset {
 	case "TRX":

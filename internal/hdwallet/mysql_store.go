@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -368,6 +369,48 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 	}
 }
 
+func (s *Service) refreshScheduledTronAddressFromDBWithContext(ctx context.Context, address string) error {
+	if s.tronClient == nil {
+		return fmt.Errorf("tron client not configured")
+	}
+	row, exists, err := s.repo.GetHDTronDashboardRowByAddress(context.Background(), s.hdSource, address)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("address not found")
+	}
+	addressHex, err := tron.Base58ToHex(row.Address)
+	if err != nil {
+		return err
+	}
+	active, trxBalance, err := s.tronClient.GetAccountState(ctx, addressHex)
+	if err != nil {
+		return fmt.Errorf("读取 tron 地址余额失败: %w", err)
+	}
+	if err := waitForBalanceThrottle(ctx); err != nil {
+		return err
+	}
+	if !active {
+		log.Printf("skip tron scheduled sync for inactive address: %s", row.Address)
+		return nil
+	}
+	if err := s.repo.UpsertBalance(ctx, row.Address, "TRX", trxBalance, 0); err != nil {
+		return err
+	}
+	value, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
+	if err != nil {
+		return fmt.Errorf("读取 tron 地址 usdt 余额失败: %w", err)
+	}
+	if err := waitForBalanceThrottle(ctx); err != nil {
+		return err
+	}
+	if err := s.repo.UpsertBalance(ctx, row.Address, "USDT", value, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) error {
 	cfg, err := s.loadConfig()
 	if err != nil {
@@ -395,7 +438,7 @@ func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) erro
 			return err
 		}
 		for _, row := range rows {
-			if _, err := s.refreshAddressFromDBWithContext(ctx, "tron", row.Address); err != nil {
+			if err := s.refreshScheduledTronAddressFromDBWithContext(ctx, row.Address); err != nil {
 				return err
 			}
 		}

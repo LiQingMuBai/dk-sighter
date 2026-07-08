@@ -31,7 +31,7 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 				loggerTron.Printf("hourly refresh failed: load solid block err=%v", err)
 			} else {
 				loggerTron.Printf("hourly refresh start: solid=%d throttle=%s", solid, perCallDelay)
-				tronBalances.RefreshAllThrottled(runCtx, solid, perCallDelay)
+				tronBalances.RefreshAllActivatedThrottled(runCtx, solid, perCallDelay)
 				loggerTron.Printf("hourly refresh done: solid=%d", solid)
 			}
 		} else {
