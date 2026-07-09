@@ -2,14 +2,20 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"tron_watcher/internal/app"
 )
+
+var buildBranch = "unknown"
+var buildCommit = "unknown"
 
 func main() {
 	log.SetOutput(os.Stdout)
@@ -26,6 +32,7 @@ func main() {
 		cfgPath = defaultConfigPath()
 	}
 
+	log.Printf("startup info: branch=%s commit=%s", resolveBranch(), resolveCommit())
 	log.Printf("starting tron watcher, config=%s", cfgPath)
 
 	application, err := app.New(cfgPath)
@@ -39,6 +46,44 @@ func main() {
 	if err := application.Run(ctx); err != nil {
 		log.Fatalf("run app failed: %v", err)
 	}
+}
+
+func resolveBranch() string {
+	value := strings.TrimSpace(buildBranch)
+	if value != "" && !strings.EqualFold(value, "unknown") {
+		return value
+	}
+	value = strings.TrimSpace(runGit("rev-parse", "--abbrev-ref", "HEAD"))
+	if value != "" {
+		return value
+	}
+	return "unknown"
+}
+
+func resolveCommit() string {
+	value := strings.TrimSpace(buildCommit)
+	if value != "" && !strings.EqualFold(value, "unknown") {
+		return value
+	}
+	value = strings.TrimSpace(runGit("rev-parse", "--short", "HEAD"))
+	if value != "" {
+		return value
+	}
+	return "unknown"
+}
+
+func runGit(args ...string) string {
+	if _, err := os.Stat(".git"); err != nil {
+		return ""
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Stdout = nil
+	cmd.Stderr = io.Discard
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 func defaultConfigPath() string {
