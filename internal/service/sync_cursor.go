@@ -2,7 +2,7 @@ package service
 
 import "context"
 
-const maxAllowedSyncLagBlocks int64 = 20
+const maxAllowedSyncLagBlocks int64 = 50
 
 type loadLastBlockFunc func(context.Context) (int64, bool, error)
 
