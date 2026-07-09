@@ -176,11 +176,21 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 			continue
 		}
 
-		s.refreshBalance(ctx, tronBalanceTask{
-			addressBase58: addressBase58,
-			addressHex:    addressHex,
-			asset:         "TRX",
-		}, blockNumber)
+		active, trxBalance, err := s.tronClient.GetAccountState(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh tron account state failed: %s err=%v", addressBase58, err)
+			continue
+		}
+		if !active {
+			s.logger.Printf("skip hourly balance refresh for inactive tron address: address=%s block=%d", addressBase58, blockNumber)
+			continue
+		}
+
+		if err := s.repo.UpsertBalance(ctx, addressBase58, "TRX", trxBalance, blockNumber); err != nil {
+			s.logger.Printf("save trx balance failed: %s err=%v", addressBase58, err)
+		} else {
+			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", addressBase58, trxBalance.String(), blockNumber)
+		}
 		if perCallDelay > 0 {
 			timer := time.NewTimer(perCallDelay)
 			select {
@@ -191,11 +201,14 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 			}
 		}
 
-		s.refreshBalance(ctx, tronBalanceTask{
-			addressBase58: addressBase58,
-			addressHex:    addressHex,
-			asset:         "USDT",
-		}, blockNumber)
+		usdtBalance, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh usdt balance failed: %s err=%v", addressBase58, err)
+		} else if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
+			s.logger.Printf("save usdt balance failed: %s err=%v", addressBase58, err)
+		} else {
+			s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+		}
 		if perCallDelay > 0 {
 			timer := time.NewTimer(perCallDelay)
 			select {
