@@ -1023,8 +1023,6 @@
             <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
           </select>
         </form>
-        <button class="btn" type="button" onclick="handleBatchAction('发能一次')">批量发能一次</button>
-        <button class="btn" type="button" onclick="handleBatchAction('发能两次')">批量发能两次</button>
         <button class="btn" type="button" onclick="handleBatchDelete()">批量删除地址</button>
       </div>
     </div>
@@ -1055,9 +1053,6 @@
               <td class="num">{{ .LastUpdatedAt }}</td>
               <td>
                 <div class="actions">
-                  <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
-                  <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
-                  <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
                   <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
                 </div>
               </td>
@@ -1093,9 +1088,6 @@
           </div>
         </div>
         <div class="mobile-actions">
-          <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
-          <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
-          <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
           <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
         </div>
       </div>

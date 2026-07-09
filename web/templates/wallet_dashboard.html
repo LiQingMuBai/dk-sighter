@@ -517,7 +517,6 @@
         <div class="form-actions" style="margin-top: 16px;">
           <button id="saveBtn" class="primary-btn" type="button">保存助记词</button>
           <button id="syncBtn" class="ghost-btn" type="button">生成 200 个地址</button>
-          <button id="sweepBtn" class="ghost-btn" type="button">一键归集当前链 USDT</button>
         </div>
 
         <div id="statusBox" class="status-box" style="margin-top: 16px;">尚未开始任务</div>
@@ -871,15 +870,9 @@
         tableBody.innerHTML = items.map((item) => `
           ${(() => {
             const disableRefresh = !!state.refreshingAddress || !!state.energyActionKey
-            const onceKey = buildEnergyActionKey(item.address, "发能一次")
-            const twiceKey = buildEnergyActionKey(item.address, "发能两次")
             const actions = [
               `<button class="row-action-btn" type="button" data-refresh-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.refreshingAddress === item.address ? "更新中..." : "更新余额"}</button>`
             ]
-            if (state.chain === "tron") {
-              actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能一次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === onceKey ? "发能中..." : "发能一次"}</button>`)
-              actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能两次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === twiceKey ? "发能中..." : "发能两次"}</button>`)
-            }
             return `
           <tr>
             <td>${item.index}</td>
@@ -1055,9 +1048,12 @@
       startSync().catch((err) => showToast(err.message, true))
     })
 
-    document.getElementById("sweepBtn").addEventListener("click", () => {
-      openSweepModal()
-    })
+    const sweepBtn = document.getElementById("sweepBtn")
+    if (sweepBtn) {
+      sweepBtn.addEventListener("click", () => {
+        openSweepModal()
+      })
+    }
 
     tableBody.addEventListener("click", (event) => {
       const refreshButton = event.target.closest("[data-refresh-address]")
