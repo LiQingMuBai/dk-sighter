@@ -297,7 +297,7 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 tron 地址余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		if err := s.repo.UpsertBalance(ctx, row.Address, "TRX", trxBalance, 0); err != nil {
@@ -309,7 +309,7 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 			if err != nil {
 				return AddressRecord{}, fmt.Errorf("读取 tron 地址 usdt 余额失败: %w", err)
 			}
-			if err := waitForBalanceThrottle(ctx); err != nil {
+			if err := s.waitForBalanceThrottle(ctx); err != nil {
 				return AddressRecord{}, err
 			}
 			if err := s.repo.UpsertBalance(ctx, row.Address, "USDT", value, 0); err != nil {
@@ -340,7 +340,7 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 bnb 余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		if err := repository.UpsertBSCBalance(ctx, s.repo, row.Address, "BNB", bnbBalance.StringFixed(6)); err != nil {
@@ -350,7 +350,7 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 usdt 余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		if err := repository.UpsertBSCBalance(ctx, s.repo, row.Address, "USDT", usdtBalance.StringFixed(6)); err != nil {
@@ -388,7 +388,7 @@ func (s *Service) refreshScheduledTronAddressFromDBWithContext(ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("读取 tron 地址余额失败: %w", err)
 	}
-	if err := waitForBalanceThrottle(ctx); err != nil {
+	if err := s.waitForBalanceThrottle(ctx); err != nil {
 		return err
 	}
 	if !active {
@@ -402,7 +402,7 @@ func (s *Service) refreshScheduledTronAddressFromDBWithContext(ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("读取 tron 地址 usdt 余额失败: %w", err)
 	}
-	if err := waitForBalanceThrottle(ctx); err != nil {
+	if err := s.waitForBalanceThrottle(ctx); err != nil {
 		return err
 	}
 	if err := s.repo.UpsertBalance(ctx, row.Address, "USDT", value, 0); err != nil {

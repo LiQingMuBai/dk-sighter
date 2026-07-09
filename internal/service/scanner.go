@@ -14,37 +14,41 @@ import (
 	"tron_watcher/internal/tron"
 )
 
-const syncKey = "tron_solid_scanner"
+const tronSolidSyncKey = "tron_solid_scanner"
+const tronHeadSyncKey = "tron_head_scanner"
 const tronStateWorkers = 2
 
 type Scanner struct {
-	tronClient *tron.Client
-	repo       *repository.DB
-	cache      *AddressCache
-	balances   *BalanceService
-	notifier   TransferNotifier
-	startBlock int64
-	txWorkers  int
-	logger     *log.Logger
+	tronClient  *tron.Client
+	repo        *repository.DB
+	cache       *AddressCache
+	balances    *BalanceService
+	notifier    TransferNotifier
+	startBlock  int64
+	txWorkers   int
+	blockSource string
+	logger      *log.Logger
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
 }
 
-func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int) *Scanner {
+func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, blockSource string) *Scanner {
 	if txWorkers <= 0 {
 		txWorkers = 1
 	}
+	source := normalizeTronBlockSource(blockSource)
 	return &Scanner{
-		tronClient: tronClient,
-		repo:       repo,
-		cache:      cache,
-		balances:   balances,
-		notifier:   notifier,
-		startBlock: startBlock,
-		txWorkers:  txWorkers,
-		logger:     tronLogger(),
-		triggerCh:  make(chan struct{}, 1),
+		tronClient:  tronClient,
+		repo:        repo,
+		cache:       cache,
+		balances:    balances,
+		notifier:    notifier,
+		startBlock:  startBlock,
+		txWorkers:   txWorkers,
+		blockSource: source,
+		logger:      tronLogger(),
+		triggerCh:   make(chan struct{}, 1),
 	}
 }
 
@@ -102,6 +106,9 @@ func (s *Scanner) scan(ctx context.Context) error {
 		return err
 	}
 
+	targetBlock := s.selectTargetBlock(headBlock, latestSolid)
+	targetLabel := s.targetBlockLabel()
+	syncKey := s.syncKey()
 	lastBlock, exists, err := s.repo.GetLastBlock(ctx, syncKey)
 	if err != nil {
 		return err
@@ -112,41 +119,41 @@ func (s *Scanner) scan(ctx context.Context) error {
 		solidLag = 0
 	}
 	if exists {
-		scanLag := latestSolid - lastBlock
+		scanLag := targetBlock - lastBlock
 		if scanLag < 0 {
 			scanLag = 0
 		}
-		s.logger.Printf("scanner state: head=%d solid=%d solid_lag=%d db_last=%d scan_lag=%d", headBlock, latestSolid, solidLag, lastBlock, scanLag)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d target=%d db_last=%d scan_lag=%d", s.blockSource, headBlock, latestSolid, solidLag, targetBlock, lastBlock, scanLag)
 	} else {
-		s.logger.Printf("scanner state: head=%d solid=%d solid_lag=%d db_last=<none>", headBlock, latestSolid, solidLag)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d target=%d db_last=<none>", s.blockSource, headBlock, latestSolid, solidLag, targetBlock)
 	}
 	if !exists {
-		initialBlock := latestSolid
+		initialBlock := targetBlock
 		if s.startBlock > 0 {
 			initialBlock = s.startBlock
-			if initialBlock > latestSolid {
-				initialBlock = latestSolid
+			if initialBlock > targetBlock {
+				initialBlock = targetBlock
 			}
 		}
 		if err := s.repo.SaveLastBlock(ctx, syncKey, initialBlock); err != nil {
 			return err
 		}
-		s.logger.Printf("scanner initialized: start_block=%d latest_solid=%d", initialBlock, latestSolid)
+		s.logger.Printf("scanner initialized: source=%s start_block=%d latest_%s=%d", s.blockSource, initialBlock, targetLabel, targetBlock)
 		return nil
 	}
-	if shouldSkipToLatestBlock(lastBlock, latestSolid) {
-		s.logger.Printf("scanner lag too large, skip to latest solid block: db_last=%d latest_solid=%d lag=%d threshold=%d", lastBlock, latestSolid, latestSolid-lastBlock, maxAllowedSyncLagBlocks)
-		if err := s.repo.SaveLastBlock(ctx, syncKey, latestSolid); err != nil {
+	if shouldSkipToLatestBlock(lastBlock, targetBlock) {
+		s.logger.Printf("scanner lag too large, skip to latest %s block: source=%s db_last=%d latest_%s=%d lag=%d threshold=%d", targetLabel, s.blockSource, lastBlock, targetLabel, targetBlock, targetBlock-lastBlock, maxAllowedSyncLagBlocks)
+		if err := s.repo.SaveLastBlock(ctx, syncKey, targetBlock); err != nil {
 			return err
 		}
 		return nil
 	}
-	if lastBlock < latestSolid {
-		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, latestSolid)
+	if lastBlock < targetBlock {
+		s.logger.Printf("scanner catching up: source=%s from=%d to=%d", s.blockSource, lastBlock+1, targetBlock)
 	}
 
 	currentBlock := lastBlock
-	for currentBlock < latestSolid {
+	for currentBlock < targetBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, syncKey)
 		})
@@ -154,16 +161,16 @@ func (s *Scanner) scan(ctx context.Context) error {
 			return err
 		}
 		if changed {
-			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
+			s.logger.Printf("scanner sync cursor updated from mysql: source=%s old=%d new=%d", s.blockSource, currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, latestSolid) {
-				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest solid block: db_last=%d latest_solid=%d lag=%d threshold=%d", currentBlock, latestSolid, latestSolid-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, syncKey, latestSolid); err != nil {
+			if shouldSkipToLatestBlock(currentBlock, targetBlock) {
+				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest %s block: source=%s db_last=%d latest_%s=%d lag=%d threshold=%d", targetLabel, s.blockSource, currentBlock, targetLabel, targetBlock, targetBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, syncKey, targetBlock); err != nil {
 					return err
 				}
 				break
 			}
-			if currentBlock >= latestSolid {
+			if currentBlock >= targetBlock {
 				break
 			}
 		}
@@ -179,6 +186,36 @@ func (s *Scanner) scan(ctx context.Context) error {
 		currentBlock = blockNum
 	}
 	return nil
+}
+
+func normalizeTronBlockSource(value string) string {
+	switch value {
+	case "head":
+		return "head"
+	default:
+		return "solid"
+	}
+}
+
+func (s *Scanner) syncKey() string {
+	if s != nil && s.blockSource == "head" {
+		return tronHeadSyncKey
+	}
+	return tronSolidSyncKey
+}
+
+func (s *Scanner) targetBlockLabel() string {
+	if s != nil && s.blockSource == "head" {
+		return "head"
+	}
+	return "solid"
+}
+
+func (s *Scanner) selectTargetBlock(headBlock, latestSolid int64) int64 {
+	if s != nil && s.blockSource == "head" {
+		return headBlock
+	}
+	return latestSolid
 }
 
 func (s *Scanner) scanBlock(ctx context.Context, blockNum int64) error {

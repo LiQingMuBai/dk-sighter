@@ -26,7 +26,7 @@ const (
 	transferTopic = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 	// QuickNode limits are enforced per account/provider. Tron and BSC use
 	// separate accounts here, so each client can maintain its own ceiling.
-	minRequestInterval = 21 * time.Millisecond
+	defaultMinRequestInterval = 10 * time.Millisecond
 )
 
 type Client struct {
@@ -37,6 +37,7 @@ type Client struct {
 	rpcID        atomic.Int64
 	rateMu       sync.Mutex
 	nextRequest  time.Time
+	minInterval  time.Duration
 }
 
 type rpcErrorResponse struct {
@@ -125,7 +126,17 @@ func NewClient(httpURL, wssURL, usdtContract string) *Client {
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
+		minInterval: defaultMinRequestInterval,
 	}
+}
+
+func (c *Client) SetMinRequestInterval(interval time.Duration) {
+	if c == nil || interval <= 0 {
+		return
+	}
+	c.rateMu.Lock()
+	c.minInterval = interval
+	c.rateMu.Unlock()
 }
 
 func (c *Client) GetSolidBlockNumber(ctx context.Context) (int64, error) {
@@ -476,7 +487,11 @@ func (c *Client) waitTurn(ctx context.Context) error {
 	if c.nextRequest.After(waitUntil) {
 		waitUntil = c.nextRequest
 	}
-	c.nextRequest = waitUntil.Add(minRequestInterval)
+	interval := c.minInterval
+	if interval <= 0 {
+		interval = defaultMinRequestInterval
+	}
+	c.nextRequest = waitUntil.Add(interval)
 	c.rateMu.Unlock()
 
 	if waitUntil.After(now) {

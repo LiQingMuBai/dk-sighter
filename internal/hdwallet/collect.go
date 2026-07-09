@@ -253,7 +253,7 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 		}
 		energyStatusMessage = "地址能量不足，已自动发能一次"
 		s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s %s", candidate.Address, energyStatusMessage))
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return "", "", err
 		}
 		energyTimer := time.NewTimer(3 * time.Second)

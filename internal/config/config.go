@@ -37,9 +37,10 @@ type MySQLConfig struct {
 }
 
 type QuickNodeConfig struct {
-	HTTPURL string `yaml:"http_url"`
-	WSSURL  string `yaml:"wss_url"`
-	USDT    string `yaml:"usdt_contract"`
+	HTTPURL              string `yaml:"http_url"`
+	WSSURL               string `yaml:"wss_url"`
+	USDT                 string `yaml:"usdt_contract"`
+	MinRequestIntervalMS int    `yaml:"min_request_interval_ms"`
 }
 
 type WebConfig struct {
@@ -86,13 +87,16 @@ type CatfeeConfig struct {
 }
 
 type WatcherConfig struct {
-	AddressReloadIntervalSeconds int   `yaml:"address_reload_interval_seconds"`
-	BlockPollIntervalSeconds     int   `yaml:"block_poll_interval_seconds"`
-	Confirmations                int   `yaml:"confirmations"`
-	StartBlock                   int64 `yaml:"start_block"`
-	TXWorkers                    int   `yaml:"tx_workers"`
-	DisableBlockSync             bool  `yaml:"disable_block_sync"`
-	DisableScheduledBalanceSync  bool  `yaml:"disable_scheduled_balance_sync"`
+	AddressReloadIntervalSeconds int    `yaml:"address_reload_interval_seconds"`
+	BlockPollIntervalSeconds     int    `yaml:"block_poll_interval_seconds"`
+	Confirmations                int    `yaml:"confirmations"`
+	StartBlock                   int64  `yaml:"start_block"`
+	TXWorkers                    int    `yaml:"tx_workers"`
+	TronBlockSource              string `yaml:"tron_block_source"`
+	BalanceRequestDelayMS        int    `yaml:"balance_request_delay_ms"`
+	ScheduledRefreshDelayMS      int    `yaml:"scheduled_refresh_delay_ms"`
+	DisableBlockSync             bool   `yaml:"disable_block_sync"`
+	DisableScheduledBalanceSync  bool   `yaml:"disable_scheduled_balance_sync"`
 }
 
 type BSCConfig struct {
@@ -102,6 +106,8 @@ type BSCConfig struct {
 	StartBlock                  int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds    int    `yaml:"block_poll_interval_seconds"`
 	Confirmations               int    `yaml:"confirmations"`
+	MinRequestIntervalMS        int    `yaml:"min_request_interval_ms"`
+	ScheduledRefreshDelayMS     int    `yaml:"scheduled_refresh_delay_ms"`
 	DisableBlockSync            bool   `yaml:"disable_block_sync"`
 	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
 }
@@ -152,6 +158,18 @@ func (c *Config) setDefaults() {
 	if c.Watcher.TXWorkers == 0 {
 		c.Watcher.TXWorkers = 8
 	}
+	if c.Watcher.TronBlockSource == "" {
+		c.Watcher.TronBlockSource = "solid"
+	}
+	if c.QuickNode.MinRequestIntervalMS == 0 {
+		c.QuickNode.MinRequestIntervalMS = 10
+	}
+	if c.Watcher.BalanceRequestDelayMS == 0 {
+		c.Watcher.BalanceRequestDelayMS = 10
+	}
+	if c.Watcher.ScheduledRefreshDelayMS == 0 {
+		c.Watcher.ScheduledRefreshDelayMS = 10
+	}
 	if c.Web.Listen == "" {
 		c.Web.Listen = ":8080"
 	}
@@ -185,6 +203,12 @@ func (c *Config) setDefaults() {
 	if c.BSC.BlockPollIntervalSeconds == 0 {
 		c.BSC.BlockPollIntervalSeconds = 3
 	}
+	if c.BSC.MinRequestIntervalMS == 0 {
+		c.BSC.MinRequestIntervalMS = 10
+	}
+	if c.BSC.ScheduledRefreshDelayMS == 0 {
+		c.BSC.ScheduledRefreshDelayMS = 10
+	}
 }
 
 func (c *Config) ConnMaxLifetime() time.Duration {
@@ -201,4 +225,24 @@ func (c *Config) BlockPollInterval() time.Duration {
 
 func (c *Config) BSCBlockPollInterval() time.Duration {
 	return time.Duration(c.BSC.BlockPollIntervalSeconds) * time.Second
+}
+
+func (c *Config) QuickNodeMinRequestInterval() time.Duration {
+	return time.Duration(c.QuickNode.MinRequestIntervalMS) * time.Millisecond
+}
+
+func (c *Config) BSCMinRequestInterval() time.Duration {
+	return time.Duration(c.BSC.MinRequestIntervalMS) * time.Millisecond
+}
+
+func (c *Config) HDBalanceRequestDelay() time.Duration {
+	return time.Duration(c.Watcher.BalanceRequestDelayMS) * time.Millisecond
+}
+
+func (c *Config) TronScheduledRefreshDelay() time.Duration {
+	return time.Duration(c.Watcher.ScheduledRefreshDelayMS) * time.Millisecond
+}
+
+func (c *Config) BSCScheduledRefreshDelay() time.Duration {
+	return time.Duration(c.BSC.ScheduledRefreshDelayMS) * time.Millisecond
 }

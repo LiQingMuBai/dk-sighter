@@ -13,6 +13,7 @@ quicknode:
   http_url: ""
   wss_url: ""
   usdt_contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+  min_request_interval_ms: 10
 
 web:
   listen: ":8080"
@@ -57,6 +58,9 @@ watcher:
   confirmations: 0
   start_block: 0
   tx_workers: 8
+  tron_block_source: "solid"
+  balance_request_delay_ms: 10
+  scheduled_refresh_delay_ms: 10
   disable_block_sync: false
   disable_scheduled_balance_sync: false
 
@@ -67,5 +71,7 @@ bsc:
   start_block: 0
   block_poll_interval_seconds: 3
   confirmations: 0
+  min_request_interval_ms: 10
+  scheduled_refresh_delay_ms: 10
   disable_block_sync: false
   disable_scheduled_balance_sync: false

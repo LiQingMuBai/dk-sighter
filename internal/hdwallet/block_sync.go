@@ -313,7 +313,7 @@ func (s *Service) refreshTronTouchedBalances(ctx context.Context, file *ChainFil
 		if err != nil {
 			return fmt.Errorf("读取 tron 地址 %s trx 余额失败: %w", record.Address, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 		usdtBalance := decimal.Zero
@@ -322,7 +322,7 @@ func (s *Service) refreshTronTouchedBalances(ctx context.Context, file *ChainFil
 			if err != nil {
 				return fmt.Errorf("读取 tron 地址 %s usdt 余额失败: %w", record.Address, err)
 			}
-			if err := waitForBalanceThrottle(ctx); err != nil {
+			if err := s.waitForBalanceThrottle(ctx); err != nil {
 				return err
 			}
 		}
@@ -346,14 +346,14 @@ func (s *Service) refreshBSCTouchedBalances(ctx context.Context, file *ChainFile
 		if err != nil {
 			return fmt.Errorf("读取 bsc 地址 %s bnb 余额失败: %w", record.Address, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 		usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, record.Address)
 		if err != nil {
 			return fmt.Errorf("读取 bsc 地址 %s usdt 余额失败: %w", record.Address, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 		record.BNBBalance = bnbBalance.StringFixed(6)

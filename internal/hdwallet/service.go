@@ -28,11 +28,11 @@ import (
 )
 
 const (
-	defaultPageSize             = 50
-	maxPageSize                 = 200
-	hdWalletGenerateBatchSize   = 200
-	encryptedPrefix             = "enc:v1:"
-	hdWalletBalanceRequestDelay = 30 * time.Millisecond
+	defaultPageSize            = 50
+	maxPageSize                = 200
+	hdWalletGenerateBatchSize  = 200
+	encryptedPrefix            = "enc:v1:"
+	defaultBalanceRequestDelay = 10 * time.Millisecond
 )
 
 type AddressRecord struct {
@@ -127,6 +127,7 @@ type Service struct {
 	bscSyncRunning          bool
 	tronLastScheduledSyncAt string
 	bscLastScheduledSyncAt  string
+	balanceRequestDelay     time.Duration
 }
 
 func NewService(dataDir string, count int, tronClient *tron.Client, bscClient *bsc.Client) *Service {
@@ -137,12 +138,20 @@ func NewService(dataDir string, count int, tronClient *tron.Client, bscClient *b
 		count = 10000
 	}
 	return &Service{
-		dataDir:    dataDir,
-		count:      count,
-		tronClient: tronClient,
-		bscClient:  bscClient,
-		hdSource:   repository.HDWalletSource,
+		dataDir:             dataDir,
+		count:               count,
+		tronClient:          tronClient,
+		bscClient:           bscClient,
+		hdSource:            repository.HDWalletSource,
+		balanceRequestDelay: defaultBalanceRequestDelay,
 	}
+}
+
+func (s *Service) ConfigureBalanceRequestDelay(delay time.Duration) {
+	if s == nil || delay <= 0 {
+		return
+	}
+	s.balanceRequestDelay = delay
 }
 
 func (s *Service) ConfigureEnergyProviders(providers map[string]infrastructure.EnergyOrderProvider, defaultProvider string) {
@@ -246,7 +255,7 @@ func (s *Service) RefreshAddress(chain, address string) (AddressRecord, error) {
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 tron 地址余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		usdtBalance := decimal.Zero
@@ -255,7 +264,7 @@ func (s *Service) RefreshAddress(chain, address string) (AddressRecord, error) {
 			if err != nil {
 				return AddressRecord{}, fmt.Errorf("读取 tron 地址 usdt 余额失败: %w", err)
 			}
-			if err := waitForBalanceThrottle(ctx); err != nil {
+			if err := s.waitForBalanceThrottle(ctx); err != nil {
 				return AddressRecord{}, err
 			}
 		}
@@ -269,14 +278,14 @@ func (s *Service) RefreshAddress(chain, address string) (AddressRecord, error) {
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 bnb 余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, record.Address)
 		if err != nil {
 			return AddressRecord{}, fmt.Errorf("读取 bsc 地址 usdt 余额失败: %w", err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return AddressRecord{}, err
 		}
 		record.BNBBalance = bnbBalance.StringFixed(6)
@@ -453,7 +462,7 @@ func (s *Service) refreshTronBalances(ctx context.Context, file *ChainFile, prog
 		if err != nil {
 			return fmt.Errorf("读取 tron 第 %d 个地址 trx 余额失败: %w", i, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 		usdtBalance := decimal.Zero
@@ -462,7 +471,7 @@ func (s *Service) refreshTronBalances(ctx context.Context, file *ChainFile, prog
 			if err != nil {
 				return fmt.Errorf("读取 tron 第 %d 个地址 usdt 余额失败: %w", i, err)
 			}
-			if err := waitForBalanceThrottle(ctx); err != nil {
+			if err := s.waitForBalanceThrottle(ctx); err != nil {
 				return err
 			}
 		}
@@ -494,14 +503,14 @@ func (s *Service) refreshBSCBalances(ctx context.Context, file *ChainFile, progr
 		if err != nil {
 			return fmt.Errorf("读取 bsc 第 %d 个地址 bnb 余额失败: %w", i, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 		usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, record.Address)
 		if err != nil {
 			return fmt.Errorf("读取 bsc 第 %d 个地址 usdt 余额失败: %w", i, err)
 		}
-		if err := waitForBalanceThrottle(ctx); err != nil {
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return err
 		}
 
@@ -946,8 +955,12 @@ func parseThresholdDecimal(value string) (decimal.Decimal, error) {
 	return parsed, nil
 }
 
-func waitForBalanceThrottle(ctx context.Context) error {
-	timer := time.NewTimer(hdWalletBalanceRequestDelay)
+func (s *Service) waitForBalanceThrottle(ctx context.Context) error {
+	delay := s.balanceRequestDelay
+	if delay <= 0 {
+		delay = defaultBalanceRequestDelay
+	}
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {

@@ -54,15 +54,18 @@ func New(cfgPath string) (*App, error) {
 	}
 
 	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT)
+	tronClient.SetMinRequestInterval(cfg.QuickNodeMinRequestInterval())
 	bscEnabled := isBSCEnabled(cfg.BSC.RPCHTTPURL)
 	var bscClient *bsc.Client
 	if bscEnabled {
 		bscClient = bsc.NewClient(cfg.BSC.RPCHTTPURL, cfg.BSC.RPCWSSURL, cfg.BSC.USDTContract)
+		bscClient.SetMinRequestInterval(cfg.BSCMinRequestInterval())
 	}
 
 	if isHDWalletMode(cfg) {
 		dataDir := resolveDataDir()
 		walletService := hdwallet.NewService(dataDir, cfg.App.HDWalletCount, tronClient, bscClient)
+		walletService.ConfigureBalanceRequestDelay(cfg.HDBalanceRequestDelay())
 		ctx := context.Background()
 		db, err := database.NewMySQL(ctx, cfg.MySQL)
 		if err != nil {
@@ -76,7 +79,7 @@ func New(cfgPath string) (*App, error) {
 			service.NewTelegramNotifier(cfg.Telegram),
 			service.NewCallbackNotifier(cfg.Callback),
 		)
-		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers)
+		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.Watcher.TronBlockSource)
 
 		var bscCache *service.BSCAddressCache
 		var bscScanner *service.BSCScanner
@@ -123,7 +126,7 @@ func New(cfgPath string) (*App, error) {
 		service.NewTelegramNotifier(cfg.Telegram),
 		service.NewCallbackNotifier(cfg.Callback),
 	)
-	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers)
+	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.Watcher.TronBlockSource)
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner
@@ -283,7 +286,7 @@ func (a *App) Run(ctx context.Context) error {
 			bscScanner = nil
 		}
 		group.Go(a.safeGo("hourly-balance-refresh", func() error {
-			err := service.RunHourlyBalanceRefresh(groupCtx, tronClient, tronBalances, bscScanner)
+			err := service.RunHourlyBalanceRefresh(groupCtx, tronClient, tronBalances, a.cfg.TronScheduledRefreshDelay(), bscScanner, a.cfg.BSCScheduledRefreshDelay())
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
