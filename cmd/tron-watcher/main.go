@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 
 	"tron_watcher/internal/app"
 )
@@ -32,7 +34,12 @@ func main() {
 		cfgPath = defaultConfigPath()
 	}
 
-	log.Printf("startup info: branch=%s commit=%s", resolveBranch(), resolveCommit())
+	branch := resolveBranch()
+	commit := resolveCommit()
+	printBuddhaBanner(os.Stdout, branch)
+	time.Sleep(time.Second)
+
+	log.Printf("startup info: branch=%s commit=%s", branch, commit)
 	log.Printf("starting tron watcher, config=%s", cfgPath)
 
 	application, err := app.New(cfgPath)
@@ -46,6 +53,31 @@ func main() {
 	if err := application.Run(ctx); err != nil {
 		log.Fatalf("run app failed: %v", err)
 	}
+}
+
+func printBuddhaBanner(w io.Writer, branch string) {
+	_, _ = fmt.Fprintln(w, "佛祖保佑 永无BUG")
+	_, _ = fmt.Fprintln(w, "分支："+strings.TrimSpace(branch))
+	_, _ = fmt.Fprint(w, `
+                       _oo0oo_
+                      o8888888o
+                      88" . "88
+                      (| -_- |)
+                      0\  =  /0
+                    ___/''\___
+                  .' \\|     |// '.
+                 / \\|||  :  |||// \
+                / _||||| -:- |||||_ \
+               |   | \\\  -  /// |   |
+               | \_|  ''\---/''  |_/ |
+               \  .-\__  '-'  __/-.  /
+             ___'. .'  /--.--\  '. .'___
+          ."" '<  '.___\_<|>_/___.'  >' "".
+         | | :  '- \.;'_/;'/ - ' : | |
+         \  \ '_.   \_ __\ /__ _/   .-' /  /
+     ====='-.____'.___ \_____/___.-'____.-'=====
+                       '=---='
+`)
 }
 
 func resolveBranch() string {
