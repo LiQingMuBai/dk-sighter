@@ -76,7 +76,7 @@ func New(cfgPath string) (*App, error) {
 			service.NewTelegramNotifier(cfg.Telegram),
 			service.NewCallbackNotifier(cfg.Callback),
 		)
-		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers)
+		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
 
 		var bscCache *service.BSCAddressCache
 		var bscScanner *service.BSCScanner
@@ -123,7 +123,7 @@ func New(cfgPath string) (*App, error) {
 		service.NewTelegramNotifier(cfg.Telegram),
 		service.NewCallbackNotifier(cfg.Callback),
 	)
-	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers)
+	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner
@@ -250,7 +250,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	group.Go(a.safeGo("hourly-balance-refresh", func() error {
-		err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner)
+		err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner, a.cfg.TronBlockSource())
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return err
 		}

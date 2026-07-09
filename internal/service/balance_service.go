@@ -125,7 +125,7 @@ func (s *BalanceService) RefreshAll(ctx context.Context, blockNumber int64) {
 }
 
 func (s *BalanceService) RefreshAddresses(ctx context.Context, addresses []string) error {
-	blockNumber, err := s.tronClient.GetSolidBlockNumber(ctx)
+	blockNumber, err := s.tronClient.GetHeadBlockNumber(ctx)
 	if err != nil {
 		return err
 	}

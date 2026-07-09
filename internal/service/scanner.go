@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +15,8 @@ import (
 	"tron_watcher/internal/tron"
 )
 
-const syncKey = "tron_solid_scanner"
+const syncKeySolid = "tron_solid_scanner"
+const syncKeyHead = "tron_head_scanner"
 const tronStateWorkers = 2
 
 type Scanner struct {
@@ -23,6 +25,7 @@ type Scanner struct {
 	cache      *AddressCache
 	balances   *BalanceService
 	notifier   TransferNotifier
+	syncKey    string
 	startBlock int64
 	txWorkers  int
 	logger     *log.Logger
@@ -31,9 +34,13 @@ type Scanner struct {
 	runMu     sync.Mutex
 }
 
-func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int) *Scanner {
+func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, tronBlockSource string) *Scanner {
 	if txWorkers <= 0 {
 		txWorkers = 1
+	}
+	syncKey := syncKeyHead
+	if strings.EqualFold(strings.TrimSpace(tronBlockSource), "solid") {
+		syncKey = syncKeySolid
 	}
 	return &Scanner{
 		tronClient: tronClient,
@@ -41,6 +48,7 @@ func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCach
 		cache:      cache,
 		balances:   balances,
 		notifier:   notifier,
+		syncKey:    syncKey,
 		startBlock: startBlock,
 		txWorkers:  txWorkers,
 		logger:     tronLogger(),
@@ -81,6 +89,7 @@ func (s *Scanner) scan(ctx context.Context) error {
 
 	var headBlock int64
 	var latestSolid int64
+	var source string
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		value, err := s.tronClient.GetHeadBlockNumber(groupCtx)
@@ -102,7 +111,14 @@ func (s *Scanner) scan(ctx context.Context) error {
 		return err
 	}
 
-	lastBlock, exists, err := s.repo.GetLastBlock(ctx, syncKey)
+	source = "head"
+	latestBlock := headBlock
+	if s.syncKey == syncKeySolid {
+		source = "solid"
+		latestBlock = latestSolid
+	}
+
+	lastBlock, exists, err := s.repo.GetLastBlock(ctx, s.syncKey)
 	if err != nil {
 		return err
 	}
@@ -112,43 +128,43 @@ func (s *Scanner) scan(ctx context.Context) error {
 		solidLag = 0
 	}
 	if exists {
-		scanLag := latestSolid - lastBlock
+		scanLag := latestBlock - lastBlock
 		if scanLag < 0 {
 			scanLag = 0
 		}
-		s.logger.Printf("scanner state: head=%d solid=%d solid_lag=%d db_last=%d scan_lag=%d", headBlock, latestSolid, solidLag, lastBlock, scanLag)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=%d scan_lag=%d", source, headBlock, latestSolid, solidLag, lastBlock, scanLag)
 	} else {
-		s.logger.Printf("scanner state: head=%d solid=%d solid_lag=%d db_last=<none>", headBlock, latestSolid, solidLag)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=<none>", source, headBlock, latestSolid, solidLag)
 	}
 	if !exists {
-		initialBlock := latestSolid
+		initialBlock := latestBlock
 		if s.startBlock > 0 {
 			initialBlock = s.startBlock
-			if initialBlock > latestSolid {
-				initialBlock = latestSolid
+			if initialBlock > latestBlock {
+				initialBlock = latestBlock
 			}
 		}
-		if err := s.repo.SaveLastBlock(ctx, syncKey, initialBlock); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, initialBlock); err != nil {
 			return err
 		}
-		s.logger.Printf("scanner initialized: start_block=%d latest_solid=%d", initialBlock, latestSolid)
+		s.logger.Printf("scanner initialized: source=%s start_block=%d latest=%d", source, initialBlock, latestBlock)
 		return nil
 	}
-	if shouldSkipToLatestBlock(lastBlock, latestSolid) {
-		s.logger.Printf("scanner lag too large, skip to latest solid block: db_last=%d latest_solid=%d lag=%d threshold=%d", lastBlock, latestSolid, latestSolid-lastBlock, maxAllowedSyncLagBlocks)
-		if err := s.repo.SaveLastBlock(ctx, syncKey, latestSolid); err != nil {
+	if shouldSkipToLatestBlock(lastBlock, latestBlock) {
+		s.logger.Printf("scanner lag too large, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, lastBlock, latestBlock, latestBlock-lastBlock, maxAllowedSyncLagBlocks)
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 			return err
 		}
 		return nil
 	}
-	if lastBlock < latestSolid {
-		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, latestSolid)
+	if lastBlock < latestBlock {
+		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, latestBlock)
 	}
 
 	currentBlock := lastBlock
-	for currentBlock < latestSolid {
+	for currentBlock < latestBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
-			return s.repo.GetLastBlock(runCtx, syncKey)
+			return s.repo.GetLastBlock(runCtx, s.syncKey)
 		})
 		if err != nil {
 			return err
@@ -156,14 +172,14 @@ func (s *Scanner) scan(ctx context.Context) error {
 		if changed {
 			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, latestSolid) {
-				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest solid block: db_last=%d latest_solid=%d lag=%d threshold=%d", currentBlock, latestSolid, latestSolid-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, syncKey, latestSolid); err != nil {
+			if shouldSkipToLatestBlock(currentBlock, latestBlock) {
+				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 					return err
 				}
 				break
 			}
-			if currentBlock >= latestSolid {
+			if currentBlock >= latestBlock {
 				break
 			}
 		}
@@ -172,7 +188,7 @@ func (s *Scanner) scan(ctx context.Context) error {
 		if err := s.scanBlock(ctx, blockNum); err != nil {
 			return err
 		}
-		if err := s.repo.SaveLastBlock(ctx, syncKey, blockNum); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, blockNum); err != nil {
 			return err
 		}
 		s.balances.Flush(ctx, blockNum)

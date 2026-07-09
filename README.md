@@ -22,8 +22,9 @@
 - 首页显示最近 30 天的每日发能折线图：发能一次计 1，发能两次计 2
 - 后台监控地址支持当前页勾选 checkbox 后批量执行 `发能一次` / `发能两次` / `批量删除地址`
 - 用 `sync_state` 持久化扫描游标，进程重启后自动续扫
-- 首次启动时可通过 `watcher.start_block` 指定起始区块；不配置时从当前最新 `solid block` 开始
-- `WSS` 只做新区块触发，实际处理按 `solid block` 顺序扫描，降低漏单风险
+- 扫描区块源支持 `watcher.tron_block_source` 配置，可选 `head` / `solid`，默认 `head`
+- 首次启动时可通过 `watcher.start_block` 指定起始区块；不配置时从当前最新区块（由 `tron_block_source` 决定）开始
+- `WSS` 只做新区块触发，实际处理按配置的区块源顺序扫描
 
 ## 目录
 
@@ -76,9 +77,14 @@ TRON_WATCHER_CONFIG=configs/config.yaml go run ./cmd/tron-watcher
 
 `watcher.start_block` 说明：
 
-- `0`：首次启动从当前最新 `solid block` 开始
+- `0`：首次启动从当前最新区块（由 `tron_block_source` 决定）开始
 - `> 0`：首次启动从指定区块开始
 - 如果 `sync_state` 里已经有游标，会优先使用数据库游标，忽略 `start_block`
+
+`watcher.tron_block_source` 说明：
+
+- `head`：使用 `/wallet/getnowblock` 获取最新块号（追最新块）
+- `solid`：使用 `/walletsolidity/getnowblock` 获取 solidity 块号（更稳但延迟更高）
 
 Web 后台：
 
@@ -201,7 +207,7 @@ curl -X POST http://127.0.0.1:8080/api/watch-addresses \
 - 数据库里只存 `T...` 地址，程序启动后会自动转换为 hex 用于链上匹配
 - `发能一次` / `发能两次` 按钮已接入真实调用：会优先根据 MySQL `runtime_settings.energy_provider` 在 `trxfee` / `catfee` 间切换，地址取 `address_base58`，能量值分别固定为 `65000` / `130000`
 - `一键归集` 当前会弹出“功能未开发”的提示框，不再弹助记词输入框
-- 如果 `sync_state` 里没有游标，服务会优先用 `watcher.start_block` 初始化；未配置时用当前最新 `solid block`
+- 如果 `sync_state` 里没有游标，服务会优先用 `watcher.start_block` 初始化；未配置时用当前最新区块（由 `tron_block_source` 决定）
 - Web 页面展示的最近更新时间来自地址当前余额记录的最新更新时间，并按北京时间显示
 - 余额不是全表重刷，而是命中任意转入转出记录后，定向刷新该地址的 `TRX` 和 `USDT` 余额
 - 如果配置了 `WSS` 且连接断开，扫描器仍会继续通过 HTTP 轮询补块

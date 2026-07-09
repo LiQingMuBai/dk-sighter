@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -85,11 +86,12 @@ type CatfeeConfig struct {
 }
 
 type WatcherConfig struct {
-	AddressReloadIntervalSeconds int   `yaml:"address_reload_interval_seconds"`
-	BlockPollIntervalSeconds     int   `yaml:"block_poll_interval_seconds"`
-	Confirmations                int   `yaml:"confirmations"`
-	StartBlock                   int64 `yaml:"start_block"`
-	TXWorkers                    int   `yaml:"tx_workers"`
+	AddressReloadIntervalSeconds int    `yaml:"address_reload_interval_seconds"`
+	BlockPollIntervalSeconds     int    `yaml:"block_poll_interval_seconds"`
+	TronBlockSource              string `yaml:"tron_block_source"`
+	Confirmations                int    `yaml:"confirmations"`
+	StartBlock                   int64  `yaml:"start_block"`
+	TXWorkers                    int    `yaml:"tx_workers"`
 }
 
 type BSCConfig struct {
@@ -144,6 +146,9 @@ func (c *Config) setDefaults() {
 	if c.Watcher.BlockPollIntervalSeconds == 0 {
 		c.Watcher.BlockPollIntervalSeconds = 3
 	}
+	if strings.TrimSpace(c.Watcher.TronBlockSource) == "" {
+		c.Watcher.TronBlockSource = "head"
+	}
 	if c.Watcher.TXWorkers == 0 {
 		c.Watcher.TXWorkers = 8
 	}
@@ -196,4 +201,12 @@ func (c *Config) BlockPollInterval() time.Duration {
 
 func (c *Config) BSCBlockPollInterval() time.Duration {
 	return time.Duration(c.BSC.BlockPollIntervalSeconds) * time.Second
+}
+
+func (c *Config) TronBlockSource() string {
+	value := strings.TrimSpace(c.Watcher.TronBlockSource)
+	if strings.EqualFold(value, "solid") {
+		return "solid"
+	}
+	return "head"
 }

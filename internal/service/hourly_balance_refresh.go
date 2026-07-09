@@ -2,16 +2,21 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"tron_watcher/internal/tron"
 )
 
-func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronBalances *BalanceService, bscScanner *BSCScanner) error {
+func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string) error {
 	loggerTron := tronLogger()
 	loggerBSC := bscLogger()
 	loc := time.FixedZone("CST", 8*3600)
 	perCallDelay := 300 * time.Millisecond
+	blockSource := "head"
+	if strings.EqualFold(strings.TrimSpace(tronBlockSource), "solid") {
+		blockSource = "solid"
+	}
 
 	for {
 		now := time.Now().In(loc)
@@ -25,13 +30,19 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 		}
 
 		runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-		solid, err := tronClient.GetSolidBlockNumber(runCtx)
-		if err != nil {
-			loggerTron.Printf("hourly refresh failed: load solid block err=%v", err)
+		blockNumber := int64(0)
+		var err error
+		if blockSource == "solid" {
+			blockNumber, err = tronClient.GetSolidBlockNumber(runCtx)
 		} else {
-			loggerTron.Printf("hourly refresh start: solid=%d throttle=%s", solid, perCallDelay)
-			tronBalances.RefreshAllThrottled(runCtx, solid, perCallDelay)
-			loggerTron.Printf("hourly refresh done: solid=%d", solid)
+			blockNumber, err = tronClient.GetHeadBlockNumber(runCtx)
+		}
+		if err != nil {
+			loggerTron.Printf("hourly refresh failed: load %s block err=%v", blockSource, err)
+		} else {
+			loggerTron.Printf("hourly refresh start: source=%s block=%d throttle=%s", blockSource, blockNumber, perCallDelay)
+			tronBalances.RefreshAllThrottled(runCtx, blockNumber, perCallDelay)
+			loggerTron.Printf("hourly refresh done: source=%s block=%d", blockSource, blockNumber)
 		}
 
 		if bscScanner != nil {

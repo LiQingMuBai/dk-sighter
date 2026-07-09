@@ -53,6 +53,7 @@ catfee:
 watcher:
   address_reload_interval_seconds: 15
   block_poll_interval_seconds: 3
+  tron_block_source: "head"
   confirmations: 0
   start_block: 0
   tx_workers: 8
