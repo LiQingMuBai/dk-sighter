@@ -53,7 +53,7 @@ func New(cfgPath string) (*App, error) {
 		cfg.App.Mode = mode
 	}
 
-	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT)
+	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, cfg.QuickNodeMinRequestInterval())
 	bscEnabled := isBSCEnabled(cfg.BSC.RPCHTTPURL)
 	var bscClient *bsc.Client
 	if bscEnabled {

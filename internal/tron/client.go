@@ -21,12 +21,10 @@ import (
 )
 
 const (
-	trxPrecision  = 1_000_000
-	usdtPrecision = 1_000_000
-	transferTopic = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-	// QuickNode limits are enforced per account/provider. Tron and BSC use
-	// separate accounts here, so each client can maintain its own ceiling.
-	minRequestInterval = 21 * time.Millisecond
+	trxPrecision              = 1_000_000
+	usdtPrecision             = 1_000_000
+	transferTopic             = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	defaultMinRequestInterval = 10 * time.Millisecond
 )
 
 type Client struct {
@@ -35,6 +33,7 @@ type Client struct {
 	usdtContract string
 	httpClient   *http.Client
 	rpcID        atomic.Int64
+	minInterval  time.Duration
 	rateMu       sync.Mutex
 	nextRequest  time.Time
 }
@@ -117,7 +116,10 @@ type broadcastTransactionResp struct {
 	Error   string `json:"Error"`
 }
 
-func NewClient(httpURL, wssURL, usdtContract string) *Client {
+func NewClient(httpURL, wssURL, usdtContract string, minRequestInterval time.Duration) *Client {
+	if minRequestInterval <= 0 {
+		minRequestInterval = defaultMinRequestInterval
+	}
 	return &Client{
 		httpURL:      strings.TrimRight(httpURL, "/"),
 		wssURL:       strings.TrimRight(wssURL, "/"),
@@ -125,6 +127,7 @@ func NewClient(httpURL, wssURL, usdtContract string) *Client {
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
+		minInterval: minRequestInterval,
 	}
 }
 
@@ -476,7 +479,7 @@ func (c *Client) waitTurn(ctx context.Context) error {
 	if c.nextRequest.After(waitUntil) {
 		waitUntil = c.nextRequest
 	}
-	c.nextRequest = waitUntil.Add(minRequestInterval)
+	c.nextRequest = waitUntil.Add(c.minInterval)
 	c.rateMu.Unlock()
 
 	if waitUntil.After(now) {

@@ -34,7 +34,7 @@ func TestClientPostReturnsRPCError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "")
+	client := NewClient(server.URL, "", "", 10*time.Millisecond)
 
 	var out map[string]any
 	err := client.post(context.Background(), "/walletsolidity/getnowblock", map[string]any{}, &out)
@@ -47,7 +47,7 @@ func TestClientPostReturnsRPCError(t *testing.T) {
 }
 
 func TestClientWaitTurnHonorsContextCancel(t *testing.T) {
-	client := NewClient("https://example.com", "", "")
+	client := NewClient("https://example.com", "", "", 10*time.Millisecond)
 	client.nextRequest = time.Now().Add(100 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())

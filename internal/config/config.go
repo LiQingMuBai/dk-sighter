@@ -38,9 +38,10 @@ type MySQLConfig struct {
 }
 
 type QuickNodeConfig struct {
-	HTTPURL string `yaml:"http_url"`
-	WSSURL  string `yaml:"wss_url"`
-	USDT    string `yaml:"usdt_contract"`
+	HTTPURL              string `yaml:"http_url"`
+	WSSURL               string `yaml:"wss_url"`
+	USDT                 string `yaml:"usdt_contract"`
+	MinRequestIntervalMS int    `yaml:"min_request_interval_ms"`
 }
 
 type WebConfig struct {
@@ -158,6 +159,9 @@ func (c *Config) setDefaults() {
 	if c.Web.SessionName == "" {
 		c.Web.SessionName = "tron_watcher_session"
 	}
+	if c.QuickNode.MinRequestIntervalMS == 0 {
+		c.QuickNode.MinRequestIntervalMS = 10
+	}
 	if c.Telegram.APIBaseURL == "" {
 		c.Telegram.APIBaseURL = "https://api.telegram.org"
 	}
@@ -209,4 +213,12 @@ func (c *Config) TronBlockSource() string {
 		return "solid"
 	}
 	return "head"
+}
+
+func (c *Config) QuickNodeMinRequestInterval() time.Duration {
+	value := c.QuickNode.MinRequestIntervalMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
 }
