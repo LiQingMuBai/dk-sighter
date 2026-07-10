@@ -18,7 +18,7 @@ import (
 	"tron_watcher/internal/tron"
 )
 
-const activateDelay = 5 * time.Second
+const activateDelay = 1 * time.Second
 
 func main() {
 	log.SetOutput(os.Stdout)
@@ -48,7 +48,7 @@ func main() {
 	activatorPrivateKeys := []string{
 		// Fill your Tron private keys here. Each record ID is hashed to one fixed signer.
 		// "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-	
+
 	}
 
 	activator, err := service.NewTronAddressActivatorWithPrivateKeys(tronClient, repo, activatorPrivateKeys, 64)
@@ -74,7 +74,6 @@ func main() {
 	successCount := 0
 	skipCount := 0
 	failCount := 0
-	lastActivatedSignerIndex := -1
 
 	for _, item := range addresses {
 		select {
@@ -107,25 +106,6 @@ func main() {
 			continue
 		}
 
-		signerIndex, err := activator.SignerIndexByRecordID(item.ID)
-		if err != nil {
-			failCount++
-			log.Printf("resolve signer failed: id=%d address=%s err=%v", item.ID, address, err)
-			continue
-		}
-
-		if lastActivatedSignerIndex == signerIndex {
-			log.Printf("wait before activate: id=%d address=%s signer_index=%d delay=%s", item.ID, address, signerIndex, activateDelay)
-			timer := time.NewTimer(activateDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				log.Printf("context canceled during wait, stop processing")
-				return
-			case <-timer.C:
-			}
-		}
-
 		activateCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		txID, err := activator.ActivateByRecordID(activateCtx, item.ID, address)
 		cancel()
@@ -136,8 +116,16 @@ func main() {
 		}
 
 		successCount++
-		lastActivatedSignerIndex = signerIndex
 		log.Printf("activate address success: id=%d address=%s txid=%s", item.ID, address, txID)
+
+		timer := time.NewTimer(activateDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			log.Printf("context canceled during success delay, stop processing")
+			return
+		case <-timer.C:
+		}
 	}
 
 	log.Printf("activation finished: total=%d success=%d skipped=%d failed=%d", len(addresses), successCount, skipCount, failCount)

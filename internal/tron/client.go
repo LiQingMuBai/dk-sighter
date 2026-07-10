@@ -3,6 +3,7 @@ package tron
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,9 +16,12 @@ import (
 	"time"
 
 	gotronAddress "github.com/fbsobreira/gotron-sdk/pkg/address"
+	gotronCore "github.com/fbsobreira/gotron-sdk/pkg/proto/core"
 	"github.com/fbsobreira/gotron-sdk/pkg/standards/trc20enc"
 	"github.com/gorilla/websocket"
 	"github.com/shopspring/decimal"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const (
@@ -114,6 +118,33 @@ type broadcastTransactionResp struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Error   string `json:"Error"`
+}
+
+type tronTransactionEnvelope struct {
+	Visible    bool            `json:"visible"`
+	TxID       string          `json:"txID,omitempty"`
+	RawData    json.RawMessage `json:"raw_data"`
+	RawDataHex string          `json:"raw_data_hex,omitempty"`
+	Signature  []string        `json:"signature,omitempty"`
+}
+
+type tronTransferRawDataJSON struct {
+	Contract []struct {
+		Type      string `json:"type"`
+		Parameter struct {
+			TypeURL string `json:"type_url"`
+			Value   struct {
+				Amount       int64  `json:"amount"`
+				OwnerAddress string `json:"owner_address"`
+				ToAddress    string `json:"to_address"`
+			} `json:"value"`
+		} `json:"parameter"`
+	} `json:"contract"`
+	RefBlockBytes string `json:"ref_block_bytes"`
+	RefBlockHash  string `json:"ref_block_hash"`
+	Expiration    int64  `json:"expiration"`
+	Timestamp     int64  `json:"timestamp"`
+	FeeLimit      int64  `json:"fee_limit,omitempty"`
 }
 
 func NewClient(httpURL, wssURL, usdtContract string, minRequestInterval time.Duration) *Client {
@@ -373,7 +404,7 @@ func (c *Client) CreateTRXTransferTransaction(ctx context.Context, ownerHex, toA
 	if len(respBody) == 0 {
 		return nil, fmt.Errorf("empty unsigned transaction")
 	}
-	return respBody, nil
+	return ensureRawDataHex(respBody)
 }
 
 func (c *Client) BroadcastTransactionJSON(ctx context.Context, txJSON []byte) (string, error) {
@@ -440,6 +471,105 @@ func normalizeTronAddressToHex(input string) (string, error) {
 		return strings.ToUpper(hex.EncodeToString(addr.Bytes())), nil
 	}
 	return NormalizeHexAddress(trimmed), nil
+}
+
+func ensureRawDataHex(txJSON []byte) ([]byte, error) {
+	if len(txJSON) == 0 {
+		return nil, fmt.Errorf("empty transaction json")
+	}
+
+	var envelope tronTransactionEnvelope
+	if err := json.Unmarshal(txJSON, &envelope); err != nil {
+		return nil, fmt.Errorf("decode transaction json: %w", err)
+	}
+	if strings.TrimSpace(envelope.RawDataHex) != "" {
+		return txJSON, nil
+	}
+
+	rawDataHex, txID, err := encodeTransferRawDataHex(envelope.RawData)
+	if err != nil {
+		return nil, err
+	}
+	envelope.RawDataHex = rawDataHex
+	if strings.TrimSpace(envelope.TxID) == "" {
+		envelope.TxID = txID
+	}
+
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("encode transaction json: %w", err)
+	}
+	return encoded, nil
+}
+
+func encodeTransferRawDataHex(rawDataJSON []byte) (string, string, error) {
+	if len(rawDataJSON) == 0 {
+		return "", "", fmt.Errorf("missing raw_data field")
+	}
+
+	var raw tronTransferRawDataJSON
+	if err := json.Unmarshal(rawDataJSON, &raw); err != nil {
+		return "", "", fmt.Errorf("decode raw_data: %w", err)
+	}
+	if len(raw.Contract) == 0 {
+		return "", "", fmt.Errorf("missing raw_data.contract")
+	}
+
+	contracts := make([]*gotronCore.Transaction_Contract, 0, len(raw.Contract))
+	for i, item := range raw.Contract {
+		typeURL := strings.TrimSpace(item.Parameter.TypeURL)
+		contractType := strings.TrimSpace(item.Type)
+		if !strings.EqualFold(contractType, "TransferContract") && !strings.HasSuffix(typeURL, ".TransferContract") {
+			return "", "", fmt.Errorf("unsupported contract type without raw_data_hex: %s", contractType)
+		}
+
+		ownerAddress, err := hex.DecodeString(strings.TrimSpace(item.Parameter.Value.OwnerAddress))
+		if err != nil {
+			return "", "", fmt.Errorf("decode owner address for contract %d: %w", i, err)
+		}
+		toAddress, err := hex.DecodeString(strings.TrimSpace(item.Parameter.Value.ToAddress))
+		if err != nil {
+			return "", "", fmt.Errorf("decode to address for contract %d: %w", i, err)
+		}
+
+		transferAny, err := anypb.New(&gotronCore.TransferContract{
+			OwnerAddress: ownerAddress,
+			ToAddress:    toAddress,
+			Amount:       item.Parameter.Value.Amount,
+		})
+		if err != nil {
+			return "", "", fmt.Errorf("build transfer contract %d: %w", i, err)
+		}
+		contracts = append(contracts, &gotronCore.Transaction_Contract{
+			Type:      gotronCore.Transaction_Contract_TransferContract,
+			Parameter: transferAny,
+		})
+	}
+
+	refBlockBytes, err := hex.DecodeString(strings.TrimSpace(raw.RefBlockBytes))
+	if err != nil {
+		return "", "", fmt.Errorf("decode ref_block_bytes: %w", err)
+	}
+	refBlockHash, err := hex.DecodeString(strings.TrimSpace(raw.RefBlockHash))
+	if err != nil {
+		return "", "", fmt.Errorf("decode ref_block_hash: %w", err)
+	}
+
+	rawProto := &gotronCore.TransactionRaw{
+		RefBlockBytes: refBlockBytes,
+		RefBlockHash:  refBlockHash,
+		Expiration:    raw.Expiration,
+		Contract:      contracts,
+		Timestamp:     raw.Timestamp,
+		FeeLimit:      raw.FeeLimit,
+	}
+
+	rawBytes, err := proto.Marshal(rawProto)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal raw_data: %w", err)
+	}
+	txIDBytes := sha256.Sum256(rawBytes)
+	return hex.EncodeToString(rawBytes), hex.EncodeToString(txIDBytes[:]), nil
 }
 
 func normalizeTronReturnMessage(message string) string {
