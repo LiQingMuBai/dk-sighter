@@ -14,6 +14,12 @@ quicknode:
   http_url: ""
   wss_url: ""
   usdt_contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+  min_request_interval_ms: 10
+
+tron_activator:
+  enabled: false
+  private_key: ""
+  queue_size: 64
 
 web:
   listen: ":8080"

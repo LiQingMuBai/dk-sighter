@@ -314,10 +314,10 @@ func (s *Scanner) handleTRXTransfer(ctx context.Context, tx tron.Transaction, bl
 		tx.TxID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 	if okFrom {
-		s.markAllBalances(fromBase58)
+		s.markBalance(fromBase58, "TRX")
 	}
 	if okTo {
-		s.markAllBalances(toBase58)
+		s.markBalance(toBase58, "TRX")
 	}
 }
 
@@ -394,17 +394,16 @@ func (s *Scanner) handleUSDTTransfers(ctx context.Context, txID string, blockNum
 			txID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 		if okFrom {
-			s.markAllBalances(fromBase58)
+			s.markBalance(fromBase58, "USDT")
 		}
 		if okTo {
-			s.markAllBalances(toBase58)
+			s.markBalance(toBase58, "USDT")
 		}
 	}
 }
 
-func (s *Scanner) markAllBalances(addressBase58 string) {
-	s.balances.Mark(addressBase58, "TRX")
-	s.balances.Mark(addressBase58, "USDT")
+func (s *Scanner) markBalance(addressBase58 string, asset string) {
+	s.balances.Mark(addressBase58, asset)
 }
 
 func direction(hitFrom, hitTo bool) string {

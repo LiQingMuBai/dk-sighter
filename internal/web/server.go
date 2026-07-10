@@ -33,10 +33,16 @@ type tronBalanceRefresher interface {
 	RefreshAddresses(context.Context, []string) error
 }
 
+type tronAddressActivator interface {
+	Activate(context.Context, string) (string, error)
+	EnqueueBatch([]string) (string, int, error)
+}
+
 type Server struct {
 	repo                  *repository.DB
 	reloader              addressReloader
 	tronBalances          tronBalanceRefresher
+	tronActivator         tronAddressActivator
 	listen                string
 	templates             *template.Template
 	username              string
@@ -64,6 +70,7 @@ type dashboardPageData struct {
 	TotalPages      int
 	ChartLabelsJSON string
 	ChartValuesJSON string
+	ChartActivateValuesJSON string
 	Sort            string
 }
 
@@ -148,6 +155,8 @@ type activateAddressResponse struct {
 	Addresses    []string `json:"addresses,omitempty"`
 	TotalCount   int      `json:"total_count,omitempty"`
 	SuccessCount int      `json:"success_count,omitempty"`
+	TxID         string   `json:"txid,omitempty"`
+	JobID        string   `json:"job_id,omitempty"`
 }
 
 type cacheMnemonicRequest struct {
@@ -165,6 +174,7 @@ func NewServer(
 	cfg config.WebConfig,
 	reloader addressReloader,
 	tronBalances tronBalanceRefresher,
+	tronActivator tronAddressActivator,
 	energyProviders map[string]infrastructure.EnergyOrderProvider,
 	defaultEnergyProvider string,
 ) (*Server, error) {
@@ -180,6 +190,7 @@ func NewServer(
 		repo:                  repo,
 		reloader:              reloader,
 		tronBalances:          tronBalances,
+		tronActivator:         tronActivator,
 		listen:                cfg.Listen,
 		templates:             tmpl,
 		username:              cfg.Username,
@@ -891,14 +902,62 @@ func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("tron activate address clicked: total=%d addresses=%s", len(addresses), strings.Join(addresses, ","))
+	if s.tronActivator == nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+			Success:    false,
+			Message:    "tron activator not configured",
+			Address:    firstAddress(addresses),
+			Addresses:  addresses,
+			TotalCount: len(addresses),
+		})
+		return
+	}
+
+	if len(addresses) == 1 {
+		log.Printf("tron activate address requested: address=%s", addresses[0])
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		txID, err := s.tronActivator.Activate(ctx, addresses[0])
+		cancel()
+		if err != nil {
+			s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+				Success:    false,
+				Message:    err.Error(),
+				Address:    addresses[0],
+				TotalCount: 1,
+			})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, activateAddressResponse{
+			Success:      true,
+			Message:      "激活地址已发送",
+			Address:      addresses[0],
+			TotalCount:   1,
+			SuccessCount: 1,
+			TxID:         txID,
+		})
+		return
+	}
+
+	log.Printf("tron batch activate requested: total=%d", len(addresses))
+	jobID, queued, err := s.tronActivator.EnqueueBatch(addresses)
+	if err != nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+			Success:    false,
+			Message:    err.Error(),
+			Address:    firstAddress(addresses),
+			Addresses:  addresses,
+			TotalCount: len(addresses),
+		})
+		return
+	}
 	s.writeJSON(w, http.StatusOK, activateAddressResponse{
 		Success:      true,
-		Message:      fmt.Sprintf("已记录激活地址点击 %d / %d", len(addresses), len(addresses)),
+		Message:      fmt.Sprintf("准备批量激活地址 %d 个，后台异步执行", queued),
 		Address:      firstAddress(addresses),
 		Addresses:    addresses,
 		TotalCount:   len(addresses),
-		SuccessCount: len(addresses),
+		SuccessCount: 0,
+		JobID:        jobID,
 	})
 }
 

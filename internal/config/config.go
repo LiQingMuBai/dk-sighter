@@ -10,17 +10,18 @@ import (
 )
 
 type Config struct {
-	App       AppConfig       `yaml:"app"`
-	MySQL     MySQLConfig     `yaml:"mysql"`
-	QuickNode QuickNodeConfig `yaml:"quicknode"`
-	Watcher   WatcherConfig   `yaml:"watcher"`
-	Web       WebConfig       `yaml:"web"`
-	Telegram  TelegramConfig  `yaml:"telegram"`
-	Callback  CallbackConfig  `yaml:"callback"`
-	Energy    EnergyConfig    `yaml:"energy"`
-	Trxfee    TrxfeeConfig    `yaml:"trxfee"`
-	Catfee    CatfeeConfig    `yaml:"catfee"`
-	BSC       BSCConfig       `yaml:"bsc"`
+	App           AppConfig           `yaml:"app"`
+	MySQL         MySQLConfig         `yaml:"mysql"`
+	QuickNode     QuickNodeConfig     `yaml:"quicknode"`
+	Watcher       WatcherConfig       `yaml:"watcher"`
+	Web           WebConfig           `yaml:"web"`
+	Telegram      TelegramConfig      `yaml:"telegram"`
+	Callback      CallbackConfig      `yaml:"callback"`
+	Energy        EnergyConfig        `yaml:"energy"`
+	Trxfee        TrxfeeConfig        `yaml:"trxfee"`
+	Catfee        CatfeeConfig        `yaml:"catfee"`
+	BSC           BSCConfig           `yaml:"bsc"`
+	TronActivator TronActivatorConfig `yaml:"tron_activator"`
 }
 
 type AppConfig struct {
@@ -103,6 +104,12 @@ type BSCConfig struct {
 	StartBlock               int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
 	Confirmations            int    `yaml:"confirmations"`
+}
+
+type TronActivatorConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	PrivateKey string `yaml:"private_key"`
+	QueueSize  int    `yaml:"queue_size"`
 }
 
 func Load(path string) (*Config, error) {

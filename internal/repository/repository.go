@@ -132,6 +132,16 @@ type EnergyActionLog struct {
 	ErrorMessage  string
 }
 
+type TronActivationLog struct {
+	JobID            string
+	AddressBase58    string
+	FromAddressBase58 string
+	AmountSun        int64
+	TxID             string
+	Status           string
+	ErrorMessage     string
+}
+
 type EnergyChartPoint struct {
 	Day   string
 	Count int
@@ -448,6 +458,20 @@ func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) er
 	return nil
 }
 
+func (d *DB) InsertTronActivationLog(ctx context.Context, item TronActivationLog) error {
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO tron_activation_logs (
+			job_id, address_base58, from_address_base58, amount_sun,
+			txid, status, error_message
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, item.JobID, item.AddressBase58, item.FromAddressBase58, item.AmountSun,
+		item.TxID, item.Status, item.ErrorMessage)
+	if err != nil {
+		return fmt.Errorf("insert tron activation log: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) ListDailyEnergyChart(ctx context.Context, days int) ([]EnergyChartPoint, error) {
 	if days <= 0 {
 		days = 30
@@ -471,6 +495,49 @@ func (d *DB) ListDailyEnergyChart(ctx context.Context, days int) ([]EnergyChartP
 		var point EnergyChartPoint
 		if err := rows.Scan(&point.Day, &point.Count); err != nil {
 			return nil, fmt.Errorf("scan energy chart row: %w", err)
+		}
+		pointsByDay[point.Day] = point.Count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	loc := time.FixedZone("CST", 8*3600)
+	today := time.Now().In(loc)
+	result := make([]EnergyChartPoint, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		day := today.AddDate(0, 0, -i).Format("2006-01-02")
+		result = append(result, EnergyChartPoint{
+			Day:   day,
+			Count: pointsByDay[day],
+		})
+	}
+	return result, nil
+}
+
+func (d *DB) ListDailyTronActivationChart(ctx context.Context, days int) ([]EnergyChartPoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+
+	rows, err := d.sql.QueryContext(ctx, `
+		SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day_key, COUNT(1) AS total_count
+		FROM tron_activation_logs
+		WHERE status = 'SUCCESS'
+		  AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+		GROUP BY day_key
+		ORDER BY day_key ASC
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("list daily tron activation chart: %w", err)
+	}
+	defer rows.Close()
+
+	pointsByDay := make(map[string]int)
+	for rows.Next() {
+		var point EnergyChartPoint
+		if err := rows.Scan(&point.Day, &point.Count); err != nil {
+			return nil, fmt.Errorf("scan tron activation chart row: %w", err)
 		}
 		pointsByDay[point.Day] = point.Count
 	}

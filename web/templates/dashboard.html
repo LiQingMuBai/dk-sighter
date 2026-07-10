@@ -994,7 +994,7 @@
       <div class="chart-head">
         <div>
           <h2 class="chart-title">每日发能折线图</h2>
-          <p class="chart-subtitle">横轴按日期，纵轴按发能次数累计。发能一次记 1，发能两次记 2。</p>
+          <p class="chart-subtitle">横轴按日期，纵轴按次数累计。蓝色为发能次数（一次记 1，两次记 2），橙色为激活次数。</p>
         </div>
       </div>
       <div class="chart-wrap">
@@ -1004,7 +1004,8 @@
           width="1100"
           height="280"
           data-labels='{{ .ChartLabelsJSON }}'
-          data-values='{{ .ChartValuesJSON }}'></canvas>
+          data-values='{{ .ChartValuesJSON }}'
+          data-activate-values='{{ .ChartActivateValuesJSON }}'></canvas>
       </div>
     </div>
 
@@ -1682,8 +1683,12 @@
       }
       const energyChartLabels = JSON.parse(canvas.dataset.labels || '[]');
       const energyChartValues = JSON.parse(canvas.dataset.values || '[]');
+      let activateChartValues = JSON.parse(canvas.dataset.activateValues || '[]');
       if (!energyChartLabels.length || !energyChartValues.length) {
         return;
+      }
+      if (!Array.isArray(activateChartValues) || activateChartValues.length !== energyChartValues.length) {
+        activateChartValues = new Array(energyChartValues.length).fill(0);
       }
       const ctx = canvas.getContext('2d');
       const width = canvas.width;
@@ -1691,7 +1696,7 @@
       const padding = { top: 20, right: 16, bottom: 42, left: 42 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
-      const maxValue = Math.max(...energyChartValues, 1);
+      const maxValue = Math.max(...energyChartValues, ...activateChartValues, 1);
       const stepX = energyChartValues.length > 1 ? chartWidth / (energyChartValues.length - 1) : chartWidth;
 
       ctx.clearRect(0, 0, width, height);
@@ -1721,27 +1726,47 @@
         ctx.fillText(String(value), padding.left - 8, y);
       }
 
-      ctx.strokeStyle = '#2563eb';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      energyChartValues.forEach((value, index) => {
-        const x = padding.left + stepX * index;
-        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
+      const series = [
+        { name: '发能次数', color: '#2563eb', values: energyChartValues },
+        { name: '激活次数', color: '#f97316', values: activateChartValues }
+      ];
 
-      ctx.fillStyle = '#2563eb';
-      energyChartValues.forEach((value, index) => {
-        const x = padding.left + stepX * index;
-        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+      series.forEach((item) => {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
+        item.values.forEach((value, index) => {
+          const x = padding.left + stepX * index;
+          const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+          if (index === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        ctx.fillStyle = item.color;
+        item.values.forEach((value, index) => {
+          const x = padding.left + stepX * index;
+          const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+
+      const legendY = 10;
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      let legendX = padding.left + 8;
+      series.forEach((item) => {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(legendX, legendY, 10, 10);
+        ctx.fillStyle = '#374151';
+        ctx.fillText(item.name, legendX + 14, legendY + 5);
+        legendX += ctx.measureText(item.name).width + 36;
       });
 
       ctx.fillStyle = '#6b7280';

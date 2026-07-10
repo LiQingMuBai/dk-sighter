@@ -347,6 +347,35 @@ func (c *Client) CreateUSDTTransferTransaction(ctx context.Context, ownerHex, to
 	return resp.Transaction, nil
 }
 
+func (c *Client) CreateTRXTransferTransaction(ctx context.Context, ownerHex, toAddress string, amountSun int64) ([]byte, error) {
+	ownerHex = NormalizeHexAddress(ownerHex)
+	if ownerHex == "" {
+		return nil, fmt.Errorf("empty owner address")
+	}
+	if amountSun <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+
+	toHex, err := normalizeTronAddressToHex(toAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	respBody, err := c.postRaw(ctx, "/wallet/createtransaction", map[string]any{
+		"to_address":    toHex,
+		"owner_address": ownerHex,
+		"amount":        amountSun,
+		"visible":       false,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(respBody) == 0 {
+		return nil, fmt.Errorf("empty unsigned transaction")
+	}
+	return respBody, nil
+}
+
 func (c *Client) BroadcastTransactionJSON(ctx context.Context, txJSON []byte) (string, error) {
 	if len(txJSON) == 0 {
 		return "", fmt.Errorf("empty transaction json")
@@ -396,6 +425,21 @@ func (c *Client) BroadcastTransactionJSON(ctx context.Context, txJSON []byte) (s
 		}
 	}
 	return strings.TrimSpace(resp.TxID), nil
+}
+
+func normalizeTronAddressToHex(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "", fmt.Errorf("empty address")
+	}
+	if strings.HasPrefix(trimmed, "T") {
+		addr, err := gotronAddress.Base58ToAddress(trimmed)
+		if err != nil {
+			return "", fmt.Errorf("invalid destination address: %w", err)
+		}
+		return strings.ToUpper(hex.EncodeToString(addr.Bytes())), nil
+	}
+	return NormalizeHexAddress(trimmed), nil
 }
 
 func normalizeTronReturnMessage(message string) string {

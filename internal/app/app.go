@@ -39,6 +39,7 @@ type App struct {
 	bscEnabled bool
 	webServer  *web.Server
 	wallets    *hdwallet.Service
+	activator  *service.TronAddressActivator
 }
 
 func New(cfgPath string) (*App, error) {
@@ -133,7 +134,11 @@ func New(cfgPath string) (*App, error) {
 	}
 
 	energyProviders := buildEnergyProviders(cfg)
-	webServer, err := web.NewServer(repo, cfg.Web, cache, balanceService, energyProviders, cfg.Energy.Provider)
+	activator, err := service.NewTronAddressActivator(tronClient, repo, cfg.TronActivator)
+	if err != nil {
+		return nil, err
+	}
+	webServer, err := web.NewServer(repo, cfg.Web, cache, balanceService, activator, energyProviders, cfg.Energy.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +156,7 @@ func New(cfgPath string) (*App, error) {
 		bscScanner: bscScanner,
 		bscEnabled: bscEnabled,
 		webServer:  webServer,
+		activator:  activator,
 	}, nil
 }
 
@@ -248,6 +254,16 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		return nil
 	}))
+
+	if a.activator != nil {
+		group.Go(a.safeGo("tron-activator", func() error {
+			err := a.activator.Run(groupCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
+	}
 
 	if a.notifier != nil {
 		group.Go(a.safeGo("telegram-notifier", func() error {

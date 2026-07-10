@@ -227,6 +227,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("load energy chart failed: %v", err)
 		return
 	}
+	activatePoints, err := s.repo.ListDailyTronActivationChart(r.Context(), 30)
+	if err != nil {
+		http.Error(w, "load dashboard failed", http.StatusInternalServerError)
+		log.Printf("load tron activation chart failed: %v", err)
+		return
+	}
 
 	viewRows := make([]dashboardRowView, 0, len(result.Rows))
 	for _, row := range result.Rows {
@@ -285,6 +291,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		TotalPages:      totalPages,
 		ChartLabelsJSON: toJSONString(chartLabels(chartPoints)),
 		ChartValuesJSON: toJSONString(chartValues(chartPoints)),
+		ChartActivateValuesJSON: toJSONString(chartValues(activatePoints)),
 		Sort:            string(sort),
 	}
 	if totalPages > 0 && data.NextPage > totalPages {
