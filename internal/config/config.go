@@ -107,9 +107,10 @@ type BSCConfig struct {
 }
 
 type TronActivatorConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	PrivateKey string `yaml:"private_key"`
-	QueueSize  int    `yaml:"queue_size"`
+	Enabled     bool     `yaml:"enabled"`
+	PrivateKey  string   `yaml:"private_key"`
+	PrivateKeys []string `yaml:"private_keys"`
+	QueueSize   int      `yaml:"queue_size"`
 }
 
 func Load(path string) (*Config, error) {
@@ -169,6 +170,12 @@ func (c *Config) setDefaults() {
 	}
 	if c.QuickNode.MinRequestIntervalMS == 0 {
 		c.QuickNode.MinRequestIntervalMS = 10
+	}
+	if len(c.TronActivator.PrivateKeys) == 0 && strings.TrimSpace(c.TronActivator.PrivateKey) != "" {
+		c.TronActivator.PrivateKeys = []string{strings.TrimSpace(c.TronActivator.PrivateKey)}
+	}
+	if strings.TrimSpace(c.TronActivator.PrivateKey) == "" && len(c.TronActivator.PrivateKeys) == 1 {
+		c.TronActivator.PrivateKey = strings.TrimSpace(c.TronActivator.PrivateKeys[0])
 	}
 	if c.Telegram.APIBaseURL == "" {
 		c.Telegram.APIBaseURL = "https://api.telegram.org"

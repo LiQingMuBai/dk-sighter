@@ -19,6 +19,7 @@ quicknode:
 tron_activator:
   enabled: false
   private_key: ""
+  private_keys: []
   queue_size: 64
 
 web:
