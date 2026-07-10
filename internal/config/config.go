@@ -26,6 +26,7 @@ type AppConfig struct {
 	Name          string `yaml:"name"`
 	Mode          string `yaml:"mode"`
 	HDWalletCount int    `yaml:"hd_wallet_count"`
+	Local         bool   `yaml:"local"`
 }
 
 type MySQLConfig struct {

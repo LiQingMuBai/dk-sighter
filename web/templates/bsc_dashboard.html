@@ -688,7 +688,6 @@
               <option value="bnb_asc" {{ if eq .Sort "bnb_asc" }}selected{{ end }}>BNB 余额 从小到大</option>
             </select>
           </form>
-          <button class="button button-danger" type="button" onclick="handleBatchDelete()">批量删除地址</button>
         </div>
       </div>
 
@@ -701,7 +700,6 @@
               <th>BNB</th>
               <th>USDT</th>
               <th>更新时间</th>
-              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -713,12 +711,11 @@
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
                   <td>{{ .UpdatedAt }}</td>
-                  <td><button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button></td>
                 </tr>
               {{ end }}
             {{ else }}
               <tr>
-                <td class="empty" colspan="6">暂无 BSC 监控地址</td>
+                <td class="empty" colspan="5">暂无 BSC 监控地址</td>
               </tr>
             {{ end }}
           </tbody>
@@ -747,9 +744,6 @@
               <div class="mobile-row">
                 <div class="mobile-label">更新时间</div>
                 <div>{{ .UpdatedAt }}</div>
-              </div>
-              <div class="mobile-actions">
-                <button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button>
               </div>
             </div>
           {{ end }}
@@ -1117,57 +1111,6 @@
           }
         };
       });
-    }
-
-    async function deleteAddresses(addresses) {
-      const resp = await fetch('/api/bsc/delete-addresses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: addresses })
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        throw new Error(data.message || '删除失败');
-      }
-      return data;
-    }
-
-    async function handleSingleDelete(button) {
-      const address = button.dataset.address || '';
-      if (!address) {
-        showToast('地址参数缺失');
-        return;
-      }
-      const ok = await showConfirm('删除地址', '删除后该地址将不再参与 BSC 监控，是否继续？');
-      if (!ok) {
-        return;
-      }
-      try {
-        await deleteAddresses([address]);
-        showToast('删除成功');
-        window.setTimeout(() => window.location.reload(), 400);
-      } catch (error) {
-        showToast(error.message || '删除失败');
-      }
-    }
-
-    async function handleBatchDelete() {
-      const addresses = getUniqueSelectedAddresses();
-      if (!addresses.length) {
-        showToast('请先勾选地址');
-        return;
-      }
-      const ok = await showConfirm('批量删除地址', `本次将删除 ${addresses.length} 个 BSC 地址，删除后将不再参与监控。`);
-      if (!ok) {
-        return;
-      }
-      try {
-        await deleteAddresses(addresses);
-        showToast('批量删除成功');
-        window.setTimeout(() => window.location.reload(), 400);
-      } catch (error) {
-        showToast(error.message || '批量删除失败');
-      }
     }
 
     document.querySelectorAll('.address-checkbox').forEach((box) => {

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -50,6 +52,16 @@ func (d *DB) insertHDTronWatchAddresses(ctx context.Context, source string, item
 		return nil
 	}
 
+	if err := d.insertHDTronWatchAddressesOnce(ctx, source, items); err != nil {
+		if isRetryableMySQLError(err) {
+			return d.insertHDTronWatchAddressesOnce(ctx, source, items)
+		}
+		return err
+	}
+	return nil
+}
+
+func (d *DB) insertHDTronWatchAddressesOnce(ctx context.Context, source string, items []HDWatchAddressInput) error {
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx for hd tron watch addresses: %w", err)
@@ -93,6 +105,16 @@ func (d *DB) insertHDBSCWatchAddresses(ctx context.Context, source string, items
 		return nil
 	}
 
+	if err := d.insertHDBSCWatchAddressesOnce(ctx, source, items); err != nil {
+		if isRetryableMySQLError(err) {
+			return d.insertHDBSCWatchAddressesOnce(ctx, source, items)
+		}
+		return err
+	}
+	return nil
+}
+
+func (d *DB) insertHDBSCWatchAddressesOnce(ctx context.Context, source string, items []HDWatchAddressInput) error {
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx for hd bsc watch addresses: %w", err)
@@ -128,6 +150,16 @@ func (d *DB) insertHDBSCWatchAddresses(ctx context.Context, source string, items
 		return fmt.Errorf("commit hd bsc watch addresses: %w", err)
 	}
 	return nil
+}
+
+func isRetryableMySQLError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, mysqlDriver.ErrInvalidConn) {
+		return true
+	}
+	return strings.Contains(err.Error(), "invalid connection")
 }
 
 func (d *DB) ListHDTronDashboardRows(ctx context.Context, source string, limit, offset int) ([]HDDashboardRow, int, error) {

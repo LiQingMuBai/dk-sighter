@@ -24,7 +24,14 @@ func NewMySQL(ctx context.Context, cfg config.MySQLConfig) (*sql.DB, error) {
 
 	db.SetMaxOpenConns(cfg.MaxOpenConns)
 	db.SetMaxIdleConns(cfg.MaxIdleConns)
-	db.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Second)
+	connMaxLifetime := time.Duration(cfg.ConnMaxLifetime) * time.Second
+	db.SetConnMaxLifetime(connMaxLifetime)
+
+	connMaxIdleTime := 55 * time.Second
+	if connMaxLifetime > 0 && connMaxLifetime < connMaxIdleTime {
+		connMaxIdleTime = connMaxLifetime
+	}
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("ping mysql: %w", err)

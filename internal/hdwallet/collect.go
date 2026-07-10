@@ -248,8 +248,27 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 		if provider == nil || !provider.IsConfigured() {
 			return "", "", fmt.Errorf("未配置发能通道")
 		}
-		if _, err := provider.OrderEnergy(wallet.Address, int(requiredTronSweepEnergy)); err != nil {
-			return "", "", fmt.Errorf("发能一次失败(provider=%s): %w", providerName, err)
+		respBody, orderErr := provider.OrderEnergy(wallet.Address, int(requiredTronSweepEnergy))
+		if s.repo != nil {
+			status := "SUCCESS"
+			errorMessage := ""
+			if orderErr != nil {
+				status = "FAILED"
+				errorMessage = orderErr.Error()
+			}
+			_ = s.repo.InsertEnergyActionLog(ctx, repository.EnergyActionLog{
+				ActionName:    "自动发能一次",
+				AddressBase58: wallet.Address,
+				Provider:      providerName,
+				EnergyAmount:  int(requiredTronSweepEnergy),
+				ActionScore:   1,
+				Status:        status,
+				ResponseBody:  respBody,
+				ErrorMessage:  errorMessage,
+			})
+		}
+		if orderErr != nil {
+			return "", "", fmt.Errorf("发能一次失败(provider=%s): %w", providerName, orderErr)
 		}
 		energyStatusMessage = "地址能量不足，已自动发能一次"
 		s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s %s", candidate.Address, energyStatusMessage))
