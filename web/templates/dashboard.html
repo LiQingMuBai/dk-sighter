@@ -1023,7 +1023,6 @@
             <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
           </select>
         </form>
-        <button class="btn" type="button" onclick="handleBatchDelete()">批量删除地址</button>
       </div>
     </div>
 
@@ -1054,7 +1053,6 @@
               <td>
                 <div class="actions">
                   <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
-                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
                 </div>
               </td>
             </tr>
@@ -1090,7 +1088,6 @@
         </div>
         <div class="mobile-actions">
           <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
-          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
         </div>
       </div>
       {{ end }}
@@ -1560,47 +1557,6 @@
       }
     }
 
-    async function handleDeleteAddress(button) {
-      const address = button.dataset.address || '';
-      if (!address) {
-        showToast('地址缺失');
-        return;
-      }
-      const confirmed = await showConfirm(
-        '删除地址',
-        `确认删除地址 ${address} 吗？删除后该地址将不再参与监控。`,
-        '确认删除'
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        const resp = await fetch('/api/watch-address/delete', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            address: address
-          })
-        });
-
-        const data = await resp.json();
-        if (!resp.ok || !data.success) {
-          showToast(data.message || '删除地址失败');
-          return;
-        }
-
-        showToast(data.message || '删除地址成功');
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
-      } catch (error) {
-        showToast('请求失败，请稍后重试');
-      }
-    }
-
     async function handleActivateAddress(button) {
       const address = button.dataset.address || '';
       if (!address) {
@@ -1626,47 +1582,6 @@
         }
 
         showToast(data.message || '已点击激活地址');
-      } catch (error) {
-        showToast('请求失败，请稍后重试');
-      }
-    }
-
-    async function handleBatchDelete() {
-      const addresses = getSelectedAddresses();
-      if (!addresses.length) {
-        showToast('请先勾选地址');
-        return;
-      }
-      const confirmed = await showConfirm(
-        '批量删除地址',
-        `确认批量删除当前勾选的 ${addresses.length} 个地址吗？删除后这些地址将不再参与监控。`,
-        '确认批量删除'
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        const resp = await fetch('/api/watch-address/delete', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            addresses: addresses
-          })
-        });
-
-        const data = await resp.json();
-        if (!resp.ok || !data.success) {
-          showToast(data.message || '批量删除失败');
-          return;
-        }
-
-        showToast(data.message || '批量删除成功');
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
       } catch (error) {
         showToast('请求失败，请稍后重试');
       }

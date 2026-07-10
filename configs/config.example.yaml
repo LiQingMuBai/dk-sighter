@@ -2,6 +2,7 @@ app:
   name: tron-watcher
   mode: hd_wallet
   hd_wallet_count: 10000
+  local: false
 mysql:
   dsn: ""
   max_open_conns: 20
