@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 
 	"tron_watcher/internal/repository"
@@ -239,19 +238,6 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 		}
 		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", task.addressBase58, balance.String(), blockNumber)
 	case "USDT":
-		active, _, err := s.tronClient.GetAccountState(ctx, task.addressHex)
-		if err != nil {
-			s.logger.Printf("refresh tron account state failed: %s err=%v", task.addressBase58, err)
-			return
-		}
-		if !active {
-			if err := s.repo.UpsertBalance(ctx, task.addressBase58, "USDT", decimal.Zero, blockNumber); err != nil {
-				s.logger.Printf("save usdt balance failed: %s err=%v", task.addressBase58, err)
-				return
-			}
-			s.logger.Printf("skip usdt balance refresh for inactive tron address: address=%s block=%d", task.addressBase58, blockNumber)
-			return
-		}
 		balance, err := s.tronClient.GetUSDTBalance(ctx, task.addressHex)
 		if err != nil {
 			s.logger.Printf("refresh usdt balance failed: %s err=%v", task.addressBase58, err)
