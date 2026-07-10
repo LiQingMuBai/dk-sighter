@@ -12,10 +12,6 @@ import (
 	"tron_watcher/internal/repository"
 )
 
-type bscBalanceRefresher interface {
-	RefreshAddresses(context.Context, []string)
-}
-
 type bscDashboardPageData struct {
 	GeneratedAt string
 	Records     []bscDashboardRecordView
@@ -203,10 +199,10 @@ func (s *Server) handleBSCAddWatchAddresses(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if refresher, ok := any(s.reloader).(bscBalanceRefresher); ok && len(toInsert) > 0 {
+	if s.bscBalances != nil && len(toInsert) > 0 {
 		refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
-		refresher.RefreshAddresses(refreshCtx, toInsert)
+		s.bscBalances.RefreshAddresses(refreshCtx, toInsert)
 	}
 
 	s.writeJSON(w, http.StatusOK, bscAddWatchAddressesResponse{
@@ -216,6 +212,55 @@ func (s *Server) handleBSCAddWatchAddresses(w http.ResponseWriter, r *http.Reque
 		Addresses:          toInsert,
 		DuplicateAddresses: duplicates,
 		InvalidAddresses:   invalid,
+	})
+}
+
+func (s *Server) handleBSCRefreshAddress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, refreshAddressResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+	if s.bscBalances == nil {
+		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+			Success: false,
+			Message: "bsc balance refresher not configured",
+		})
+		return
+	}
+
+	var req refreshAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	address := strings.TrimSpace(req.Address)
+	if address == "" {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "address is required",
+		})
+		return
+	}
+
+	refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	s.bscBalances.RefreshAddresses(refreshCtx, []string{address})
+
+	s.writeJSON(w, http.StatusOK, refreshAddressResponse{
+		Success: true,
+		Message: "BSC 地址余额更新成功",
+		Address: address,
 	})
 }
 

@@ -1054,6 +1054,7 @@
               <td class="num">{{ .LastUpdatedAt }}</td>
               <td>
                 <div class="actions">
+                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleRefreshTronAddress(this)">更新余额</button>
                   <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
                 </div>
               </td>
@@ -1089,6 +1090,7 @@
           </div>
         </div>
         <div class="mobile-actions">
+          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleRefreshTronAddress(this)">更新余额</button>
           <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
         </div>
       </div>
@@ -1586,6 +1588,46 @@
         showToast(data.message || '已点击激活地址');
       } catch (error) {
         showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleRefreshTronAddress(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '更新中...';
+
+      try {
+        const resp = await fetch('/api/tron/refresh-address', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            address: address
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '更新余额失败');
+          return;
+        }
+
+        showToast(data.message || '地址余额更新成功');
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
     }
 

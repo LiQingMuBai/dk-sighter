@@ -33,6 +33,10 @@ type tronBalanceRefresher interface {
 	RefreshAddresses(context.Context, []string) error
 }
 
+type bscBalanceRefresher interface {
+	RefreshAddresses(context.Context, []string)
+}
+
 type tronAddressActivator interface {
 	Activate(context.Context, string) (string, error)
 	EnqueueBatch([]string) (string, int, error)
@@ -42,6 +46,7 @@ type Server struct {
 	repo                  *repository.DB
 	reloader              addressReloader
 	tronBalances          tronBalanceRefresher
+	bscBalances           bscBalanceRefresher
 	tronActivator         tronAddressActivator
 	listen                string
 	templates             *template.Template
@@ -109,6 +114,16 @@ type addWatchAddressesResponse struct {
 	InvalidAddresses   []string `json:"invalid_addresses,omitempty"`
 }
 
+type refreshAddressRequest struct {
+	Address string `json:"address"`
+}
+
+type refreshAddressResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Address string `json:"address,omitempty"`
+}
+
 type actionPreviewRequest struct {
 	Action    string   `json:"action"`
 	Address   string   `json:"address"`
@@ -174,6 +189,7 @@ func NewServer(
 	cfg config.WebConfig,
 	reloader addressReloader,
 	tronBalances tronBalanceRefresher,
+	bscBalances bscBalanceRefresher,
 	tronActivator tronAddressActivator,
 	energyProviders map[string]infrastructure.EnergyOrderProvider,
 	defaultEnergyProvider string,
@@ -190,6 +206,7 @@ func NewServer(
 		repo:                  repo,
 		reloader:              reloader,
 		tronBalances:          tronBalances,
+		bscBalances:           bscBalances,
 		tronActivator:         tronActivator,
 		listen:                cfg.Listen,
 		templates:             tmpl,
@@ -271,12 +288,14 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/openapi.json", s.handleOpenAPI)
 		mux.HandleFunc("/api/bsc/watch-addresses", s.handleBSCAddWatchAddresses)
 		mux.HandleFunc("/api/bsc/delete-addresses", s.handleBSCDeleteAddresses)
+		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
 		mux.HandleFunc("/api/bsc/transfers/in", s.handleBSCTransfersInAPI)
 		mux.HandleFunc("/api/bsc/transfers/out", s.handleBSCTransfersOutAPI)
 		mux.HandleFunc("/api/mnemonic/cache", s.handleCacheMnemonic)
 		mux.HandleFunc("/api/watch-addresses", s.handleAddWatchAddresses)
 		mux.HandleFunc("/api/tron/watch-addresses", s.handleAddWatchAddresses)
+		mux.HandleFunc("/api/tron/refresh-address", s.handleRefreshAddress)
 		mux.HandleFunc("/api/tron/balances", s.handleTronBalancesAPI)
 		mux.HandleFunc("/api/tron/transfers/in", s.handleTronTransfersInAPI)
 		mux.HandleFunc("/api/tron/transfers/out", s.handleTronTransfersOutAPI)
@@ -791,9 +810,65 @@ func (s *Server) handleCacheMnemonic(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, refreshAddressResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+	if s.tronBalances == nil {
+		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+			Success: false,
+			Message: "tron balance refresher not configured",
+		})
+		return
+	}
+
+	var req refreshAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	address := strings.TrimSpace(req.Address)
+	if address == "" {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "address is required",
+		})
+		return
+	}
+
+	if err := s.tronBalances.RefreshAddresses(r.Context(), []string{address}); err != nil {
+		log.Printf("refresh tron address balance failed: address=%s err=%v", address, err)
+		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+			Success: false,
+			Message: "更新 Tron 余额失败",
+			Address: address,
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, refreshAddressResponse{
+		Success: true,
+		Message: "Tron 地址余额更新成功",
+		Address: address,
+	})
+}
 func (s *Server) handleDeleteWatchAddress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 		return
 	}
 	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {

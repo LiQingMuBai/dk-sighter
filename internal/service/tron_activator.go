@@ -22,7 +22,7 @@ import (
 
 const (
 	activateTRXAmountSun = int64(1_000_000)
-	activateInterval     = 1 * time.Second
+	activateInterval     = 3 * time.Second
 )
 
 type TronAddressActivator struct {

@@ -700,6 +700,7 @@
               <th>BNB</th>
               <th>USDT</th>
               <th>更新时间</th>
+              <th>功能</th>
             </tr>
           </thead>
           <tbody>
@@ -711,11 +712,12 @@
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
                   <td>{{ .UpdatedAt }}</td>
+                  <td><button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button></td>
                 </tr>
               {{ end }}
             {{ else }}
               <tr>
-                <td class="empty" colspan="5">暂无 BSC 监控地址</td>
+                <td class="empty" colspan="6">暂无 BSC 监控地址</td>
               </tr>
             {{ end }}
           </tbody>
@@ -744,6 +746,9 @@
               <div class="mobile-row">
                 <div class="mobile-label">更新时间</div>
                 <div>{{ .UpdatedAt }}</div>
+              </div>
+              <div class="mobile-actions">
+                <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
               </div>
             </div>
           {{ end }}
@@ -1044,6 +1049,38 @@
           btn.disabled = false;
           btn.textContent = '添加地址';
         }
+      }
+    }
+
+    async function handleRefreshBSCAddress(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '更新中...';
+
+      try {
+        const resp = await fetch('/api/bsc/refresh-address', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: address })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '更新余额失败');
+          return;
+        }
+        showToast(data.message || '地址余额更新成功');
+        window.setTimeout(() => window.location.reload(), 500);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
     }
 
