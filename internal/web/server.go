@@ -137,13 +137,17 @@ type deleteWatchAddressResponse struct {
 }
 
 type activateAddressRequest struct {
-	Address string `json:"address"`
+	Address   string   `json:"address"`
+	Addresses []string `json:"addresses"`
 }
 
 type activateAddressResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Address string `json:"address,omitempty"`
+	Success      bool     `json:"success"`
+	Message      string   `json:"message"`
+	Address      string   `json:"address,omitempty"`
+	Addresses    []string `json:"addresses,omitempty"`
+	TotalCount   int      `json:"total_count,omitempty"`
+	SuccessCount int      `json:"success_count,omitempty"`
 }
 
 type cacheMnemonicRequest struct {
@@ -878,20 +882,23 @@ func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	address := strings.TrimSpace(req.Address)
-	if address == "" {
+	addresses := normalizeActionAddresses(req.Address, req.Addresses)
+	if len(addresses) == 0 {
 		s.writeJSON(w, http.StatusBadRequest, activateAddressResponse{
 			Success: false,
-			Message: "address is required",
+			Message: "address or addresses is required",
 		})
 		return
 	}
 
-	log.Printf("tron activate address clicked: address=%s", address)
+	log.Printf("tron activate address clicked: total=%d addresses=%s", len(addresses), strings.Join(addresses, ","))
 	s.writeJSON(w, http.StatusOK, activateAddressResponse{
-		Success: true,
-		Message: "已记录激活地址点击",
-		Address: address,
+		Success:      true,
+		Message:      fmt.Sprintf("已记录激活地址点击 %d / %d", len(addresses), len(addresses)),
+		Address:      firstAddress(addresses),
+		Addresses:    addresses,
+		TotalCount:   len(addresses),
+		SuccessCount: len(addresses),
 	})
 }
 

@@ -1023,6 +1023,7 @@
             <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
           </select>
         </form>
+        <button class="btn" type="button" onclick="handleBatchActivateAddress()">批量激活地址</button>
       </div>
     </div>
 
@@ -1582,6 +1583,45 @@
         }
 
         showToast(data.message || '已点击激活地址');
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      }
+    }
+
+    async function handleBatchActivateAddress() {
+      const addresses = getSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+
+      const confirmed = await showConfirm(
+        '批量激活地址',
+        `确认批量激活当前勾选的 ${addresses.length} 个地址吗？`,
+        '确认激活'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/tron/activate-address', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            addresses: addresses
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '批量激活地址失败');
+          return;
+        }
+
+        showToast(data.message || '已批量激活地址');
       } catch (error) {
         showToast('请求失败，请稍后重试');
       }
