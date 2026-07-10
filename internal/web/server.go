@@ -136,6 +136,16 @@ type deleteWatchAddressResponse struct {
 	FailedAddresses []string `json:"failed_addresses,omitempty"`
 }
 
+type activateAddressRequest struct {
+	Address string `json:"address"`
+}
+
+type activateAddressResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Address string `json:"address,omitempty"`
+}
+
 type cacheMnemonicRequest struct {
 	Mnemonic string `json:"mnemonic"`
 }
@@ -257,6 +267,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/tron/transfers/out", s.handleTronTransfersOutAPI)
 		mux.HandleFunc("/api/watch-address/delete", s.handleDeleteWatchAddress)
 		mux.HandleFunc("/api/tron/delete-addresses", s.handleDeleteWatchAddress)
+		mux.HandleFunc("/api/tron/activate-address", s.handleActivateAddress)
 	}
 
 	server := &http.Server{
@@ -842,6 +853,45 @@ func (s *Server) handleDeleteWatchAddress(w http.ResponseWriter, r *http.Request
 		SuccessCount:    successCount,
 		FailedCount:     failedCount,
 		FailedAddresses: failedAddresses,
+	})
+}
+
+func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, activateAddressResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	var req activateAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	address := strings.TrimSpace(req.Address)
+	if address == "" {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressResponse{
+			Success: false,
+			Message: "address is required",
+		})
+		return
+	}
+
+	log.Printf("tron activate address clicked: address=%s", address)
+	s.writeJSON(w, http.StatusOK, activateAddressResponse{
+		Success: true,
+		Message: "已记录激活地址点击",
+		Address: address,
 	})
 }
 
