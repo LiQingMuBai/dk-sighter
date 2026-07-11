@@ -1137,7 +1137,7 @@
     }
 
     async function handleManualFullRefreshBSC() {
-      const confirmed = await showConfirm('手动全量更新', '确认开始手动全量更新全部 BSC 关注地址余额吗？系统会后台分页执行，10 分钟内不能重复操作。');
+      const confirmed = await showConfirm('手动全量更新', '确认开始手动全量更新全部 BSC 关注地址余额吗？系统会后台分页执行，20 分钟内不能重复操作。');
       if (!confirmed) {
         return;
       }

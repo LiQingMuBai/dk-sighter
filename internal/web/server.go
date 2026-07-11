@@ -1375,7 +1375,7 @@ func firstAddress(addresses []string) string {
 }
 
 const (
-	manualRefreshCooldown  = 10 * time.Minute
+	manualRefreshCooldown  = 20 * time.Minute
 	manualRefreshBatchSize = 50
 	manualRefreshBatchWait = 300 * time.Millisecond
 	tronManualRefreshBatchWait = 1 * time.Second
@@ -1416,7 +1416,7 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	if !job.lastStarted.IsZero() && now.Before(job.lastStarted.Add(manualRefreshCooldown)) {
 		nextAllowed := job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
 		s.manualRefreshMu.Unlock()
-		return 0, fmt.Errorf("%s 手动全量更新 10分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
+		return 0, fmt.Errorf("%s 手动全量更新 20分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
 	}
 	job.running = true
 	job.lastStarted = now
