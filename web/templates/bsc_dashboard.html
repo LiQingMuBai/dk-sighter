@@ -702,6 +702,7 @@
       <div class="toolbar">
         <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
         <div class="toolbar-actions">
+          <button id="batchRefreshBalanceBtn" class="button button-brand" type="button" onclick="handleBatchRefreshBSCAddress()">批量更新余额</button>
           <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
@@ -1123,6 +1124,43 @@
       } finally {
         button.disabled = false;
         button.textContent = originalText;
+      }
+    }
+
+    async function handleBatchRefreshBSCAddress() {
+      const addresses = getUniqueSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+
+      const button = document.getElementById('batchRefreshBalanceBtn');
+      const originalText = button ? button.textContent : '批量更新余额';
+      if (button) {
+        button.disabled = true;
+        button.textContent = '批量更新中...';
+      }
+
+      try {
+        const resp = await fetch('/api/bsc/refresh-address', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addresses })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量更新余额失败');
+          return;
+        }
+        showToast(data.message || `批量更新余额成功，共 ${addresses.length} 个`);
+        window.setTimeout(() => window.location.reload(), 800);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
       }
     }
 
