@@ -3,6 +3,7 @@ package hdwallet
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,7 +34,10 @@ const (
 	manualTronSweepEnergy   = int64(10_000)
 )
 
-var minimumBSCSweepBNBBalance = decimal.RequireFromString("0.001")
+var (
+	minimumBSCSweepBNBBalance = decimal.RequireFromString("0.001")
+	manualBSCGasTopupAmount   = decimal.RequireFromString("0.001")
+)
 
 type SweepPreview struct {
 	Chain             string           `json:"chain"`
@@ -169,7 +173,7 @@ func (s *Service) runSweep(chain, destination, sourceAddress string) {
 		case "tron":
 			txHash, statusNote, err = s.collectTronUSDT(cfg, file, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		case "bsc":
-			txHash, err = s.collectBSCUSDT(cfg, file, threshold, destination, candidate)
+			txHash, statusNote, err = s.collectBSCUSDT(cfg, file, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		default:
 			err = fmt.Errorf("unknown chain")
 		}
@@ -399,60 +403,83 @@ func buildSignedTronTransactionJSON(unsignedJSON []byte, signatures [][]byte) ([
 	return json.Marshal(payload)
 }
 
-func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold decimal.Decimal, destination string, candidate SweepCandidate) (string, error) {
+func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold decimal.Decimal, destination string, candidate SweepCandidate, progressCurrent int, manualSweep bool) (string, string, error) {
 	mnemonic := cfg.BSCMnemonic
 	var err error
 	if s.repo != nil {
 		mnemonic, err = s.loadChainMnemonicByTag("bsc", candidate.MnemonicTag, cfg.BSCMnemonic)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	wallet, err := DeriveBSCWallet(mnemonic, candidate.Index)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if strings.EqualFold(wallet.Address, destination) {
-		return "", fmt.Errorf("skip: 目标地址与源地址相同")
+		return "", "", fmt.Errorf("skip: 目标地址与源地址相同")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+	statusNotes := make([]string, 0, 2)
 
 	usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, wallet.Address)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if usdtBalance.LessThan(threshold) {
-		return "", fmt.Errorf("skip: 当前 USDT 余额低于阈值")
+		return "", "", fmt.Errorf("skip: 当前 USDT 余额低于阈值")
 	}
 
 	bnbBalance, err := s.bscClient.GetBNBBalance(ctx, wallet.Address)
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	if manualSweep && bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
+		if strings.TrimSpace(s.bscGasTopupPrivateKey) == "" {
+			return "", "", fmt.Errorf("未配置 bsc gas 补充私钥")
+		}
+		s.setProgress("sweep", "bsc", progressCurrent, fmt.Sprintf("BSC 地址 %s BNB 不足，正在自动补充 gas", candidate.Address))
+		gasTxHash, topupErr := s.sendBSCGasTopup(ctx, wallet.Address, manualBSCGasTopupAmount)
+		if topupErr != nil {
+			return "", "", fmt.Errorf("补充 bsc gas 失败: %w", topupErr)
+		}
+		statusNotes = append(statusNotes, fmt.Sprintf("BNB 不足，已自动补充 0.001 BNB gas(%s)", gasTxHash))
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		case <-timer.C:
+		}
+		bnbBalance, err = s.bscClient.GetBNBBalance(ctx, wallet.Address)
+		if err != nil {
+			return "", "", fmt.Errorf("补充 gas 后读取 bnb 余额失败: %w", err)
+		}
 	}
 	if bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
-		return "", fmt.Errorf("skip: bnb 余额需大于等于 0.001")
+		return "", "", fmt.Errorf("skip: bnb 余额需大于等于 0.001")
 	}
 	amountUnits, err := decimalToTokenUnits(usdtBalance, bscTokenPrecision)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	gasPrice, err := s.bscClient.GasPrice(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	nonce, err := s.bscClient.PendingNonceAt(ctx, wallet.Address)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	chainID, err := s.bscClient.ChainID(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	data, err := buildERC20TransferData(destination, amountUnits)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	callObj := map[string]any{
 		"from": wallet.Address,
@@ -461,22 +488,22 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	}
 	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	gasLimit = gasLimit + gasLimit/5 + 5_000
 
 	bnbBalanceWei, err := decimalToTokenUnits(bnbBalance, 18)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	estimatedFeeWei := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
 	if bnbBalanceWei.Cmp(estimatedFeeWei) < 0 {
-		return "", fmt.Errorf("skip: bnb 手续费不足")
+		return "", "", fmt.Errorf("skip: bnb 手续费不足")
 	}
 
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(wallet.PrivateKeyHex, "0x"))
 	if err != nil {
-		return "", fmt.Errorf("load bsc private key: %w", err)
+		return "", "", fmt.Errorf("load bsc private key: %w", err)
 	}
 	tokenAddress := common.HexToAddress(s.bscClient.USDTContract())
 	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
@@ -489,29 +516,99 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	})
 	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privateKey)
 	if err != nil {
-		return "", fmt.Errorf("sign bsc transaction: %w", err)
+		return "", "", fmt.Errorf("sign bsc transaction: %w", err)
 	}
 	rawTx, err := signedTx.MarshalBinary()
 	if err != nil {
-		return "", fmt.Errorf("marshal bsc transaction: %w", err)
+		return "", "", fmt.Errorf("marshal bsc transaction: %w", err)
 	}
 	txHash, err := s.bscClient.SendRawTransaction(ctx, hex.EncodeToString(rawTx))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if s.repo != nil {
 		if err := repository.UpsertBSCBalance(ctx, s.repo, wallet.Address, "USDT", decimal.Zero.StringFixed(6)); err != nil {
-			return "", err
+			return "", "", err
 		}
-		return txHash, nil
+		return txHash, strings.Join(statusNotes, "，"), nil
 	}
 	if candidate.Index < len(file.Addresses) {
 		file.Addresses[candidate.Index].USDTBalance = decimal.Zero.StringFixed(6)
 		file.Addresses[candidate.Index].UpdatedAt = nowString()
 	}
 	file.BalanceUpdatedAt = nowString()
+	return txHash, strings.Join(statusNotes, "，"), nil
+}
+
+func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount decimal.Decimal) (string, error) {
+	if s.bscClient == nil {
+		return "", fmt.Errorf("bsc client not configured")
+	}
+	privateKey, fromAddress, err := parseBSCGasTopupPrivateKey(s.bscGasTopupPrivateKey)
+	if err != nil {
+		return "", err
+	}
+	gasPrice, err := s.bscClient.GasPrice(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get gas price: %w", err)
+	}
+	nonce, err := s.bscClient.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		return "", fmt.Errorf("get nonce: %w", err)
+	}
+	chainID, err := s.bscClient.ChainID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get chain id: %w", err)
+	}
+	amountWei, err := decimalToTokenUnits(amount, 18)
+	if err != nil {
+		return "", fmt.Errorf("convert amount to wei: %w", err)
+	}
+	to := common.HexToAddress(toAddress)
+	callObj := map[string]any{
+		"from":  fromAddress,
+		"to":    toAddress,
+		"value": "0x" + amountWei.Text(16),
+	}
+	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
+	if err != nil {
+		return "", fmt.Errorf("estimate gas: %w", err)
+	}
+	gasLimit = gasLimit + gasLimit/5 + 5_000
+	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
+		Nonce:    nonce,
+		To:       &to,
+		Value:    amountWei,
+		Gas:      gasLimit,
+		GasPrice: gasPrice,
+	})
+	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		return "", fmt.Errorf("sign bsc tx: %w", err)
+	}
+	rawTx, err := signedTx.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("marshal bsc tx: %w", err)
+	}
+	txHash, err := s.bscClient.SendRawTransaction(ctx, hex.EncodeToString(rawTx))
+	if err != nil {
+		return "", fmt.Errorf("send raw transaction: %w", err)
+	}
 	return txHash, nil
+}
+
+func parseBSCGasTopupPrivateKey(value string) (*ecdsa.PrivateKey, string, error) {
+	keyHex := strings.TrimSpace(strings.TrimPrefix(value, "0x"))
+	if keyHex == "" {
+		return nil, "", fmt.Errorf("empty bsc gas topup private key")
+	}
+	privateKey, err := crypto.HexToECDSA(keyHex)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse bsc gas topup private key: %w", err)
+	}
+	fromAddress := strings.ToLower(crypto.PubkeyToAddress(privateKey.PublicKey).Hex())
+	return privateKey, fromAddress, nil
 }
 
 func (s *Service) loadSweepContext(chain string) (ConfigFile, *ChainFile, decimal.Decimal, error) {
@@ -672,27 +769,21 @@ func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.
 				continue
 			}
 		} else if chain == "bsc" {
-			if strings.TrimSpace(record.BNBBalance) == "" {
-				if isFocus {
-					// #region debug-point C:sweep-filter-focus-skip-empty-bnb
-					debugReport("pre", "C", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: empty bnb balance", nil)
-					// #endregion
+			if strings.TrimSpace(record.BNBBalance) != "" {
+				bnbBalance, err = decimal.NewFromString(strings.TrimSpace(record.BNBBalance))
+				if err != nil {
+					if isFocus {
+						// #region debug-point C:sweep-filter-focus-parse-bnb-failed
+						debugReport("pre", "C", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: parse bnb failed", map[string]any{
+							"rawBNB": strings.TrimSpace(record.BNBBalance),
+							"err":    err.Error(),
+						})
+						// #endregion
+					}
+					continue
 				}
-				continue
 			}
-			bnbBalance, err = decimal.NewFromString(strings.TrimSpace(record.BNBBalance))
-			if err != nil {
-				if isFocus {
-					// #region debug-point C:sweep-filter-focus-parse-bnb-failed
-					debugReport("pre", "C", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: parse bnb failed", map[string]any{
-						"rawBNB": strings.TrimSpace(record.BNBBalance),
-						"err":    err.Error(),
-					})
-					// #endregion
-				}
-				continue
-			}
-			if bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
+			if sourceAddress == "" && bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
 				if isFocus {
 					// #region debug-point C:sweep-filter-focus-skip-bnb-threshold
 					debugReport("pre", "C", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: bnb below minimum", map[string]any{

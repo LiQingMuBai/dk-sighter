@@ -122,6 +122,7 @@ type Service struct {
 	repo                  *repository.DB
 	hdSource              string
 	tronActivator         tronSweepActivator
+	bscGasTopupPrivateKey string
 	energyProviders       map[string]infrastructure.EnergyOrderProvider
 	defaultEnergyProvider string
 
@@ -166,6 +167,10 @@ func (s *Service) ConfigureEnergyProviders(providers map[string]infrastructure.E
 
 func (s *Service) ConfigureTronActivator(activator tronSweepActivator) {
 	s.tronActivator = activator
+}
+
+func (s *Service) ConfigureBSCGasTopupPrivateKey(privateKey string) {
+	s.bscGasTopupPrivateKey = strings.TrimSpace(privateKey)
 }
 
 func (s *Service) SaveConfig(tronMnemonic, bscMnemonic, tronUSDTThreshold, bscUSDTThreshold string) (ConfigFile, error) {

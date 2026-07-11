@@ -97,6 +97,7 @@ func New(cfgPath string) (*App, error) {
 		}
 		walletService.ConfigureEnergyProviders(energyProviders, cfg.Energy.Provider)
 		walletService.ConfigureTronActivator(activator)
+		walletService.ConfigureBSCGasTopupPrivateKey(cfg.BSC.GasTransferPrivateKey)
 		walletService.ConfigureRepository(repo, repository.HDWalletSource)
 		webServer, err := web.NewHDWalletServer(cfg.Web, walletService, energyProviders, cfg.Energy.Provider)
 		if err != nil {

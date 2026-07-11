@@ -3,6 +3,7 @@ package hdwallet
 import (
 	"encoding/json"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -204,6 +205,35 @@ func TestCollectEligibleCandidatesFiltersBySourceAddress(t *testing.T) {
 	}
 }
 
+func TestCollectEligibleCandidatesAllowsManualBSCSweepWithLowBNB(t *testing.T) {
+	file := &ChainFile{
+		Chain: "bsc",
+		Addresses: []AddressRecord{
+			{
+				Index:       0,
+				Address:     "0x1111111111111111111111111111111111111111",
+				MnemonicTag: "m-current",
+				BNBBalance:  "0.000000",
+				USDTBalance: "15.000000",
+			},
+		},
+	}
+
+	candidates, total := collectEligibleCandidates("bsc", file, decimal.RequireFromString("10"), "", "m-current", "0x1111111111111111111111111111111111111111")
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].Address != "0x1111111111111111111111111111111111111111" {
+		t.Fatalf("unexpected candidate address: %s", candidates[0].Address)
+	}
+	if candidates[0].BNBBalance != "0.000000" {
+		t.Fatalf("unexpected candidate bnb balance: %s", candidates[0].BNBBalance)
+	}
+	if !total.Equal(decimal.RequireFromString("15")) {
+		t.Fatalf("unexpected total usdt: %s", total.String())
+	}
+}
+
 func TestCollectEligibleCandidatesAllowsManualTronSweepWithLowTRX(t *testing.T) {
 	file := &ChainFile{
 		Chain: "tron",
@@ -233,6 +263,19 @@ func TestCollectEligibleCandidatesAllowsManualTronSweepWithLowTRX(t *testing.T) 
 	}
 }
 
+func TestParseBSCGasTopupPrivateKey(t *testing.T) {
+	privateKey, fromAddress, err := parseBSCGasTopupPrivateKey("0x4c0883a69102937d6231471b5dbb6204fe512961708279f810f7ac2d7f7e5d58")
+	if err != nil {
+		t.Fatalf("parseBSCGasTopupPrivateKey returned error: %v", err)
+	}
+	if privateKey == nil {
+		t.Fatalf("expected private key")
+	}
+	if fromAddress == "" || !strings.HasPrefix(fromAddress, "0x") {
+		t.Fatalf("unexpected from address: %s", fromAddress)
+	}
+}
+
 func TestDecimalToTokenUnitsUsesBSCPrecision18(t *testing.T) {
 	value, err := decimalToTokenUnits(decimal.RequireFromString("100"), bscTokenPrecision)
 	if err != nil {
@@ -244,6 +287,7 @@ func TestDecimalToTokenUnitsUsesBSCPrecision18(t *testing.T) {
 		t.Fatalf("unexpected token units: got %s want %s", value.String(), expected.String())
 	}
 }
+
 func TestCollectMissingWalletIndexesSkipsExistingIndexes(t *testing.T) {
 	indexes := collectMissingWalletIndexes([]int{0, 1, 3, 5, 999}, 8, 4)
 	expected := []int{2, 4, 6, 7}

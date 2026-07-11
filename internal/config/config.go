@@ -105,6 +105,7 @@ type BSCConfig struct {
 	RPCHTTPURL                  string `yaml:"rpc_http_url"`
 	RPCWSSURL                   string `yaml:"rpc_wss_url"`
 	USDTContract                string `yaml:"usdt_contract"`
+	GasTransferPrivateKey       string `yaml:"gas_transfer_private_key"`
 	StartBlock                  int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds    int    `yaml:"block_poll_interval_seconds"`
 	Confirmations               int    `yaml:"confirmations"`

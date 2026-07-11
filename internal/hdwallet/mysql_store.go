@@ -613,7 +613,7 @@ func (s *Service) runSweepFromDB(chain, destination, sourceAddress string) {
 		case "tron":
 			txHash, statusNote, err = s.collectTronUSDT(cfg, file, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		case "bsc":
-			txHash, err = s.collectBSCUSDT(cfg, nil, threshold, destination, candidate)
+			txHash, statusNote, err = s.collectBSCUSDT(cfg, nil, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		default:
 			err = fmt.Errorf("unknown chain")
 		}
