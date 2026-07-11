@@ -276,6 +276,15 @@
       word-break: break-all;
     }
 
+    .address-link {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    .address-link:hover {
+      text-decoration: underline;
+    }
+
     .delete-link {
       border: 0;
       background: transparent;
@@ -754,7 +763,7 @@
               {{ range .Records }}
                 <tr>
                   <td><input class="address-checkbox" type="checkbox" value="{{ .Address }}"></td>
-                  <td class="mono">{{ .Address }}</td>
+                  <td class="mono"><a class="address-link" href="https://bscscan.com/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
                   <td>{{ .UpdatedAt }}</td>
@@ -784,7 +793,7 @@
               </div>
               <div class="mobile-row">
                 <div class="mobile-label">地址</div>
-                <div class="mono">{{ .Address }}</div>
+                <div class="mono"><a class="address-link" href="https://bscscan.com/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></div>
               </div>
               <div class="mobile-row">
                 <div class="mobile-label">BNB</div>

@@ -291,6 +291,15 @@
       word-break: break-all;
     }
 
+    .address-link {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    .address-link:hover {
+      text-decoration: underline;
+    }
+
     .num {
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
@@ -1085,7 +1094,7 @@
               <td class="check-cell">
                 <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
               </td>
-              <td class="address">{{ .Address }}</td>
+              <td class="address"><a class="address-link" href="https://tronscan.org/#/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></td>
               <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'TRX')">{{ .TRXBalance }}</button></td>
               <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDTBalance }}</button></td>
               <td class="num">{{ .LastUpdatedAt }}</td>
@@ -1108,7 +1117,7 @@
         <div class="wallet-head">
           <div class="wallet-head-left">
             <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
-            <div class="wallet-address">{{ .Address }}</div>
+            <div class="wallet-address"><a class="address-link" href="https://tronscan.org/#/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></div>
           </div>
           <div class="tag">监控中</div>
         </div>
