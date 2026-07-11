@@ -189,6 +189,13 @@
       flex-wrap: wrap;
     }
 
+    .search-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
     .sort-label {
       color: var(--subtext);
       font-size: 14px;
@@ -203,6 +210,23 @@
       border-radius: 12px;
       padding: 10px 12px;
       font-size: 14px;
+    }
+
+    .search-input {
+      min-width: 280px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .search-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
     }
 
     .button {
@@ -680,6 +704,7 @@
         <div class="toolbar-actions">
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
+            <input type="hidden" name="address" value="{{ .AddressQuery }}">
             <label class="sort-label" for="sortSelect">Sort 排序</label>
             <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
               <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
@@ -687,6 +712,16 @@
               <option value="bnb_desc" {{ if eq .Sort "bnb_desc" }}selected{{ end }}>BNB 余额 从大到小</option>
               <option value="bnb_asc" {{ if eq .Sort "bnb_asc" }}selected{{ end }}>BNB 余额 从小到大</option>
             </select>
+          </form>
+          <form class="search-form" method="get" action="/bsc">
+            <input type="hidden" name="page" value="1">
+            <input type="hidden" name="sort" value="{{ .Sort }}">
+            <label class="sort-label" for="addressSearch">地址检索</label>
+            <input id="addressSearch" class="search-input" type="text" name="address" value="{{ .AddressQuery }}" placeholder="输入 BSC 地址片段快速过滤">
+            <button class="button button-brand" type="submit">检索</button>
+            {{ if .AddressQuery }}
+            <a class="button search-link" href="/bsc?sort={{ .Sort }}">清空</a>
+            {{ end }}
           </form>
         </div>
       </div>
@@ -717,7 +752,7 @@
               {{ end }}
             {{ else }}
               <tr>
-                <td class="empty" colspan="6">暂无 BSC 监控地址</td>
+                <td class="empty" colspan="6">{{ if .AddressQuery }}未找到匹配的 BSC 地址{{ else }}暂无 BSC 监控地址{{ end }}</td>
               </tr>
             {{ end }}
           </tbody>
@@ -759,12 +794,12 @@
         <div class="pager-info">第 {{ .Page }} / {{ .TotalPages }} 页，每页 {{ .PageSize }} 条</div>
         <div class="pager-nav">
           {{ if .HasPrev }}
-            <a href="/bsc?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+            <a href="/bsc?page={{ .PrevPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">上一页</a>
           {{ else }}
             <span class="disabled">上一页</span>
           {{ end }}
           {{ if .HasNext }}
-            <a href="/bsc?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+            <a href="/bsc?page={{ .NextPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">下一页</a>
           {{ else }}
             <span class="disabled">下一页</span>
           {{ end }}

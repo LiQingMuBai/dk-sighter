@@ -64,20 +64,21 @@ type Server struct {
 }
 
 type dashboardPageData struct {
-	GeneratedAt     string
-	Rows            []dashboardRowView
-	TotalCount      int
-	Page            int
-	PageSize        int
-	HasPrev         bool
-	HasNext         bool
-	PrevPage        int
-	NextPage        int
-	TotalPages      int
-	ChartLabelsJSON string
-	ChartValuesJSON string
+	GeneratedAt             string
+	Rows                    []dashboardRowView
+	TotalCount              int
+	Page                    int
+	PageSize                int
+	HasPrev                 bool
+	HasNext                 bool
+	PrevPage                int
+	NextPage                int
+	TotalPages              int
+	ChartLabelsJSON         string
+	ChartValuesJSON         string
 	ChartActivateValuesJSON string
-	Sort            string
+	Sort                    string
+	AddressQuery            string
 }
 
 type apiDocsPageData struct {
@@ -375,9 +376,10 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 
 	page := parsePositiveBSCPage(r.URL.Query().Get("page"))
 	sort := parseBSCDashboardSort(r.URL.Query().Get("sort"))
+	addressQuery := strings.TrimSpace(r.URL.Query().Get("address"))
 	pageSize := 20
 
-	total, err := s.countActiveBSCWatchAddresses(r.Context())
+	total, err := s.countActiveBSCWatchAddresses(r.Context(), addressQuery)
 	if err != nil {
 		http.Error(w, "load bsc total failed", http.StatusInternalServerError)
 		log.Printf("load bsc total failed: %v", err)
@@ -395,7 +397,7 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * pageSize
-	records, err := s.listBSCDashboardRecords(r.Context(), pageSize, offset, sort)
+	records, err := s.listBSCDashboardRecords(r.Context(), pageSize, offset, sort, addressQuery)
 	if err != nil {
 		http.Error(w, "load bsc dashboard failed", http.StatusInternalServerError)
 		log.Printf("load bsc dashboard failed: %v", err)
@@ -419,6 +421,7 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 	data := buildBSCDashboardPageData(recordViews, page, pageSize, total)
 	data.GeneratedAt = formatBeijingTime(time.Now())
 	data.Sort = string(sort)
+	data.AddressQuery = addressQuery
 	if err := s.templates.ExecuteTemplate(w, "bsc_dashboard.html", data); err != nil {
 		http.Error(w, "render bsc dashboard failed", http.StatusInternalServerError)
 		log.Printf("render bsc dashboard failed: %v", err)
@@ -811,7 +814,6 @@ func (s *Server) handleCacheMnemonic(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn: 60,
 	})
 }
-
 
 func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

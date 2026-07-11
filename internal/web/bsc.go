@@ -13,17 +13,18 @@ import (
 )
 
 type bscDashboardPageData struct {
-	GeneratedAt string
-	Records     []bscDashboardRecordView
-	Page        int
-	PageSize    int
-	Total       int
-	TotalPages  int
-	HasPrev     bool
-	HasNext     bool
-	PrevPage    int
-	NextPage    int
-	Sort        string
+	GeneratedAt  string
+	Records      []bscDashboardRecordView
+	Page         int
+	PageSize     int
+	Total        int
+	TotalPages   int
+	HasPrev      bool
+	HasNext      bool
+	PrevPage     int
+	NextPage     int
+	Sort         string
+	AddressQuery string
 }
 
 type bscDashboardRecordView struct {
@@ -288,12 +289,12 @@ func buildBSCDashboardPageData(records []bscDashboardRecordView, page, pageSize,
 	}
 }
 
-func (s *Server) countActiveBSCWatchAddresses(ctx context.Context) (int, error) {
-	return repository.CountActiveBSCWatchAddresses(ctx, s.repo)
+func (s *Server) countActiveBSCWatchAddresses(ctx context.Context, addressQuery string) (int, error) {
+	return repository.CountActiveBSCWatchAddressesByQuery(ctx, s.repo, addressQuery)
 }
 
-func (s *Server) listBSCDashboardRecords(ctx context.Context, limit, offset int, sort repository.BSCDashboardSort) ([]repository.BSCDashboardRecord, error) {
-	return repository.ListBSCDashboardRecords(ctx, s.repo, limit, offset, sort)
+func (s *Server) listBSCDashboardRecords(ctx context.Context, limit, offset int, sort repository.BSCDashboardSort, addressQuery string) ([]repository.BSCDashboardRecord, error) {
+	return repository.ListBSCDashboardRecordsByQuery(ctx, s.repo, limit, offset, sort, addressQuery)
 }
 
 func parsePositiveBSCPage(raw string) int {

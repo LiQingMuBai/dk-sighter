@@ -344,6 +344,13 @@
       flex-wrap: wrap;
     }
 
+    .search-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
     .sort-label {
       color: var(--subtext);
       font-size: 14px;
@@ -358,6 +365,24 @@
       border-radius: 10px;
       padding: 10px 12px;
       font-size: 14px;
+    }
+
+    .search-input {
+      min-width: 260px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .search-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      text-decoration: none;
     }
 
     .check-cell {
@@ -1016,6 +1041,7 @@
       <div class="batch-actions">
         <form class="sort-form" method="get" action="/">
           <input type="hidden" name="page" value="1">
+          <input type="hidden" name="address" value="{{ .AddressQuery }}">
           <label class="sort-label" for="sortSelect">Sort 排序</label>
           <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
             <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
@@ -1023,6 +1049,16 @@
             <option value="trx_desc" {{ if eq .Sort "trx_desc" }}selected{{ end }}>TRX 余额 从大到小</option>
             <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
           </select>
+        </form>
+        <form class="search-form" method="get" action="/">
+          <input type="hidden" name="page" value="1">
+          <input type="hidden" name="sort" value="{{ .Sort }}">
+          <label class="sort-label" for="addressSearch">地址检索</label>
+          <input id="addressSearch" class="search-input" type="text" name="address" value="{{ .AddressQuery }}" placeholder="输入 Tron 地址片段快速过滤">
+          <button class="btn" type="submit">检索</button>
+          {{ if .AddressQuery }}
+          <a class="btn search-link" href="/?sort={{ .Sort }}">清空</a>
+          {{ end }}
         </form>
         <button class="btn" type="button" onclick="handleBatchActivateAddress()">批量激活地址</button>
       </div>
@@ -1097,7 +1133,7 @@
       {{ end }}
     </div>
     {{ else }}
-    <div class="empty">暂无监控地址</div>
+    <div class="empty">{{ if .AddressQuery }}未找到匹配的 Tron 地址{{ else }}暂无监控地址{{ end }}</div>
     {{ end }}
 
     {{ if gt .TotalPages 0 }}
@@ -1107,13 +1143,13 @@
       </div>
       <div class="pager-actions">
         {{ if .HasPrev }}
-        <a class="pager-btn" href="/?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+        <a class="pager-btn" href="/?page={{ .PrevPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">上一页</a>
         {{ else }}
         <span class="pager-btn disabled">上一页</span>
         {{ end }}
 
         {{ if .HasNext }}
-        <a class="pager-btn" href="/?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+        <a class="pager-btn" href="/?page={{ .NextPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">下一页</a>
         {{ else }}
         <span class="pager-btn disabled">下一页</span>
         {{ end }}

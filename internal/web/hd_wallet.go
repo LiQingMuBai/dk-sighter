@@ -223,10 +223,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	sort := parseDashboardSort(r.URL.Query().Get("sort"))
+	addressQuery := strings.TrimSpace(r.URL.Query().Get("address"))
 	pageSize := defaultDashboardPageSize
 	offset := (page - 1) * pageSize
 
-	result, err := s.repo.ListDashboardRows(r.Context(), offset, pageSize, sort)
+	result, err := s.repo.ListDashboardRowsByAddress(r.Context(), offset, pageSize, sort, addressQuery)
 	if err != nil {
 		http.Error(w, "load dashboard failed", http.StatusInternalServerError)
 		log.Printf("load dashboard failed: %v", err)
@@ -267,7 +268,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if totalPages > 0 && page > totalPages {
 		page = totalPages
 		offset = (page - 1) * pageSize
-		result, err = s.repo.ListDashboardRows(r.Context(), offset, pageSize, sort)
+		result, err = s.repo.ListDashboardRowsByAddress(r.Context(), offset, pageSize, sort, addressQuery)
 		if err != nil {
 			http.Error(w, "load dashboard failed", http.StatusInternalServerError)
 			log.Printf("reload dashboard failed: %v", err)
@@ -290,20 +291,21 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := dashboardPageData{
-		GeneratedAt:     formatBeijingTime(time.Now()),
-		Rows:            viewRows,
-		TotalCount:      result.TotalCount,
-		Page:            page,
-		PageSize:        pageSize,
-		HasPrev:         page > 1,
-		HasNext:         totalPages > 0 && page < totalPages,
-		PrevPage:        maxInt(page-1, 1),
-		NextPage:        page + 1,
-		TotalPages:      totalPages,
-		ChartLabelsJSON: toJSONString(chartLabels(chartPoints)),
-		ChartValuesJSON: toJSONString(chartValues(chartPoints)),
+		GeneratedAt:             formatBeijingTime(time.Now()),
+		Rows:                    viewRows,
+		TotalCount:              result.TotalCount,
+		Page:                    page,
+		PageSize:                pageSize,
+		HasPrev:                 page > 1,
+		HasNext:                 totalPages > 0 && page < totalPages,
+		PrevPage:                maxInt(page-1, 1),
+		NextPage:                page + 1,
+		TotalPages:              totalPages,
+		ChartLabelsJSON:         toJSONString(chartLabels(chartPoints)),
+		ChartValuesJSON:         toJSONString(chartValues(chartPoints)),
 		ChartActivateValuesJSON: toJSONString(chartValues(activatePoints)),
-		Sort:            string(sort),
+		Sort:                    string(sort),
+		AddressQuery:            addressQuery,
 	}
 	if totalPages > 0 && data.NextPage > totalPages {
 		data.NextPage = totalPages

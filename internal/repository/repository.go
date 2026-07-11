@@ -586,12 +586,23 @@ func (d *DB) ListDailyTronActivationChart(ctx context.Context, days int) ([]Ener
 }
 
 func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort DashboardSort) (*DashboardListResult, error) {
+	return d.ListDashboardRowsByAddress(ctx, offset, limit, sort, "")
+}
+
+func (d *DB) ListDashboardRowsByAddress(ctx context.Context, offset, limit int, sort DashboardSort, addressQuery string) (*DashboardListResult, error) {
+	where := "WHERE w.status = 1"
+	args := make([]any, 0, 3)
+	if value := strings.ToLower(strings.TrimSpace(addressQuery)); value != "" {
+		where += " AND LOWER(w.address_base58) LIKE ?"
+		args = append(args, "%"+value+"%")
+	}
+
 	var totalCount int
 	err := d.sql.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM watch_addresses
 		WHERE status = 1
-	`).Scan(&totalCount)
+	`+strings.ReplaceAll(where, "w.", ""), args...).Scan(&totalCount)
 	if err != nil {
 		return nil, fmt.Errorf("count dashboard rows: %w", err)
 	}
@@ -607,6 +618,10 @@ func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort Dash
 	default:
 		sort = DashboardSortUSDTDesc
 	}
+
+	listArgs := make([]any, 0, len(args)+2)
+	listArgs = append(listArgs, args...)
+	listArgs = append(listArgs, limit, offset)
 
 	rows, err := d.sql.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
@@ -627,10 +642,10 @@ func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort Dash
 		LEFT JOIN asset_balances usdt
 			ON usdt.address_base58 = w.address_base58
 			AND usdt.asset_code = 'USDT'
-		WHERE w.status = 1
+		%s
 		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, orderBy), limit, offset)
+	`, where, orderBy), listArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list dashboard rows: %w", err)
 	}

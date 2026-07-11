@@ -34,19 +34,28 @@ const (
 )
 
 func CountActiveBSCWatchAddresses(ctx context.Context, repo any) (int, error) {
+	return CountActiveBSCWatchAddressesByQuery(ctx, repo, "")
+}
+
+func CountActiveBSCWatchAddressesByQuery(ctx context.Context, repo any, addressQuery string) (int, error) {
 	executor, err := resolveBSCExecutor(repo)
 	if err != nil {
 		return 0, err
 	}
 
-	const query = `
+	query := `
 SELECT COUNT(1)
 FROM bsc_watch_addresses
 WHERE status = 1
 `
+	args := make([]any, 0, 1)
+	if value := strings.ToLower(strings.TrimSpace(addressQuery)); value != "" {
+		query += "  AND LOWER(address) LIKE ?\n"
+		args = append(args, "%"+value+"%")
+	}
 
 	var total int
-	if err := executor.QueryRowContext(ctx, query).Scan(&total); err != nil {
+	if err := executor.QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
 		return 0, err
 	}
 	return total, nil
@@ -111,6 +120,10 @@ LIMIT 1
 }
 
 func ListBSCDashboardRecords(ctx context.Context, repo any, limit, offset int, sort BSCDashboardSort) ([]BSCDashboardRecord, error) {
+	return ListBSCDashboardRecordsByQuery(ctx, repo, limit, offset, sort, "")
+}
+
+func ListBSCDashboardRecordsByQuery(ctx context.Context, repo any, limit, offset int, sort BSCDashboardSort, addressQuery string) ([]BSCDashboardRecord, error) {
 	executor, err := resolveBSCExecutor(repo)
 	if err != nil {
 		return nil, err
@@ -126,6 +139,13 @@ func ListBSCDashboardRecords(ctx context.Context, repo any, limit, offset int, s
 		orderBy = "COALESCE(bnb.balance, 0) ASC, w.id DESC"
 	default:
 		sort = BSCDashboardSortUSDTDesc
+	}
+
+	where := ""
+	args := make([]any, 0, 3)
+	if value := strings.ToLower(strings.TrimSpace(addressQuery)); value != "" {
+		where = "WHERE LOWER(w.address) LIKE ?"
+		args = append(args, "%"+value+"%")
 	}
 
 	query := fmt.Sprintf(`
@@ -152,11 +172,14 @@ LEFT JOIN bsc_asset_balances bnb
 	ON LOWER(bnb.address) = LOWER(w.address) AND bnb.asset_code = 'BNB'
 LEFT JOIN bsc_asset_balances usdt
 	ON LOWER(usdt.address) = LOWER(w.address) AND usdt.asset_code = 'USDT'
+%s
 ORDER BY %s
 LIMIT ? OFFSET ?
-`, orderBy)
+`, where, orderBy)
 
-	rows, err := executor.QueryContext(ctx, query, limit, offset)
+	args = append(args, limit, offset)
+
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
