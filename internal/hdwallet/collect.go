@@ -598,6 +598,27 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 	return txHash, nil
 }
 
+func (s *Service) TopUpBSCGas(address string) (string, error) {
+	normalizedAddress := strings.TrimSpace(address)
+	if normalizedAddress == "" {
+		return "", fmt.Errorf("address is required")
+	}
+	if !common.IsHexAddress(normalizedAddress) {
+		return "", fmt.Errorf("bsc 地址格式不正确")
+	}
+	if strings.TrimSpace(s.bscGasTopupPrivateKey) == "" {
+		return "", fmt.Errorf("未配置 bsc gas 补充私钥")
+	}
+	if s.bscClient == nil {
+		return "", fmt.Errorf("bsc rpc 未配置")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	return s.sendBSCGasTopup(ctx, common.HexToAddress(normalizedAddress).Hex(), manualBSCGasTopupAmount)
+}
+
 func parseBSCGasTopupPrivateKey(value string) (*ecdsa.PrivateKey, string, error) {
 	keyHex := strings.TrimSpace(strings.TrimPrefix(value, "0x"))
 	if keyHex == "" {

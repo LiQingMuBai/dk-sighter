@@ -276,6 +276,13 @@ func TestParseBSCGasTopupPrivateKey(t *testing.T) {
 	}
 }
 
+func TestTopUpBSCGasRejectsInvalidAddress(t *testing.T) {
+	service := &Service{}
+	if _, err := service.TopUpBSCGas("not-an-address"); err == nil {
+		t.Fatalf("expected invalid address error")
+	}
+}
+
 func TestDecimalToTokenUnitsUsesBSCPrecision18(t *testing.T) {
 	value, err := decimalToTokenUnits(decimal.RequireFromString("100"), bscTokenPrecision)
 	if err != nil {

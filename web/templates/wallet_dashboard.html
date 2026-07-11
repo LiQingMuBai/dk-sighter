@@ -639,6 +639,7 @@
       sweepPreview: null,
       sweepSourceAddress: "",
       refreshingAddress: "",
+      bscGasTopupAddress: "",
       energyActionKey: ""
     }
 
@@ -879,7 +880,7 @@
       } else {
         tableBody.innerHTML = items.map((item) => `
           ${(() => {
-            const disableRefresh = !!state.refreshingAddress || !!state.energyActionKey || !!state.jobRunning
+            const disableRefresh = !!state.refreshingAddress || !!state.bscGasTopupAddress || !!state.energyActionKey || !!state.jobRunning
             const onceKey = buildEnergyActionKey(item.address, "发能一次")
             const twiceKey = buildEnergyActionKey(item.address, "发能两次")
             const actions = [
@@ -888,6 +889,9 @@
             if (state.chain === "tron") {
               actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能一次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === onceKey ? "发能中..." : "发能一次"}</button>`)
               actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能两次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === twiceKey ? "发能中..." : "发能两次"}</button>`)
+            }
+            if (desktopMode && state.chain === "bsc") {
+              actions.push(`<button class="row-action-btn" type="button" data-bsc-gas-topup-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.bscGasTopupAddress === item.address ? "转账中..." : "转手续费"}</button>`)
             }
             if (desktopMode) {
               actions.push(`<button class="row-action-btn" type="button" data-sweep-address="${item.address}" ${disableRefresh ? "disabled" : ""}>手动归集</button>`)
@@ -986,6 +990,25 @@
       }
     }
 
+    async function topUpBSCGas(address) {
+      if (state.chain !== "bsc") {
+        return
+      }
+      state.bscGasTopupAddress = address
+      await loadState()
+      try {
+        const resp = await request("/api/hd-wallet/bsc-gas-topup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address })
+        })
+        showToast(resp.message || "已向该地址补充 0.001 BNB 手续费")
+      } finally {
+        state.bscGasTopupAddress = ""
+        await loadState()
+      }
+    }
+
     async function triggerEnergy(action, address) {
       if (state.chain !== "tron") {
         return
@@ -1077,7 +1100,7 @@
       const refreshButton = event.target.closest("[data-refresh-address]")
       if (refreshButton) {
         const address = refreshButton.getAttribute("data-refresh-address") || ""
-        if (!address || state.refreshingAddress || state.energyActionKey || state.jobRunning) {
+        if (!address || state.refreshingAddress || state.bscGasTopupAddress || state.energyActionKey || state.jobRunning) {
           return
         }
         refreshAddress(address).catch((err) => {
@@ -1094,10 +1117,27 @@
           return
         }
         const address = sweepAddressButton.getAttribute("data-sweep-address") || ""
-        if (!address || state.refreshingAddress || state.energyActionKey || state.jobRunning) {
+        if (!address || state.refreshingAddress || state.bscGasTopupAddress || state.energyActionKey || state.jobRunning) {
           return
         }
         openSweepModal(address)
+        return
+      }
+
+      const bscGasTopupButton = event.target.closest("[data-bsc-gas-topup-address]")
+      if (bscGasTopupButton) {
+        if (!desktopMode || state.chain !== "bsc") {
+          return
+        }
+        const address = bscGasTopupButton.getAttribute("data-bsc-gas-topup-address") || ""
+        if (!address || state.refreshingAddress || state.bscGasTopupAddress || state.energyActionKey || state.jobRunning) {
+          return
+        }
+        topUpBSCGas(address).catch((err) => {
+          state.bscGasTopupAddress = ""
+          showToast(err.message, true)
+          loadState().catch(() => {})
+        })
         return
       }
 

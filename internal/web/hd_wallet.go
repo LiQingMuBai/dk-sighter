@@ -31,6 +31,10 @@ type hdWalletRefreshAddressRequest struct {
 	Address string `json:"address"`
 }
 
+type hdWalletBSCGasTopupRequest struct {
+	Address string `json:"address"`
+}
+
 func (s *Server) handleHDWalletDashboard(w http.ResponseWriter, r *http.Request) {
 	if !s.isAuthenticated(r) {
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -204,6 +208,38 @@ func (s *Server) handleHDWalletRefreshAddress(w http.ResponseWriter, r *http.Req
 		"success": true,
 		"message": "地址余额更新成功",
 		"item":    record,
+	})
+}
+
+func (s *Server) handleHDWalletBSCGasTopup(w http.ResponseWriter, r *http.Request) {
+	if !s.isAuthenticated(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !s.desktopMode {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req hdWalletBSCGasTopupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	txHash, err := s.walletService.TopUpBSCGas(req.Address)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": "已向该地址补充 0.001 BNB 手续费",
+		"tx_hash": txHash,
+		"address": strings.TrimSpace(req.Address),
 	})
 }
 

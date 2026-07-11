@@ -240,6 +240,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/hd-wallet/config", s.handleHDWalletConfig)
 		mux.HandleFunc("/api/hd-wallet/sync", s.handleHDWalletSync)
 		mux.HandleFunc("/api/hd-wallet/refresh-address", s.handleHDWalletRefreshAddress)
+		mux.HandleFunc("/api/hd-wallet/bsc-gas-topup", s.handleHDWalletBSCGasTopup)
 		mux.HandleFunc("/api/hd-wallet/sweep/preview", s.handleHDWalletSweepPreview)
 		mux.HandleFunc("/api/hd-wallet/sweep/execute", s.handleHDWalletSweepExecute)
 	} else {
