@@ -591,9 +591,11 @@ func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort Dash
 
 func (d *DB) ListDashboardRowsByAddress(ctx context.Context, offset, limit int, sort DashboardSort, addressQuery string) (*DashboardListResult, error) {
 	where := "WHERE w.status = 1"
+	countWhere := "WHERE status = 1"
 	args := make([]any, 0, 3)
 	if value := strings.ToLower(strings.TrimSpace(addressQuery)); value != "" {
 		where += " AND LOWER(w.address_base58) LIKE ?"
+		countWhere += " AND LOWER(address_base58) LIKE ?"
 		args = append(args, "%"+value+"%")
 	}
 
@@ -601,8 +603,7 @@ func (d *DB) ListDashboardRowsByAddress(ctx context.Context, offset, limit int, 
 	err := d.sql.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM watch_addresses
-		WHERE status = 1
-	`+strings.ReplaceAll(where, "w.", ""), args...).Scan(&totalCount)
+		`+countWhere, args...).Scan(&totalCount)
 	if err != nil {
 		return nil, fmt.Errorf("count dashboard rows: %w", err)
 	}
