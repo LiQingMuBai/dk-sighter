@@ -40,7 +40,6 @@ function resolveGoCommand() {
 function ensureUserConfig() {
   const userDir = app.getPath("userData")
   const cfgPath = path.join(userDir, "config.yaml")
-  if (fs.existsSync(cfgPath)) return cfgPath
 
   const bundledConfigPath = app.isPackaged
     ? path.join(process.resourcesPath, "config.yaml")
