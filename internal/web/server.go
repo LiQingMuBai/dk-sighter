@@ -420,8 +420,8 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		recordViews = append(recordViews, bscDashboardRecordView{
 			Address:   record.Address,
-			BNB:       record.BNB,
-			USDT:      record.USDT,
+			BNB:       formatBSCDisplayBalance(record.BNB),
+			USDT:      formatBSCDisplayBalance(record.USDT),
 			UpdatedAt: updatedAt,
 		})
 	}

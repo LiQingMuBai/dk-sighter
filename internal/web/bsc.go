@@ -691,3 +691,11 @@ func webDecimalToTokenUnits(amount decimal.Decimal, decimals int32) (*big.Int, e
 	}
 	return value.BigInt(), nil
 }
+
+func formatBSCDisplayBalance(value string) string {
+	parsed, err := decimal.NewFromString(strings.TrimSpace(value))
+	if err != nil {
+		return strings.TrimSpace(value)
+	}
+	return parsed.StringFixed(6)
+}

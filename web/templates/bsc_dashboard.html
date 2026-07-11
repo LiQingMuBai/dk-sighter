@@ -702,7 +702,7 @@
       <div class="toolbar">
         <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
         <div class="toolbar-actions">
-          <button id="batchTransferGasBtn" class="button" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
+          <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
             <input type="hidden" name="address" value="{{ .AddressQuery }}">
@@ -751,7 +751,7 @@
                   <td>
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
                       <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
-                      <button class="button" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
+                      <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
                     </div>
                   </td>
                 </tr>
@@ -790,7 +790,7 @@
               </div>
               <div class="mobile-actions">
                 <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
-                <button class="button" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
+                <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
               </div>
             </div>
           {{ end }}
