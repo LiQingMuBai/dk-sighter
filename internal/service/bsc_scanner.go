@@ -103,7 +103,14 @@ func (s *BSCScanner) RefreshAllBalancesThrottled(ctx context.Context, perCallDel
 		if err != nil {
 			s.logger.Printf("refresh usdt balance failed: %s err=%v", address, err)
 		} else {
+			currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, address)
+			if balanceErr != nil {
+				s.logger.Printf("load current bsc usdt balance failed: %s err=%v", address, balanceErr)
+			}
 			_ = repository.UpsertBSCBalance(ctx, s.repo, address, "USDT", normalizeDecimal(usdt))
+			if balanceErr == nil {
+				s.syncRecentUSDTTransfersIfNeeded(ctx, address, currentDBBalance, usdt)
+			}
 		}
 		if perCallDelay > 0 {
 			timer := time.NewTimer(perCallDelay)
@@ -458,8 +465,121 @@ func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string,
 	if err != nil {
 		s.logger.Printf("refresh usdt balance failed: %s err=%v", address, err)
 	} else {
+		currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, address)
+		if balanceErr != nil {
+			s.logger.Printf("load current bsc usdt balance failed: %s err=%v", address, balanceErr)
+		}
 		_ = repository.UpsertBSCBalance(ctx, s.repo, address, "USDT", normalizeDecimal(usdt))
+		if balanceErr == nil {
+			s.syncRecentUSDTTransfersIfNeeded(ctx, address, currentDBBalance, usdt)
+		}
 	}
+}
+
+func (s *BSCScanner) getCurrentUSDTBalance(ctx context.Context, address string) (decimal.Decimal, error) {
+	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
+	if err != nil {
+		return decimal.Zero, err
+	}
+
+	if ok && record != nil {
+		value, err := decimal.NewFromString(strings.TrimSpace(record.USDT))
+		if err != nil {
+			return decimal.Zero, err
+		}
+		return value, nil
+	}
+	return decimal.Zero, nil
+}
+
+func (s *BSCScanner) syncRecentUSDTTransfersIfNeeded(ctx context.Context, address string, currentDBBalance, latestBalance decimal.Decimal) {
+	if latestBalance.Sub(currentDBBalance).Abs().LessThanOrEqual(usdtTransferRepairThreshold) {
+		return
+	}
+
+	insertedIn, insertedOut, err := s.syncRecentBSCUSDTTransfers(ctx, address, time.Now().Add(-time.Hour))
+	if err != nil {
+		s.logger.Printf("repair bsc usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", address, currentDBBalance.String(), latestBalance.String(), err)
+		return
+	}
+	s.logger.Printf("repair bsc usdt transfers done: address=%s old_balance=%s new_balance=%s inserted_in=%d inserted_out=%d",
+		address, currentDBBalance.String(), latestBalance.String(), insertedIn, insertedOut)
+}
+
+func (s *BSCScanner) syncRecentBSCUSDTTransfers(ctx context.Context, watchAddress string, since time.Time) (int, int, error) {
+	headBlock, err := s.client.BlockNumber(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	watchAddress = strings.ToLower(strings.TrimSpace(watchAddress))
+	sinceUnix := uint64(since.Unix())
+	insertedIn := 0
+	insertedOut := 0
+	for blockNum := headBlock; blockNum > 0; blockNum-- {
+		select {
+		case <-ctx.Done():
+			return insertedIn, insertedOut, ctx.Err()
+		default:
+		}
+
+		block, err := s.client.GetBlockByNumber(ctx, blockNum)
+		if err != nil {
+			return insertedIn, insertedOut, err
+		}
+		if block.Timestamp < sinceUnix {
+			break
+		}
+
+		transfers, err := s.client.GetUSDTTransfersByBlock(ctx, blockNum)
+		if err != nil {
+			return insertedIn, insertedOut, err
+		}
+		for _, transfer := range transfers {
+			matchFrom := strings.EqualFold(strings.TrimSpace(transfer.From), watchAddress)
+			matchTo := strings.EqualFold(strings.TrimSpace(transfer.To), watchAddress)
+			if !matchFrom && !matchTo {
+				continue
+			}
+
+			amount := decimal.NewFromBigInt(transfer.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+			record := repository.TransferRecord{
+				TxHash:      transfer.TxHash,
+				BlockNumber: int64(blockNum),
+				BlockTime:   int64(block.Timestamp) * 1000,
+				AssetCode:   "USDT",
+				ContractAddress: sql.NullString{
+					String: s.client.USDTContract(),
+					Valid:  s.client.USDTContract() != "",
+				},
+				WatchAddress: watchAddress,
+				FromAddress:  strings.ToLower(strings.TrimSpace(transfer.From)),
+				ToAddress:    strings.ToLower(strings.TrimSpace(transfer.To)),
+				Amount:       amount,
+				LogIndex:     int(transfer.LogIndex),
+				Status:       "CONFIRMED",
+			}
+
+			if matchFrom {
+				inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
+				if err != nil {
+					s.logger.Printf("insert bsc transfer out failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
+				} else if inserted {
+					insertedOut++
+				}
+			}
+			if matchTo {
+				inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
+				if err != nil {
+					s.logger.Printf("insert bsc transfer in failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
+				} else if inserted {
+					insertedIn++
+				}
+			}
+		}
+	}
+
+	return insertedIn, insertedOut, nil
 }
 
 func normalizeDecimal(v decimal.Decimal) string {

@@ -293,13 +293,17 @@ func (a *App) Run(ctx context.Context) error {
 		}))
 	}
 
-	group.Go(a.safeGo("hourly-balance-refresh", func() error {
-		err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner, a.cfg.TronBlockSource())
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
-	}))
+	if isHDWalletMode(a.cfg) {
+		log.Printf("hd wallet mode enabled, scheduled balance refresh disabled")
+	} else {
+		group.Go(a.safeGo("hourly-balance-refresh", func() error {
+			err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner, a.cfg.TronBlockSource())
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
+	}
 
 	return group.Wait()
 }

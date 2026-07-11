@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"golang.org/x/sync/errgroup"
 
 	"tron_watcher/internal/repository"
@@ -14,6 +16,8 @@ import (
 )
 
 const tronBalanceWorkers = 4
+
+var usdtTransferRepairThreshold = decimal.NewFromInt(1)
 
 type tronBalanceTask struct {
 	addressBase58 string
@@ -203,10 +207,19 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 		usdtBalance, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
 		if err != nil {
 			s.logger.Printf("refresh usdt balance failed: %s err=%v", addressBase58, err)
-		} else if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
-			s.logger.Printf("save usdt balance failed: %s err=%v", addressBase58, err)
 		} else {
-			s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+			currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, addressBase58)
+			if balanceErr != nil {
+				s.logger.Printf("load current usdt balance failed: %s err=%v", addressBase58, balanceErr)
+			}
+			if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
+				s.logger.Printf("save usdt balance failed: %s err=%v", addressBase58, err)
+			} else {
+				s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+				if balanceErr == nil {
+					s.syncRecentUSDTTransfersIfNeeded(ctx, addressBase58, addressHex, currentDBBalance, usdtBalance)
+				}
+			}
 		}
 		if perCallDelay > 0 {
 			timer := time.NewTimer(perCallDelay)
@@ -243,10 +256,147 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 			s.logger.Printf("refresh usdt balance failed: %s err=%v", task.addressBase58, err)
 			return
 		}
+		currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, task.addressBase58)
+		if balanceErr != nil {
+			s.logger.Printf("load current usdt balance failed: %s err=%v", task.addressBase58, balanceErr)
+		}
 		if err := s.repo.UpsertBalance(ctx, task.addressBase58, "USDT", balance, blockNumber); err != nil {
 			s.logger.Printf("save usdt balance failed: %s err=%v", task.addressBase58, err)
 			return
 		}
 		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", task.addressBase58, balance.String(), blockNumber)
+		if balanceErr == nil {
+			s.syncRecentUSDTTransfersIfNeeded(ctx, task.addressBase58, task.addressHex, currentDBBalance, balance)
+		}
+	}
+}
+
+func (s *BalanceService) getCurrentUSDTBalance(ctx context.Context, addressBase58 string) (decimal.Decimal, error) {
+	row, ok, err := s.repo.GetDashboardRowByAddress(ctx, addressBase58)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if ok && row != nil {
+		return row.USDTBalance, nil
+	}
+	return decimal.Zero, nil
+}
+
+func (s *BalanceService) syncRecentUSDTTransfersIfNeeded(ctx context.Context, addressBase58, addressHex string, currentDBBalance, latestBalance decimal.Decimal) {
+	if latestBalance.Sub(currentDBBalance).Abs().LessThanOrEqual(usdtTransferRepairThreshold) {
+		return
+	}
+
+	insertedIn, insertedOut, err := s.syncRecentTronUSDTTransfers(ctx, addressBase58, addressHex, time.Now().Add(-time.Hour))
+	if err != nil {
+		s.logger.Printf("repair tron usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", addressBase58, currentDBBalance.String(), latestBalance.String(), err)
+		return
+	}
+	s.logger.Printf("repair tron usdt transfers done: address=%s old_balance=%s new_balance=%s inserted_in=%d inserted_out=%d",
+		addressBase58, currentDBBalance.String(), latestBalance.String(), insertedIn, insertedOut)
+}
+
+func (s *BalanceService) syncRecentTronUSDTTransfers(ctx context.Context, watchAddressBase58, watchAddressHex string, since time.Time) (int, int, error) {
+	headBlock, err := s.tronClient.GetHeadBlockNumber(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	sinceMillis := since.UnixMilli()
+	insertedIn := 0
+	insertedOut := 0
+	for blockNum := headBlock; blockNum > 0; blockNum-- {
+		select {
+		case <-ctx.Done():
+			return insertedIn, insertedOut, ctx.Err()
+		default:
+		}
+
+		block, err := s.tronClient.GetBlockByNum(ctx, blockNum)
+		if err != nil {
+			return insertedIn, insertedOut, err
+		}
+		if block.BlockHeader.RawData.Timestamp < sinceMillis {
+			break
+		}
+
+		for _, tx := range block.Transactions {
+			if !isTriggerSmartContractTx(tx) {
+				continue
+			}
+
+			txInfo, err := s.tronClient.GetTransactionInfoByID(ctx, tx.TxID)
+			if err != nil {
+				s.logger.Printf("load tron tx info failed during usdt repair sync: address=%s tx=%s err=%v", watchAddressBase58, tx.TxID, err)
+				continue
+			}
+
+			for idx, logItem := range txInfo.Log {
+				if !s.tronClient.IsUSDTTransferLog(logItem) {
+					continue
+				}
+
+				fromHex, toHex, amount, err := s.tronClient.DecodeTransferLog(logItem)
+				if err != nil {
+					s.logger.Printf("decode tron usdt transfer failed during repair sync: address=%s tx=%s err=%v", watchAddressBase58, tx.TxID, err)
+					continue
+				}
+
+				matchFrom := strings.EqualFold(tron.NormalizeHexAddress(fromHex), tron.NormalizeHexAddress(watchAddressHex))
+				matchTo := strings.EqualFold(tron.NormalizeHexAddress(toHex), tron.NormalizeHexAddress(watchAddressHex))
+				if !matchFrom && !matchTo {
+					continue
+				}
+
+				record := repository.TransferRecord{
+					TxHash:      tx.TxID,
+					BlockNumber: blockNum,
+					BlockTime:   block.BlockHeader.RawData.Timestamp,
+					AssetCode:   "USDT",
+					ContractAddress: sqlNullString(
+						tron.NormalizeHexAddress(logItem.Address),
+					),
+					WatchAddress: watchAddressBase58,
+					FromAddress:  fallbackBase58(fromHex, ""),
+					ToAddress:    fallbackBase58(toHex, ""),
+					Amount:       amount,
+					LogIndex:     idx,
+					Status:       "CONFIRMED",
+				}
+
+				if matchFrom {
+					inserted, err := s.repo.InsertTransferOutIfAbsent(ctx, record)
+					if err != nil {
+						s.logger.Printf("insert tron transfer out failed during repair sync: address=%s tx=%s err=%v", watchAddressBase58, tx.TxID, err)
+					} else if inserted {
+						insertedOut++
+					}
+				}
+				if matchTo {
+					inserted, err := s.repo.InsertTransferInIfAbsent(ctx, record)
+					if err != nil {
+						s.logger.Printf("insert tron transfer in failed during repair sync: address=%s tx=%s err=%v", watchAddressBase58, tx.TxID, err)
+					} else if inserted {
+						insertedIn++
+					}
+				}
+			}
+		}
+	}
+
+	return insertedIn, insertedOut, nil
+}
+
+func isTriggerSmartContractTx(tx tron.Transaction) bool {
+	if len(tx.RawData.Contract) == 0 {
+		return false
+	}
+	return tx.RawData.Contract[0].Type == "TriggerSmartContract"
+}
+
+func sqlNullString(value string) sql.NullString {
+	return sql.NullString{
+		String: value,
+		Valid:  strings.TrimSpace(value) != "",
 	}
 }

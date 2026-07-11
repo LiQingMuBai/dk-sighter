@@ -306,6 +306,22 @@ func (d *DB) InsertBSCTransferOut(ctx context.Context, item TransferRecord) erro
 	return d.insertTransferIntoTable(ctx, "bsc_transfer_out_records", item)
 }
 
+func (d *DB) InsertTransferInIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "transfer_in_records", item)
+}
+
+func (d *DB) InsertTransferOutIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "transfer_out_records", item)
+}
+
+func (d *DB) InsertBSCTransferInIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "bsc_transfer_in_records", item)
+}
+
+func (d *DB) InsertBSCTransferOutIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "bsc_transfer_out_records", item)
+}
+
 func (d *DB) insertTransferIntoTable(ctx context.Context, table string, item TransferRecord) error {
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
@@ -342,6 +358,38 @@ func (d *DB) insertTransferIntoTable(ctx context.Context, table string, item Tra
 		return fmt.Errorf("insert transfer %s: %w", table, err)
 	}
 	return nil
+}
+
+func (d *DB) insertTransferIntoTableIfAbsent(ctx context.Context, table string, item TransferRecord) (bool, error) {
+	query := fmt.Sprintf(`
+		INSERT IGNORE INTO %s (
+			tx_hash, block_number, block_time, asset_code, contract_address,
+			watch_address, from_address, to_address, amount, log_index, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, table)
+
+	result, err := d.sql.ExecContext(ctx, query,
+		item.TxHash,
+		item.BlockNumber,
+		item.BlockTime,
+		item.AssetCode,
+		item.ContractAddress,
+		item.WatchAddress,
+		item.FromAddress,
+		item.ToAddress,
+		item.Amount.String(),
+		item.LogIndex,
+		item.Status,
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert transfer if absent %s: %w", table, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert transfer if absent rows affected %s: %w", table, err)
+	}
+	return rowsAffected > 0, nil
 }
 
 func (d *DB) InsertWatchAddresses(ctx context.Context, addresses []string) error {

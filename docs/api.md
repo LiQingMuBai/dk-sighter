@@ -220,3 +220,142 @@ curl -X POST http://127.0.0.1:8080/api/bsc/delete-addresses \
     ]
   }'
 ```
+
+## 5. 通用刷新地址余额
+
+支持 `tron` / `bsc` 两条链，支持单地址和批量地址刷新。
+
+- 方法：`POST`
+- 路径：`/api/refresh-addresses`
+- Content-Type：`application/json`
+
+### 单个地址请求
+
+```json
+{
+  "chain": "tron",
+  "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+}
+```
+
+### 批量地址请求
+
+```json
+{
+  "chain": "bsc",
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ]
+}
+```
+
+### 说明
+
+- `chain` 必填，只支持 `tron` 或 `bsc`
+- `address` 和 `addresses` 至少传一个
+- 批量最多支持 `100` 个地址
+- Tron 地址必须是合法 Base58 地址
+- BSC 地址会统一转成小写后校验
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "message": "BSC 地址余额批量更新成功 2 / 2",
+  "chain": "bsc",
+  "address": "0x1111111111111111111111111111111111111111",
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ],
+  "total_count": 2,
+  "success_count": 2
+}
+```
+
+### 失败响应
+
+```json
+{
+  "success": false,
+  "message": "addresses count cannot exceed 100",
+  "chain": "bsc"
+}
+```
+
+### curl 示例
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "chain": "tron",
+    "addresses": [
+      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    ]
+  }'
+```
+
+## 6. 刷新 Tron 地址余额
+
+这是兼容旧调用方式的接口，行为与通用接口一致，但链类型固定为 `tron`。
+
+- 方法：`POST`
+- 路径：`/api/tron/refresh-address`
+- Content-Type：`application/json`
+
+### 请求示例
+
+```json
+{
+  "addresses": [
+    "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+  ]
+}
+```
+
+### curl 示例
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/tron/refresh-address \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  }'
+```
+
+## 7. 刷新 BSC 地址余额
+
+这是兼容旧调用方式的接口，行为与通用接口一致，但链类型固定为 `bsc`。
+
+- 方法：`POST`
+- 路径：`/api/bsc/refresh-address`
+- Content-Type：`application/json`
+
+### 请求示例
+
+```json
+{
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ]
+}
+```
+
+### curl 示例
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/bsc/refresh-address \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "address": "0x1111111111111111111111111111111111111111"
+  }'
+```

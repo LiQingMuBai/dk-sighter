@@ -190,6 +190,59 @@ curl -X POST http://127.0.0.1:8080/api/watch-addresses \
 }
 ```
 
+刷新余额接口：
+
+- 通用接口：`POST /api/refresh-addresses`
+- 兼容旧接口：
+  - `POST /api/tron/refresh-address`
+  - `POST /api/bsc/refresh-address`
+- 功能：支持 `tron` / `bsc` 单地址或多地址刷新
+- 限制：批量最多 `100` 个地址
+
+通用接口单地址示例：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: change_me_api_key' \
+  -d '{
+    "chain": "tron",
+    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  }'
+```
+
+通用接口批量示例：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: change_me_api_key' \
+  -d '{
+    "chain": "bsc",
+    "addresses": [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222"
+    ]
+  }'
+```
+
+返回示例：
+
+```json
+{
+  "success": true,
+  "message": "BSC 地址余额批量更新成功 2 / 2",
+  "chain": "bsc",
+  "address": "0x1111111111111111111111111111111111111111",
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ],
+  "total_count": 2,
+  "success_count": 2
+}
+```
+
 额外接口文档文件：
 
 - Markdown 文档：[docs/api.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/api.md)

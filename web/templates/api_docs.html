@@ -460,6 +460,114 @@
 
     <div class="card">
       <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/refresh-addresses</span>
+      </div>
+      <h2 class="section-title">通用刷新地址余额</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        支持 <code>tron</code> 和 <code>bsc</code> 两条链，支持单地址和批量地址刷新。请求体中的 <code>chain</code> 必填，批量最多 <code>100</code> 个地址。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">请求体（单个地址）</div>
+          <pre><code>{
+  "chain": "tron",
+  "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">请求体（批量地址）</div>
+          <pre><code>{
+  "chain": "bsc",
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <div class="label">成功响应</div>
+          <pre><code>{
+  "success": true,
+  "message": "BSC 地址余额批量更新成功 2 / 2",
+  "chain": "bsc",
+  "address": "0x1111111111111111111111111111111111111111",
+  "addresses": [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222"
+  ],
+  "total_count": 2,
+  "success_count": 2
+}</code></pre>
+        </div>
+        <div>
+          <div class="label">错误响应</div>
+          <pre><code>{
+  "success": false,
+  "message": "addresses count cannot exceed 100",
+  "chain": "bsc"
+}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">curl 示例</h2>
+      <pre><code>curl -X POST '{{ .BaseURL }}/api/refresh-addresses' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "chain": "tron",
+    "addresses": [
+      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+    ]
+  }'</code></pre>
+    </div>
+
+    <div class="card">
+      <div class="meta">
+        <span class="method">POST</span>
+        <span class="path">/api/tron/refresh-address<br>/api/bsc/refresh-address</span>
+      </div>
+      <h2 class="section-title">兼容旧刷新接口</h2>
+      <div class="text" style="margin-bottom: 14px;">
+        这两个接口继续保留，分别固定刷新 <code>tron</code> 和 <code>bsc</code>。请求体支持 <code>address</code> 或 <code>addresses</code>，批量同样最多 <code>100</code> 个地址。
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="label">Tron 示例</div>
+          <pre><code>curl -X POST '{{ .BaseURL }}/api/tron/refresh-address' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  }'</code></pre>
+        </div>
+        <div>
+          <div class="label">BSC 示例</div>
+          <pre><code>curl -X POST '{{ .BaseURL }}/api/bsc/refresh-address' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: your_api_key' \
+  -d '{
+    "addresses": [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222"
+    ]
+  }'</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meta">
         <span class="method">GET</span>
         <span class="path">/api/tron/balances</span>
       </div>
