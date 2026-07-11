@@ -133,13 +133,26 @@ type EnergyActionLog struct {
 }
 
 type TronActivationLog struct {
-	JobID            string
-	AddressBase58    string
+	JobID             string
+	AddressBase58     string
 	FromAddressBase58 string
-	AmountSun        int64
-	TxID             string
-	Status           string
-	ErrorMessage     string
+	AmountSun         int64
+	TxID              string
+	Status            string
+	ErrorMessage      string
+}
+
+type BSCGasTopupLog struct {
+	Address      string
+	FromAddress  string
+	AmountBNB    string
+	CurrentBNB   string
+	CurrentUSDT  string
+	TxHash       string
+	KeySource    string
+	Status       string
+	ResponseBody string
+	ErrorMessage string
 }
 
 type EnergyChartPoint struct {
@@ -176,7 +189,7 @@ func (d *DB) LoadActiveAddresses(ctx context.Context) ([]WatchAddress, error) {
 	rows, err := d.sql.QueryContext(ctx, `
 		SELECT id, address_base58, status
 		FROM watch_addresses
-		WHERE status = 1
+		WHERE status = 1 
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query watch_addresses: %w", err)
@@ -468,6 +481,20 @@ func (d *DB) InsertTronActivationLog(ctx context.Context, item TronActivationLog
 		item.TxID, item.Status, item.ErrorMessage)
 	if err != nil {
 		return fmt.Errorf("insert tron activation log: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) InsertBSCGasTopupLog(ctx context.Context, item BSCGasTopupLog) error {
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO bsc_gas_topup_logs (
+			address, from_address, amount_bnb, current_bnb, current_usdt,
+			tx_hash, key_source, status, response_body, error_message
+		) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)
+	`, item.Address, item.FromAddress, item.AmountBNB, item.CurrentBNB, item.CurrentUSDT,
+		item.TxHash, item.KeySource, item.Status, item.ResponseBody, item.ErrorMessage)
+	if err != nil {
+		return fmt.Errorf("insert bsc gas topup log: %w", err)
 	}
 	return nil
 }

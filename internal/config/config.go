@@ -101,6 +101,8 @@ type BSCConfig struct {
 	RPCHTTPURL               string `yaml:"rpc_http_url"`
 	RPCWSSURL                string `yaml:"rpc_wss_url"`
 	USDTContract             string `yaml:"usdt_contract"`
+	GasTransferPrivateKey    string `yaml:"gas_transfer_private_key"`
+	MinRequestIntervalMS     int    `yaml:"min_request_interval_ms"`
 	StartBlock               int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
 	Confirmations            int    `yaml:"confirmations"`
@@ -171,6 +173,9 @@ func (c *Config) setDefaults() {
 	if c.QuickNode.MinRequestIntervalMS == 0 {
 		c.QuickNode.MinRequestIntervalMS = 10
 	}
+	if c.BSC.MinRequestIntervalMS == 0 {
+		c.BSC.MinRequestIntervalMS = 10
+	}
 	if len(c.TronActivator.PrivateKeys) == 0 && strings.TrimSpace(c.TronActivator.PrivateKey) != "" {
 		c.TronActivator.PrivateKeys = []string{strings.TrimSpace(c.TronActivator.PrivateKey)}
 	}
@@ -232,6 +237,14 @@ func (c *Config) TronBlockSource() string {
 
 func (c *Config) QuickNodeMinRequestInterval() time.Duration {
 	value := c.QuickNode.MinRequestIntervalMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func (c *Config) BSCMinRequestInterval() time.Duration {
+	value := c.BSC.MinRequestIntervalMS
 	if value <= 0 {
 		value = 10
 	}

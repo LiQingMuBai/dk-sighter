@@ -70,6 +70,8 @@ bsc:
   rpc_http_url: "https://your-bsc-rpc-host"
   rpc_wss_url: ""
   usdt_contract: "0x55d398326f99059fF775485246999027B3197955"
+  gas_transfer_private_key: ""
+  min_request_interval_ms: 10
   start_block: 0
   block_poll_interval_seconds: 3
   confirmations: 0

@@ -15,6 +15,7 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 	perCallDelay := 300 * time.Millisecond
 	tronInterval := 40 * time.Minute
 	tronOffset := 10 * time.Minute
+	bscInterval := 30 * time.Minute
 	blockSource := "head"
 	if strings.EqualFold(strings.TrimSpace(tronBlockSource), "solid") {
 		blockSource = "solid"
@@ -23,7 +24,7 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 	for {
 		now := time.Now().In(loc)
 		nextTron := nextOffsetMinuteBoundary(now, 40, 10)
-		nextBSC := nextHourlyBoundary(now)
+		nextBSC := nextOffsetMinuteBoundary(now, 30, 0)
 		next := nextTron
 		if nextBSC.Before(next) {
 			next = nextBSC
@@ -59,19 +60,15 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 		if !runAt.Before(nextBSC) {
 			runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 			if bscScanner != nil {
-				loggerBSC.Printf("scheduled refresh start: interval=1h throttle=%s", perCallDelay)
+				loggerBSC.Printf("scheduled refresh start: interval=%s throttle=%s", bscInterval, perCallDelay)
 				bscScanner.RefreshAllBalancesThrottled(runCtx, perCallDelay)
-				loggerBSC.Printf("scheduled refresh done: interval=1h")
+				loggerBSC.Printf("scheduled refresh done: interval=%s", bscInterval)
 			} else {
-				loggerBSC.Printf("scheduled refresh skipped: interval=1h bsc scanner disabled")
+				loggerBSC.Printf("scheduled refresh skipped: interval=%s bsc scanner disabled", bscInterval)
 			}
 			cancel()
 		}
 	}
-}
-
-func nextHourlyBoundary(now time.Time) time.Time {
-	return time.Date(now.Year(), now.Month(), now.Day(), now.Hour()+1, 0, 0, 0, now.Location())
 }
 
 func nextOffsetMinuteBoundary(now time.Time, stepMinutes int, offsetMinutes int) time.Time {
