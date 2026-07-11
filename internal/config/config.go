@@ -44,6 +44,9 @@ type QuickNodeConfig struct {
 	WSSURL               string `yaml:"wss_url"`
 	USDT                 string `yaml:"usdt_contract"`
 	MinRequestIntervalMS int    `yaml:"min_request_interval_ms"`
+	RefreshHTTPURL       string `yaml:"refresh_http_url"`
+	RefreshWSSURL        string `yaml:"refresh_wss_url"`
+	RefreshMinIntervalMS int    `yaml:"refresh_min_request_interval_ms"`
 }
 
 type WebConfig struct {
@@ -103,6 +106,9 @@ type BSCConfig struct {
 	USDTContract             string `yaml:"usdt_contract"`
 	GasTransferPrivateKey    string `yaml:"gas_transfer_private_key"`
 	MinRequestIntervalMS     int    `yaml:"min_request_interval_ms"`
+	RefreshRPCHTTPURL        string `yaml:"refresh_rpc_http_url"`
+	RefreshRPCWSSURL         string `yaml:"refresh_rpc_wss_url"`
+	RefreshMinIntervalMS     int    `yaml:"refresh_min_request_interval_ms"`
 	StartBlock               int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
 	Confirmations            int    `yaml:"confirmations"`
@@ -173,8 +179,14 @@ func (c *Config) setDefaults() {
 	if c.QuickNode.MinRequestIntervalMS == 0 {
 		c.QuickNode.MinRequestIntervalMS = 10
 	}
+	if c.QuickNode.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.QuickNode.RefreshHTTPURL) != "" {
+		c.QuickNode.RefreshMinIntervalMS = 20
+	}
 	if c.BSC.MinRequestIntervalMS == 0 {
 		c.BSC.MinRequestIntervalMS = 10
+	}
+	if c.BSC.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.BSC.RefreshRPCHTTPURL) != "" {
+		c.BSC.RefreshMinIntervalMS = 20
 	}
 	if len(c.TronActivator.PrivateKeys) == 0 && strings.TrimSpace(c.TronActivator.PrivateKey) != "" {
 		c.TronActivator.PrivateKeys = []string{strings.TrimSpace(c.TronActivator.PrivateKey)}
@@ -243,8 +255,46 @@ func (c *Config) QuickNodeMinRequestInterval() time.Duration {
 	return time.Duration(value) * time.Millisecond
 }
 
+func (c *Config) QuickNodeRefreshHTTPURL() string {
+	return strings.TrimSpace(c.QuickNode.RefreshHTTPURL)
+}
+
+func (c *Config) QuickNodeRefreshWSSURL() string {
+	return strings.TrimSpace(c.QuickNode.RefreshWSSURL)
+}
+
+func (c *Config) QuickNodeRefreshMinRequestInterval() time.Duration {
+	value := c.QuickNode.RefreshMinIntervalMS
+	if value <= 0 {
+		value = c.QuickNode.MinRequestIntervalMS
+	}
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
 func (c *Config) BSCMinRequestInterval() time.Duration {
 	value := c.BSC.MinRequestIntervalMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func (c *Config) BSCRefreshHTTPURL() string {
+	return strings.TrimSpace(c.BSC.RefreshRPCHTTPURL)
+}
+
+func (c *Config) BSCRefreshWSSURL() string {
+	return strings.TrimSpace(c.BSC.RefreshRPCWSSURL)
+}
+
+func (c *Config) BSCRefreshMinRequestInterval() time.Duration {
+	value := c.BSC.RefreshMinIntervalMS
+	if value <= 0 {
+		value = c.BSC.MinRequestIntervalMS
+	}
 	if value <= 0 {
 		value = 10
 	}

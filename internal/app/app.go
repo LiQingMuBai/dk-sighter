@@ -126,13 +126,18 @@ func New(cfgPath string) (*App, error) {
 		return nil, err
 	}
 
+	if strings.TrimSpace(cfg.QuickNodeRefreshHTTPURL()) == "" {
+		return nil, fmt.Errorf("quicknode.refresh_http_url is required for manual/scheduled refresh")
+	}
+	if bscEnabled && strings.TrimSpace(cfg.BSCRefreshHTTPURL()) == "" {
+		return nil, fmt.Errorf("bsc.refresh_rpc_http_url is required for manual/scheduled refresh")
+	}
+
 	repo := repository.New(db)
 	cache := service.NewAddressCache(repo)
 	balanceService := service.NewBalanceService(tronClient, repo, cache)
-	scheduledRefreshTronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, cfg.QuickNodeMinRequestInterval())
-	scheduledRefreshBalanceService := service.NewBalanceService(scheduledRefreshTronClient, repo, cache)
-	manualRefreshTronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, manualRefreshMinInterval(cfg.QuickNodeMinRequestInterval()))
-	manualRefreshBalanceService := service.NewBalanceService(manualRefreshTronClient, repo, cache)
+	refreshTronClient := tron.NewClient(cfg.QuickNodeRefreshHTTPURL(), cfg.QuickNodeRefreshWSSURL(), cfg.QuickNode.USDT, cfg.QuickNodeRefreshMinRequestInterval())
+	refreshBalanceService := service.NewBalanceService(refreshTronClient, repo, cache)
 	notifier := service.NewMultiTransferNotifier(
 		service.NewTelegramNotifier(cfg.Telegram),
 		service.NewCallbackNotifier(cfg.Callback),
@@ -141,17 +146,13 @@ func New(cfgPath string) (*App, error) {
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner
-	var scheduledRefreshBSCScanner *service.BSCScanner
-	var manualRefreshBSCScanner *service.BSCScanner
+	var refreshBSCScanner *service.BSCScanner
 	if bscEnabled {
 		bscCache = service.NewBSCAddressCache(repo)
 		bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
-		scheduledRefreshBSCClient := bsc.NewClient(cfg.BSC.RPCHTTPURL, cfg.BSC.RPCWSSURL, cfg.BSC.USDTContract)
-		scheduledRefreshBSCClient.SetMinRequestInterval(cfg.BSCMinRequestInterval())
-		scheduledRefreshBSCScanner = service.NewBSCScanner(scheduledRefreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
-		manualRefreshBSCClient := bsc.NewClient(cfg.BSC.RPCHTTPURL, cfg.BSC.RPCWSSURL, cfg.BSC.USDTContract)
-		manualRefreshBSCClient.SetMinRequestInterval(manualRefreshMinInterval(cfg.BSCMinRequestInterval()))
-		manualRefreshBSCScanner = service.NewBSCScanner(manualRefreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+		refreshBSCClient := bsc.NewClient(cfg.BSCRefreshHTTPURL(), cfg.BSCRefreshWSSURL(), cfg.BSC.USDTContract)
+		refreshBSCClient.SetMinRequestInterval(cfg.BSCRefreshMinRequestInterval())
+		refreshBSCScanner = service.NewBSCScanner(refreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
 	}
 
 	energyProviders := buildEnergyProviders(cfg)
@@ -164,9 +165,9 @@ func New(cfgPath string) (*App, error) {
 		cfg.Web,
 		cache,
 		balanceService,
-		manualRefreshBalanceService,
+		refreshBalanceService,
 		bscScanner,
-		manualRefreshBSCScanner,
+		refreshBSCScanner,
 		activator,
 		bscClient,
 		cfg.BSC.GasTransferPrivateKey,
@@ -183,24 +184,17 @@ func New(cfgPath string) (*App, error) {
 		cache:               cache,
 		scanner:             scanner,
 		balances:            balanceService,
-		scheduledBalances:   scheduledRefreshBalanceService,
+		scheduledBalances:   refreshBalanceService,
 		notifier:            notifier,
 		tronClient:          tronClient,
 		bscClient:           bscClient,
 		bscCache:            bscCache,
 		bscScanner:          bscScanner,
-		scheduledBSCScanner: scheduledRefreshBSCScanner,
+		scheduledBSCScanner: refreshBSCScanner,
 		bscEnabled:          bscEnabled,
 		webServer:           webServer,
 		activator:           activator,
 	}, nil
-}
-
-func manualRefreshMinInterval(base time.Duration) time.Duration {
-	if base < 50*time.Millisecond {
-		return 50 * time.Millisecond
-	}
-	return base * 2
 }
 
 func (a *App) Run(ctx context.Context) error {
