@@ -39,6 +39,7 @@ type App struct {
 	bscEnabled bool
 	webServer  *web.Server
 	wallets    *hdwallet.Service
+	activator  *service.TronAddressActivator
 }
 
 func New(cfgPath string) (*App, error) {
@@ -90,7 +91,12 @@ func New(cfgPath string) (*App, error) {
 		}
 
 		energyProviders := buildEnergyProviders(cfg)
+		activator, err := service.NewTronAddressActivator(tronClient, repo, cfg.TronActivator)
+		if err != nil {
+			return nil, err
+		}
 		walletService.ConfigureEnergyProviders(energyProviders, cfg.Energy.Provider)
+		walletService.ConfigureTronActivator(activator)
 		walletService.ConfigureRepository(repo, repository.HDWalletSource)
 		webServer, err := web.NewHDWalletServer(cfg.Web, walletService, energyProviders, cfg.Energy.Provider)
 		if err != nil {
@@ -110,6 +116,7 @@ func New(cfgPath string) (*App, error) {
 			bscEnabled: bscEnabled,
 			webServer:  webServer,
 			wallets:    walletService,
+			activator:  activator,
 		}, nil
 	}
 

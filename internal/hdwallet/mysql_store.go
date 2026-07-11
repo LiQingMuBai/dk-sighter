@@ -556,17 +556,18 @@ func (s *Service) loadSweepContextFromDB(chain string) (ConfigFile, *ChainFile, 
 	}
 }
 
-func (s *Service) previewSweepFromDB(chain, destination string) (SweepPreview, error) {
+func (s *Service) previewSweepFromDB(chain, destination, sourceAddress string) (SweepPreview, error) {
 	cfg, file, threshold, err := s.loadSweepContextFromDB(chain)
 	if err != nil {
 		return SweepPreview{}, err
 	}
 	currentMnemonicTag := currentSweepMnemonicTag(cfg, chain)
 
-	candidates, total := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag)
+	candidates, total := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag, sourceAddress)
 	preview := SweepPreview{
 		Chain:             chain,
 		Destination:       destination,
+		SourceAddress:     sourceAddress,
 		Threshold:         threshold.StringFixed(6),
 		EligibleCount:     len(candidates),
 		EligibleTotalUSDT: total.StringFixed(6),
@@ -582,7 +583,7 @@ func (s *Service) previewSweepFromDB(chain, destination string) (SweepPreview, e
 	return preview, nil
 }
 
-func (s *Service) runSweepFromDB(chain, destination string) {
+func (s *Service) runSweepFromDB(chain, destination, sourceAddress string) {
 	cfg, file, threshold, err := s.loadSweepContextFromDB(chain)
 	if err != nil {
 		s.finishWithError(err)
@@ -590,7 +591,7 @@ func (s *Service) runSweepFromDB(chain, destination string) {
 	}
 	currentMnemonicTag := currentSweepMnemonicTag(cfg, chain)
 
-	candidates, _ := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag)
+	candidates, _ := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag, sourceAddress)
 	if len(candidates) == 0 {
 		s.finishSkipped("没有符合阈值的地址")
 		return
@@ -610,7 +611,7 @@ func (s *Service) runSweepFromDB(chain, destination string) {
 		)
 		switch chain {
 		case "tron":
-			txHash, statusNote, err = s.collectTronUSDT(cfg, nil, threshold, destination, candidate, index+1)
+			txHash, statusNote, err = s.collectTronUSDT(cfg, file, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		case "bsc":
 			txHash, err = s.collectBSCUSDT(cfg, nil, threshold, destination, candidate)
 		default:

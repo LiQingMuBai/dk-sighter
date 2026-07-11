@@ -355,6 +355,35 @@ func (c *Client) CreateUSDTTransferTransaction(ctx context.Context, ownerHex, to
 	return resp.Transaction, nil
 }
 
+func (c *Client) CreateTRXTransferTransaction(ctx context.Context, ownerHex, toAddress string, amountSun int64) ([]byte, error) {
+	ownerHex = NormalizeHexAddress(ownerHex)
+	if ownerHex == "" {
+		return nil, fmt.Errorf("empty owner address")
+	}
+	if amountSun <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+
+	toHex, err := normalizeTronAddressToHex(toAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	respBody, err := c.postRaw(ctx, "/wallet/createtransaction", map[string]any{
+		"to_address":    toHex,
+		"owner_address": ownerHex,
+		"amount":        amountSun,
+		"visible":       false,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(respBody) == 0 {
+		return nil, fmt.Errorf("empty unsigned transaction")
+	}
+	return ensureRawDataHex(respBody)
+}
+
 func (c *Client) BroadcastTransactionJSON(ctx context.Context, txJSON []byte) (string, error) {
 	if len(txJSON) == 0 {
 		return "", fmt.Errorf("empty transaction json")
@@ -570,4 +599,47 @@ func normalizeContractAddress(input string) string {
 		}
 	}
 	return NormalizeHexAddress(trimmed)
+}
+
+func normalizeTronAddressToHex(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "", fmt.Errorf("empty address")
+	}
+	if strings.HasPrefix(trimmed, "T") {
+		hexAddr, err := Base58ToHex(trimmed)
+		if err != nil {
+			return "", fmt.Errorf("decode base58 address: %w", err)
+		}
+		return NormalizeHexAddress(hexAddr), nil
+	}
+	normalized := NormalizeHexAddress(trimmed)
+	if normalized == "" {
+		return "", fmt.Errorf("invalid hex address")
+	}
+	return normalized, nil
+}
+
+func ensureRawDataHex(input []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return nil, fmt.Errorf("decode transaction json: %w", err)
+	}
+	rawData, ok := payload["raw_data"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("missing raw_data")
+	}
+	if existing, ok := payload["raw_data_hex"].(string); ok && strings.TrimSpace(existing) != "" {
+		return input, nil
+	}
+	rawDataBytes, err := json.Marshal(rawData)
+	if err != nil {
+		return nil, fmt.Errorf("marshal raw_data: %w", err)
+	}
+	payload["raw_data_hex"] = hex.EncodeToString(rawDataBytes)
+	output, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode transaction json: %w", err)
+	}
+	return output, nil
 }

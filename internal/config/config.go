@@ -20,6 +20,7 @@ type Config struct {
 	Trxfee    TrxfeeConfig    `yaml:"trxfee"`
 	Catfee    CatfeeConfig    `yaml:"catfee"`
 	BSC       BSCConfig       `yaml:"bsc"`
+	TronActivator TronActivatorConfig `yaml:"tron_activator"`
 }
 
 type AppConfig struct {
@@ -111,6 +112,13 @@ type BSCConfig struct {
 	ScheduledRefreshDelayMS     int    `yaml:"scheduled_refresh_delay_ms"`
 	DisableBlockSync            bool   `yaml:"disable_block_sync"`
 	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
+}
+
+type TronActivatorConfig struct {
+	Enabled     bool     `yaml:"enabled"`
+	PrivateKey  string   `yaml:"private_key"`
+	PrivateKeys []string `yaml:"private_keys"`
+	QueueSize   int      `yaml:"queue_size"`
 }
 
 func Load(path string) (*Config, error) {

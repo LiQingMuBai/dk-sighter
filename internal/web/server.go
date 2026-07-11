@@ -47,6 +47,7 @@ type Server struct {
 	energyProviders       map[string]infrastructure.EnergyOrderProvider
 	defaultEnergyProvider string
 	mnemonicStore         *mnemonicStore
+	desktopMode           bool
 	walletMode            bool
 	walletService         *hdwallet.Service
 }
@@ -204,6 +205,7 @@ func NewHDWalletServer(
 		energyProviders:       energyProviders,
 		defaultEnergyProvider: strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
 		mnemonicStore:         newMnemonicStore(),
+		desktopMode:           strings.TrimSpace(os.Getenv("TRON_WATCHER_DESKTOP")) == "1",
 		walletMode:            true,
 		walletService:         walletService,
 	}, nil

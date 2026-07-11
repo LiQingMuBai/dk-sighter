@@ -2,6 +2,7 @@ package hdwallet
 
 import (
 	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -83,7 +84,7 @@ func TestCollectEligibleCandidatesFiltersBSCBelowMinimumBNB(t *testing.T) {
 		},
 	}
 
-	candidates, total := collectEligibleCandidates("bsc", file, decimal.RequireFromString("10"), "", "")
+	candidates, total := collectEligibleCandidates("bsc", file, decimal.RequireFromString("10"), "", "", "")
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate, got %d", len(candidates))
 	}
@@ -119,7 +120,7 @@ func TestCollectEligibleCandidatesFiltersByCurrentMnemonicTag(t *testing.T) {
 		},
 	}
 
-	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current")
+	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current", "")
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate, got %d", len(candidates))
 	}
@@ -155,7 +156,7 @@ func TestCollectEligibleCandidatesAllowsTronBalanceEqualToOne(t *testing.T) {
 		},
 	}
 
-	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current")
+	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current", "")
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate, got %d", len(candidates))
 	}
@@ -170,6 +171,79 @@ func TestCollectEligibleCandidatesAllowsTronBalanceEqualToOne(t *testing.T) {
 	}
 }
 
+func TestCollectEligibleCandidatesFiltersBySourceAddress(t *testing.T) {
+	file := &ChainFile{
+		Chain: "bsc",
+		Addresses: []AddressRecord{
+			{
+				Index:       0,
+				Address:     "0x1111111111111111111111111111111111111111",
+				MnemonicTag: "m-current",
+				BNBBalance:  "0.100000",
+				USDTBalance: "15.000000",
+			},
+			{
+				Index:       1,
+				Address:     "0x2222222222222222222222222222222222222222",
+				MnemonicTag: "m-current",
+				BNBBalance:  "0.100000",
+				USDTBalance: "18.000000",
+			},
+		},
+	}
+
+	candidates, total := collectEligibleCandidates("bsc", file, decimal.RequireFromString("10"), "", "m-current", "0x2222222222222222222222222222222222222222")
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].Address != "0x2222222222222222222222222222222222222222" {
+		t.Fatalf("unexpected candidate address: %s", candidates[0].Address)
+	}
+	if !total.Equal(decimal.RequireFromString("18")) {
+		t.Fatalf("unexpected total usdt: %s", total.String())
+	}
+}
+
+func TestCollectEligibleCandidatesAllowsManualTronSweepWithLowTRX(t *testing.T) {
+	file := &ChainFile{
+		Chain: "tron",
+		Addresses: []AddressRecord{
+			{
+				Index:       0,
+				Address:     "T111111111111111111111111111111111",
+				MnemonicTag: "m-current",
+				TRXBalance:  "0.000000",
+				USDTBalance: "15.000000",
+			},
+		},
+	}
+
+	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current", "T111111111111111111111111111111111")
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].Address != "T111111111111111111111111111111111" {
+		t.Fatalf("unexpected candidate address: %s", candidates[0].Address)
+	}
+	if candidates[0].TRXBalance != "0.000000" {
+		t.Fatalf("unexpected candidate trx balance: %s", candidates[0].TRXBalance)
+	}
+	if !total.Equal(decimal.RequireFromString("15")) {
+		t.Fatalf("unexpected total usdt: %s", total.String())
+	}
+}
+
+func TestDecimalToTokenUnitsUsesBSCPrecision18(t *testing.T) {
+	value, err := decimalToTokenUnits(decimal.RequireFromString("100"), bscTokenPrecision)
+	if err != nil {
+		t.Fatalf("decimalToTokenUnits returned error: %v", err)
+	}
+	expected := new(big.Int)
+	expected.SetString("100000000000000000000", 10)
+	if value.Cmp(expected) != 0 {
+		t.Fatalf("unexpected token units: got %s want %s", value.String(), expected.String())
+	}
+}
 func TestCollectMissingWalletIndexesSkipsExistingIndexes(t *testing.T) {
 	indexes := collectMissingWalletIndexes([]int{0, 1, 3, 5, 999}, 8, 4)
 	expected := []int{2, 4, 6, 7}

@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	tokenPrecision          = int32(6)
+	tronTokenPrecision      = int32(6)
+	bscTokenPrecision       = int32(18)
 	defaultTronFeeLimitSun  = int64(30_000_000)
 	requiredTronSweepEnergy = int64(65_000)
+	manualTronSweepEnergy   = int64(10_000)
 )
 
 var minimumBSCSweepBNBBalance = decimal.RequireFromString("0.001")
@@ -36,6 +38,7 @@ var minimumBSCSweepBNBBalance = decimal.RequireFromString("0.001")
 type SweepPreview struct {
 	Chain             string           `json:"chain"`
 	Destination       string           `json:"destination"`
+	SourceAddress     string           `json:"source_address,omitempty"`
 	Threshold         string           `json:"threshold"`
 	EligibleCount     int              `json:"eligible_count"`
 	EligibleTotalUSDT string           `json:"eligible_total_usdt"`
@@ -51,14 +54,15 @@ type SweepCandidate struct {
 	USDTBalance string `json:"usdt_balance"`
 }
 
-func (s *Service) PreviewSweep(chain, destination string) (SweepPreview, error) {
+func (s *Service) PreviewSweep(chain, destination, sourceAddress string) (SweepPreview, error) {
 	normalizedChain, normalizedDestination, err := validateSweepDestination(chain, destination)
 	if err != nil {
 		return SweepPreview{}, err
 	}
+	normalizedSourceAddress := strings.TrimSpace(sourceAddress)
 
 	if s.repo != nil {
-		return s.previewSweepFromDB(normalizedChain, normalizedDestination)
+		return s.previewSweepFromDB(normalizedChain, normalizedDestination, normalizedSourceAddress)
 	}
 	cfg, file, threshold, err := s.loadSweepContext(normalizedChain)
 	if err != nil {
@@ -66,11 +70,12 @@ func (s *Service) PreviewSweep(chain, destination string) (SweepPreview, error) 
 	}
 	currentMnemonicTag := currentSweepMnemonicTag(cfg, normalizedChain)
 
-	candidates, total := collectEligibleCandidates(normalizedChain, file, threshold, normalizedDestination, currentMnemonicTag)
+	candidates, total := collectEligibleCandidates(normalizedChain, file, threshold, normalizedDestination, currentMnemonicTag, normalizedSourceAddress)
 	// #region debug-point A:sweep-preview-summary
 	debugReport("pre", "A", "hdwallet/collect.go:PreviewSweep", "[DEBUG] sweep preview summary", map[string]any{
 		"chain":              normalizedChain,
 		"destination":        normalizedDestination,
+		"sourceAddress":      normalizedSourceAddress,
 		"threshold":          threshold.StringFixed(6),
 		"currentMnemonicTag": currentMnemonicTag,
 		"fileCount":          len(file.Addresses),
@@ -81,6 +86,7 @@ func (s *Service) PreviewSweep(chain, destination string) (SweepPreview, error) 
 	preview := SweepPreview{
 		Chain:             normalizedChain,
 		Destination:       normalizedDestination,
+		SourceAddress:     normalizedSourceAddress,
 		Threshold:         threshold.StringFixed(6),
 		EligibleCount:     len(candidates),
 		EligibleTotalUSDT: total.StringFixed(6),
@@ -96,25 +102,32 @@ func (s *Service) PreviewSweep(chain, destination string) (SweepPreview, error) 
 	return preview, nil
 }
 
-func (s *Service) StartSweep(chain, destination string) error {
-	preview, err := s.PreviewSweep(chain, destination)
+func (s *Service) StartSweep(chain, destination, sourceAddress string) error {
+	preview, err := s.PreviewSweep(chain, destination, sourceAddress)
 	if err != nil {
 		return err
 	}
 	if preview.EligibleCount == 0 {
+		if strings.TrimSpace(preview.SourceAddress) != "" {
+			return fmt.Errorf("当前地址不符合归集条件")
+		}
 		if strings.EqualFold(chain, "tron") {
 			return fmt.Errorf("当前链没有 TRX 余额大于等于 1 且 USDT 大于等于阈值的地址")
 		}
 		return fmt.Errorf("当前链没有 BNB 余额大于等于 0.001 且 USDT 大于等于阈值的地址")
 	}
-	if !s.beginJob("sweep-"+preview.Chain, preview.Chain, preview.EligibleCount, fmt.Sprintf("开始归集 %s USDT", strings.ToUpper(preview.Chain))) {
+	jobMessage := fmt.Sprintf("开始归集 %s USDT", strings.ToUpper(preview.Chain))
+	if preview.SourceAddress != "" {
+		jobMessage = fmt.Sprintf("开始归集 %s 单条地址 USDT", strings.ToUpper(preview.Chain))
+	}
+	if !s.beginJob("sweep-"+preview.Chain, preview.Chain, preview.EligibleCount, jobMessage) {
 		return fmt.Errorf("任务正在执行中")
 	}
-	go s.runSweep(preview.Chain, preview.Destination)
+	go s.runSweep(preview.Chain, preview.Destination, preview.SourceAddress)
 	return nil
 }
 
-func (s *Service) runSweep(chain, destination string) {
+func (s *Service) runSweep(chain, destination, sourceAddress string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			s.finishWithError(fmt.Errorf("panic: %v", recovered))
@@ -122,7 +135,7 @@ func (s *Service) runSweep(chain, destination string) {
 	}()
 
 	if s.repo != nil {
-		s.runSweepFromDB(chain, destination)
+		s.runSweepFromDB(chain, destination, sourceAddress)
 		return
 	}
 
@@ -133,7 +146,7 @@ func (s *Service) runSweep(chain, destination string) {
 	}
 	currentMnemonicTag := currentSweepMnemonicTag(cfg, chain)
 
-	candidates, _ := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag)
+	candidates, _ := collectEligibleCandidates(chain, file, threshold, destination, currentMnemonicTag, sourceAddress)
 	if len(candidates) == 0 {
 		s.finishSkipped("没有符合阈值的地址")
 		return
@@ -154,7 +167,7 @@ func (s *Service) runSweep(chain, destination string) {
 		)
 		switch chain {
 		case "tron":
-			txHash, statusNote, err = s.collectTronUSDT(cfg, file, threshold, destination, candidate, index+1)
+			txHash, statusNote, err = s.collectTronUSDT(cfg, file, threshold, destination, candidate, index+1, strings.TrimSpace(sourceAddress) != "")
 		case "bsc":
 			txHash, err = s.collectBSCUSDT(cfg, file, threshold, destination, candidate)
 		default:
@@ -201,7 +214,7 @@ func (s *Service) runSweep(chain, destination string) {
 	s.finishSuccess(message)
 }
 
-func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold decimal.Decimal, destination string, candidate SweepCandidate, progressCurrent int) (string, string, error) {
+func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold decimal.Decimal, destination string, candidate SweepCandidate, progressCurrent int, manualSweep bool) (string, string, error) {
 	mnemonic := cfg.TronMnemonic
 	var err error
 	if s.repo != nil {
@@ -232,6 +245,31 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 	if err != nil {
 		return "", "", err
 	}
+	statusNotes := make([]string, 0, 2)
+	if manualSweep && (!trxActive || trxBalance.LessThan(decimal.NewFromInt(1))) {
+		if s.tronActivator == nil {
+			return "", "", fmt.Errorf("未配置 tron 激活地址功能")
+		}
+		s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s TRX 不足，正在自动激活地址", candidate.Address))
+		if _, err := s.tronActivator.Activate(ctx, wallet.Address); err != nil {
+			return "", "", fmt.Errorf("激活地址失败: %w", err)
+		}
+		statusNotes = append(statusNotes, "TRX 不足，已自动激活地址一次")
+		if err := s.waitForBalanceThrottle(ctx); err != nil {
+			return "", "", err
+		}
+		activationTimer := time.NewTimer(3 * time.Second)
+		defer activationTimer.Stop()
+		select {
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		case <-activationTimer.C:
+		}
+		trxActive, trxBalance, err = s.tronClient.GetAccountState(ctx, wallet.AddressHex)
+		if err != nil {
+			return "", "", fmt.Errorf("激活后读取 tron 地址余额失败: %w", err)
+		}
+	}
 	if !trxActive {
 		return "", "", fmt.Errorf("skip: tron 地址未激活")
 	}
@@ -242,8 +280,12 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 	if err != nil {
 		return "", "", fmt.Errorf("读取 tron 地址能量失败: %w", err)
 	}
+	energyThreshold := requiredTronSweepEnergy
+	if manualSweep {
+		energyThreshold = manualTronSweepEnergy
+	}
 	energyStatusMessage := "地址能量充足，跳过发能"
-	if availableEnergy <= requiredTronSweepEnergy {
+	if availableEnergy < energyThreshold {
 		providerName, provider := s.resolveEnergyProvider()
 		if provider == nil || !provider.IsConfigured() {
 			return "", "", fmt.Errorf("未配置发能通道")
@@ -271,6 +313,7 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 			return "", "", fmt.Errorf("发能一次失败(provider=%s): %w", providerName, orderErr)
 		}
 		energyStatusMessage = "地址能量不足，已自动发能一次"
+		statusNotes = append(statusNotes, energyStatusMessage)
 		s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s %s", candidate.Address, energyStatusMessage))
 		if err := s.waitForBalanceThrottle(ctx); err != nil {
 			return "", "", err
@@ -286,7 +329,7 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 		s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s %s", candidate.Address, energyStatusMessage))
 	}
 
-	amountUnits, err := decimalToTokenUnits(usdtBalance, tokenPrecision)
+	amountUnits, err := decimalToTokenUnits(usdtBalance, tronTokenPrecision)
 	if err != nil {
 		return "", "", err
 	}
@@ -324,14 +367,14 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 		if err := s.repo.UpsertBalance(ctx, wallet.Address, "USDT", decimal.Zero, 0); err != nil {
 			return "", "", err
 		}
-		return txHash, energyStatusMessage, nil
+		return txHash, strings.Join(statusNotes, "，"), nil
 	}
 	if candidate.Index < len(file.Addresses) {
 		file.Addresses[candidate.Index].USDTBalance = decimal.Zero.StringFixed(6)
 		file.Addresses[candidate.Index].UpdatedAt = nowString()
 	}
 	file.BalanceUpdatedAt = nowString()
-	return txHash, energyStatusMessage, nil
+	return txHash, strings.Join(statusNotes, "，"), nil
 }
 
 func buildSignedTronTransactionJSON(unsignedJSON []byte, signatures [][]byte) ([]byte, error) {
@@ -391,7 +434,7 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	if bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
 		return "", fmt.Errorf("skip: bnb 余额需大于等于 0.001")
 	}
-	amountUnits, err := decimalToTokenUnits(usdtBalance, tokenPrecision)
+	amountUnits, err := decimalToTokenUnits(usdtBalance, bscTokenPrecision)
 	if err != nil {
 		return "", err
 	}
@@ -508,7 +551,7 @@ func (s *Service) loadSweepContext(chain string) (ConfigFile, *ChainFile, decima
 	return cfg, &file, threshold, nil
 }
 
-func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.Decimal, destination, currentMnemonicTag string) ([]SweepCandidate, decimal.Decimal) {
+func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.Decimal, destination, currentMnemonicTag, sourceAddress string) ([]SweepCandidate, decimal.Decimal) {
 	candidates := make([]SweepCandidate, 0)
 	total := decimal.Zero
 	for _, record := range file.Addresses {
@@ -539,6 +582,18 @@ func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.
 				// #endregion
 			}
 			continue
+		}
+		if sourceAddress != "" {
+			switch chain {
+			case "tron":
+				if strings.TrimSpace(record.Address) != sourceAddress {
+					continue
+				}
+			case "bsc":
+				if !strings.EqualFold(strings.TrimSpace(record.Address), sourceAddress) {
+					continue
+				}
+			}
 		}
 		if destination != "" {
 			if chain == "tron" && record.Address == destination {
@@ -591,31 +646,26 @@ func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.
 		trxBalance := decimal.Zero
 		bnbBalance := decimal.Zero
 		if chain == "tron" {
-			if strings.TrimSpace(record.TRXBalance) == "" {
-				if isFocus {
-					// #region debug-point D:sweep-filter-focus-skip-empty-trx
-					debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: empty trx balance", nil)
-					// #endregion
+			if strings.TrimSpace(record.TRXBalance) != "" {
+				trxBalance, err = decimal.NewFromString(strings.TrimSpace(record.TRXBalance))
+				if err != nil {
+					if isFocus {
+						// #region debug-point D:sweep-filter-focus-parse-trx-failed
+						debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: parse trx failed", map[string]any{
+							"rawTRX": strings.TrimSpace(record.TRXBalance),
+							"err":    err.Error(),
+						})
+						// #endregion
+					}
+					continue
 				}
-				continue
 			}
-			trxBalance, err = decimal.NewFromString(strings.TrimSpace(record.TRXBalance))
-			if err != nil {
-				if isFocus {
-					// #region debug-point D:sweep-filter-focus-parse-trx-failed
-					debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: parse trx failed", map[string]any{
-						"rawTRX": strings.TrimSpace(record.TRXBalance),
-						"err":    err.Error(),
-					})
-					// #endregion
-				}
-				continue
-			}
-			if trxBalance.LessThan(decimal.NewFromInt(1)) {
+			if sourceAddress == "" && trxBalance.LessThan(decimal.NewFromInt(1)) {
 				if isFocus {
 					// #region debug-point D:sweep-filter-focus-skip-trx-threshold
-					debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: trx <= 1", map[string]any{
-						"trx": trxBalance.StringFixed(6),
+					debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: trx below minimum", map[string]any{
+						"trx":           trxBalance.StringFixed(6),
+						"sourceAddress": sourceAddress,
 					})
 					// #endregion
 				}

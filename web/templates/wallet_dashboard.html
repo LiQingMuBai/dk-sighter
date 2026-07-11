@@ -467,7 +467,7 @@
     }
   </style>
 </head>
-<body>
+<body data-desktop-mode="{{if .DesktopMode}}1{{else}}0{{end}}">
   <div id="jobBanner" class="job-banner" aria-live="polite">
     <div class="job-banner-text">
       <span class="job-banner-dot"></span>
@@ -626,6 +626,7 @@
   </div>
 
   <script>
+    const desktopMode = document.body.dataset.desktopMode === "1"
     const urlChain = new URLSearchParams(window.location.search).get("chain")
     const state = {
       chain: urlChain === "bsc" ? "bsc" : "tron",
@@ -636,6 +637,7 @@
       waitingSweepResult: false,
       sweepStep: "input",
       sweepPreview: null,
+      sweepSourceAddress: "",
       refreshingAddress: "",
       energyActionKey: ""
     }
@@ -720,8 +722,9 @@
         : "地址格式不正确，请输入 T 开头的 34 位 Tron 地址"
     }
 
-    function openSweepModal() {
+    function openSweepModal(sourceAddress = "") {
       const chainName = currentChainName()
+      state.sweepSourceAddress = desktopMode ? (sourceAddress || "") : ""
       state.sweepStep = "input"
       state.sweepPreview = null
       sweepModalCard.classList.toggle("chain-tron", state.chain === "tron")
@@ -729,10 +732,12 @@
       sweepChainIcon.classList.toggle("chain-tron", state.chain === "tron")
       sweepChainIcon.classList.toggle("chain-bsc", state.chain === "bsc")
       sweepChainIconText.textContent = state.chain === "bsc" ? "BSC" : "TRON"
-      sweepModalTitle.textContent = `${chainName} USDT 一键归集`
-      sweepModalSubtitle.textContent = state.chain === "tron"
-        ? "请输入归集地址，系统会先预览 TRX 大于 1 且 USDT 达到阈值的地址数量，执行时会先发能一次，再发起 USDT 归集。"
-        : "请输入归集地址，系统会先预览符合阈值的地址数量和预计归集总额，确认后再执行。"
+      sweepModalTitle.textContent = state.sweepSourceAddress ? `${chainName} USDT 手动归集` : `${chainName} USDT 一键归集`
+      sweepModalSubtitle.textContent = state.sweepSourceAddress
+        ? `当前只会归集地址 ${state.sweepSourceAddress}。请输入目标地址后，系统会先预览这条记录是否符合条件，再执行归集。`
+        : (state.chain === "tron"
+          ? "请输入归集地址，系统会先预览 TRX 大于等于 1 且 USDT 达到阈值的地址数量，执行时会先发能一次，再发起 USDT 归集。"
+          : "请输入归集地址，系统会先预览符合阈值的地址数量和预计归集总额，确认后再执行。")
       sweepDestinationLabel.textContent = `${chainName} 归集地址`
       sweepDestinationInput.placeholder = `请输入 ${chainName} 归集地址`
       sweepDestinationInput.value = ""
@@ -753,6 +758,7 @@
       sweepModal.setAttribute("aria-hidden", "true")
       state.sweepStep = "input"
       state.sweepPreview = null
+      state.sweepSourceAddress = ""
     }
 
     function showJobResultModal(job) {
@@ -793,13 +799,14 @@
 
     function renderSweepPreview(preview) {
       const chainName = currentChainName()
-      sweepModalTitle.textContent = `${chainName} USDT 归集确认`
+      sweepModalTitle.textContent = preview.source_address ? `${chainName} USDT 手动归集确认` : `${chainName} USDT 归集确认`
       sweepModalSubtitle.textContent = "请再次核对归集目标地址、阈值和预计归集总额，确认后将立即启动归集任务。"
       sweepDestinationInput.value = preview.destination || ""
       sweepDestinationInput.disabled = true
       sweepDestinationHint.className = "input-hint success"
       sweepDestinationHint.textContent = `${chainName} 目标地址已通过格式校验`
       sweepPreview.innerHTML = `
+        ${preview.source_address ? `<div class="modal-preview-row"><div class="modal-preview-label">源地址</div><div class="modal-preview-value">${preview.source_address}</div></div>` : ""}
         <div class="modal-preview-row"><div class="modal-preview-label">目标地址</div><div class="modal-preview-value">${preview.destination || "-"}</div></div>
         <div class="modal-preview-row"><div class="modal-preview-label">归集阈值</div><div class="modal-preview-value">${preview.threshold || "-"}</div></div>
         <div class="modal-preview-row"><div class="modal-preview-label">符合地址数</div><div class="modal-preview-value">${preview.eligible_count || 0}</div></div>
@@ -872,7 +879,7 @@
       } else {
         tableBody.innerHTML = items.map((item) => `
           ${(() => {
-            const disableRefresh = !!state.refreshingAddress || !!state.energyActionKey
+            const disableRefresh = !!state.refreshingAddress || !!state.energyActionKey || !!state.jobRunning
             const onceKey = buildEnergyActionKey(item.address, "发能一次")
             const twiceKey = buildEnergyActionKey(item.address, "发能两次")
             const actions = [
@@ -881,6 +888,9 @@
             if (state.chain === "tron") {
               actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能一次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === onceKey ? "发能中..." : "发能一次"}</button>`)
               actions.push(`<button class="row-action-btn" type="button" data-energy-action="发能两次" data-energy-address="${item.address}" ${disableRefresh ? "disabled" : ""}>${state.energyActionKey === twiceKey ? "发能中..." : "发能两次"}</button>`)
+            }
+            if (desktopMode) {
+              actions.push(`<button class="row-action-btn" type="button" data-sweep-address="${item.address}" ${disableRefresh ? "disabled" : ""}>手动归集</button>`)
             }
             return `
           <tr>
@@ -1017,7 +1027,8 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chain: state.chain,
-            destination
+            destination,
+            address: desktopMode ? state.sweepSourceAddress : ""
           })
         })
         state.sweepStep = "preview"
@@ -1037,7 +1048,8 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chain: state.chain,
-          destination: state.sweepPreview.destination
+          destination: state.sweepPreview.destination,
+          address: desktopMode ? (state.sweepPreview.source_address || state.sweepSourceAddress) : ""
         })
       })
       state.waitingSweepResult = true
@@ -1065,7 +1077,7 @@
       const refreshButton = event.target.closest("[data-refresh-address]")
       if (refreshButton) {
         const address = refreshButton.getAttribute("data-refresh-address") || ""
-        if (!address || state.refreshingAddress || state.energyActionKey) {
+        if (!address || state.refreshingAddress || state.energyActionKey || state.jobRunning) {
           return
         }
         refreshAddress(address).catch((err) => {
@@ -1073,6 +1085,19 @@
           showToast(err.message, true)
           loadState().catch(() => {})
         })
+        return
+      }
+
+      const sweepAddressButton = event.target.closest("[data-sweep-address]")
+      if (sweepAddressButton) {
+        if (!desktopMode) {
+          return
+        }
+        const address = sweepAddressButton.getAttribute("data-sweep-address") || ""
+        if (!address || state.refreshingAddress || state.energyActionKey || state.jobRunning) {
+          return
+        }
+        openSweepModal(address)
         return
       }
 

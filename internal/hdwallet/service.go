@@ -110,6 +110,10 @@ type State struct {
 	Page       PageData   `json:"page"`
 }
 
+type tronSweepActivator interface {
+	Activate(context.Context, string) (string, error)
+}
+
 type Service struct {
 	dataDir               string
 	count                 int
@@ -117,6 +121,7 @@ type Service struct {
 	bscClient             *bsc.Client
 	repo                  *repository.DB
 	hdSource              string
+	tronActivator         tronSweepActivator
 	energyProviders       map[string]infrastructure.EnergyOrderProvider
 	defaultEnergyProvider string
 
@@ -157,6 +162,10 @@ func (s *Service) ConfigureBalanceRequestDelay(delay time.Duration) {
 func (s *Service) ConfigureEnergyProviders(providers map[string]infrastructure.EnergyOrderProvider, defaultProvider string) {
 	s.energyProviders = providers
 	s.defaultEnergyProvider = strings.ToLower(strings.TrimSpace(defaultProvider))
+}
+
+func (s *Service) ConfigureTronActivator(activator tronSweepActivator) {
+	s.tronActivator = activator
 }
 
 func (s *Service) SaveConfig(tronMnemonic, bscMnemonic, tronUSDTThreshold, bscUSDTThreshold string) (ConfigFile, error) {
