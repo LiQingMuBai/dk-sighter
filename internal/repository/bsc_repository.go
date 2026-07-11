@@ -326,6 +326,44 @@ func LoadActiveBSCWatchAddresses(ctx context.Context, repo any) ([]string, error
 	return result, nil
 }
 
+func LoadActiveBSCWatchAddressesWithPositiveBNBBalance(ctx context.Context, repo any) ([]string, error) {
+	executor, err := resolveBSCExecutor(repo)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := executor.QueryContext(ctx, `
+		SELECT DISTINCT LOWER(w.address)
+		FROM bsc_watch_addresses w
+		INNER JOIN bsc_asset_balances bnb
+			ON LOWER(bnb.address) = LOWER(w.address)
+			AND bnb.asset_code = 'BNB'
+		WHERE w.status = 1
+		  AND bnb.balance > 0
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]string, 0)
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return nil, err
+		}
+		address = strings.ToLower(strings.TrimSpace(address))
+		if address == "" {
+			continue
+		}
+		result = append(result, address)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func LoadActiveBSCWatchAddressesBySource(ctx context.Context, repo any, source string) ([]string, error) {
 	executor, err := resolveBSCExecutor(repo)
 	if err != nil {

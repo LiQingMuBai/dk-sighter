@@ -1490,26 +1490,9 @@ func (s *Server) manualRefreshJob(chain string) *manualBalanceRefreshJob {
 func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) ([]string, error) {
 	switch chain {
 	case "tron":
-		items, err := s.repo.LoadActiveAddresses(ctx)
-		if err != nil {
-			return nil, err
-		}
-		result := make([]string, 0, len(items))
-		seen := make(map[string]struct{}, len(items))
-		for _, item := range items {
-			address := strings.TrimSpace(item.AddressBase58)
-			if address == "" {
-				continue
-			}
-			if _, ok := seen[address]; ok {
-				continue
-			}
-			seen[address] = struct{}{}
-			result = append(result, address)
-		}
-		return result, nil
+		return s.repo.LoadActiveAddressesWithPositiveTRXBalance(ctx)
 	case "bsc":
-		return repository.LoadActiveBSCWatchAddresses(ctx, s.repo)
+		return repository.LoadActiveBSCWatchAddressesWithPositiveBNBBalance(ctx, s.repo)
 	default:
 		return nil, fmt.Errorf("unsupported chain: %s", chain)
 	}

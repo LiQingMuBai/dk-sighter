@@ -207,6 +207,36 @@ func (d *DB) LoadActiveAddresses(ctx context.Context) ([]WatchAddress, error) {
 	return result, rows.Err()
 }
 
+func (d *DB) LoadActiveAddressesWithPositiveTRXBalance(ctx context.Context) ([]string, error) {
+	rows, err := d.sql.QueryContext(ctx, `
+		SELECT DISTINCT w.address_base58
+		FROM watch_addresses w
+		INNER JOIN asset_balances trx
+			ON trx.address_base58 = w.address_base58
+			AND trx.asset_code = 'TRX'
+		WHERE w.status = 1
+		  AND trx.balance > 0
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query watch_addresses with positive trx balance: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]string, 0)
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return nil, fmt.Errorf("scan watch_address with positive trx balance: %w", err)
+		}
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		result = append(result, address)
+	}
+	return result, rows.Err()
+}
+
 func (d *DB) LoadActiveAddressesBySource(ctx context.Context, source string) ([]WatchAddress, error) {
 	rows, err := d.sql.QueryContext(ctx, `
 		SELECT id, address_base58, status
