@@ -1060,7 +1060,7 @@
           <a class="btn search-link" href="/?sort={{ .Sort }}">清空</a>
           {{ end }}
         </form>
-        <button id="batchRefreshBalanceBtn" class="btn" type="button" onclick="handleBatchRefreshTronAddress()">批量更新余额</button>
+        <button id="manualFullRefreshBtn" class="btn" type="button" onclick="handleManualFullRefreshTron()">手动全量更新</button>
         <button class="btn" type="button" onclick="handleBatchActivateAddress()">批量激活地址</button>
       </div>
     </div>
@@ -1668,41 +1668,38 @@
       }
     }
 
-    async function handleBatchRefreshTronAddress() {
-      const addresses = getSelectedAddresses();
-      if (!addresses.length) {
-        showToast('请先勾选地址');
+    async function handleManualFullRefreshTron() {
+      const confirmed = await showConfirm(
+        '手动全量更新',
+        '确认开始手动全量更新全部 Tron 关注地址余额吗？系统会后台分页执行，10 分钟内不能重复操作。',
+        '开始更新'
+      );
+      if (!confirmed) {
         return;
       }
 
-      const button = document.getElementById('batchRefreshBalanceBtn');
-      const originalText = button ? button.textContent : '批量更新余额';
+      const button = document.getElementById('manualFullRefreshBtn');
+      const originalText = button ? button.textContent : '手动全量更新';
       if (button) {
         button.disabled = true;
-        button.textContent = '批量更新中...';
+        button.textContent = '启动中...';
       }
 
       try {
-        const resp = await fetch('/api/tron/refresh-address', {
+        const resp = await fetch('/api/tron/manual-refresh-all', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            addresses: addresses
-          })
+          }
         });
 
         const data = await resp.json();
         if (!resp.ok || !data.success) {
-          showToast(data.message || '批量更新余额失败');
+          showToast(data.message || '手动全量更新启动失败');
           return;
         }
 
-        showToast(data.message || `批量更新余额成功，共 ${addresses.length} 个地址`);
-        setTimeout(() => {
-          window.location.reload();
-        }, 700);
+        showToast(data.message || '已开始手动全量更新余额');
       } catch (error) {
         showToast('请求失败，请稍后重试');
       } finally {

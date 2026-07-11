@@ -702,8 +702,6 @@
       <div class="toolbar">
         <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
         <div class="toolbar-actions">
-          <button id="batchRefreshBalanceBtn" class="button button-brand" type="button" onclick="handleBatchRefreshBSCAddress()">批量更新余额</button>
-          <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
             <input type="hidden" name="address" value="{{ .AddressQuery }}">
@@ -725,6 +723,8 @@
             <a class="button search-link" href="/bsc?sort={{ .Sort }}">清空</a>
             {{ end }}
           </form>
+          <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()">手动全量更新</button>
+          <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
         </div>
       </div>
 
@@ -1127,33 +1127,30 @@
       }
     }
 
-    async function handleBatchRefreshBSCAddress() {
-      const addresses = getUniqueSelectedAddresses();
-      if (!addresses.length) {
-        showToast('请先勾选地址');
+    async function handleManualFullRefreshBSC() {
+      const confirmed = await showConfirm('手动全量更新', '确认开始手动全量更新全部 BSC 关注地址余额吗？系统会后台分页执行，10 分钟内不能重复操作。');
+      if (!confirmed) {
         return;
       }
 
-      const button = document.getElementById('batchRefreshBalanceBtn');
-      const originalText = button ? button.textContent : '批量更新余额';
+      const button = document.getElementById('manualFullRefreshBtn');
+      const originalText = button ? button.textContent : '手动全量更新';
       if (button) {
         button.disabled = true;
-        button.textContent = '批量更新中...';
+        button.textContent = '启动中...';
       }
 
       try {
-        const resp = await fetch('/api/bsc/refresh-address', {
+        const resp = await fetch('/api/bsc/manual-refresh-all', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ addresses: addresses })
+          headers: { 'Content-Type': 'application/json' }
         });
         const data = await resp.json();
         if (!resp.ok || !data.success) {
-          showToast((data && data.message) ? data.message : '批量更新余额失败');
+          showToast((data && data.message) ? data.message : '手动全量更新启动失败');
           return;
         }
-        showToast(data.message || `批量更新余额成功，共 ${addresses.length} 个`);
-        window.setTimeout(() => window.location.reload(), 800);
+        showToast(data.message || '已开始手动全量更新余额');
       } catch (error) {
         showToast('请求失败，请稍后重试');
       } finally {

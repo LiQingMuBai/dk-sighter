@@ -248,6 +248,10 @@ func (s *Server) handleBSCRefreshAddress(w http.ResponseWriter, r *http.Request)
 	s.handleRefreshAddressesByChain(w, r, "bsc")
 }
 
+func (s *Server) handleBSCManualRefreshAll(w http.ResponseWriter, r *http.Request) {
+	s.handleManualRefreshAll(w, r, "bsc")
+}
+
 func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

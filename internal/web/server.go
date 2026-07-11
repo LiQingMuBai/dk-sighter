@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"tron_watcher/infrastructure"
@@ -64,6 +65,14 @@ type Server struct {
 	desktopMode           bool
 	walletMode            bool
 	walletService         *hdwallet.Service
+	manualRefreshMu       sync.Mutex
+	tronManualRefresh     manualBalanceRefreshJob
+	bscManualRefresh      manualBalanceRefreshJob
+}
+
+type manualBalanceRefreshJob struct {
+	running     bool
+	lastStarted time.Time
 }
 
 type dashboardPageData struct {
@@ -135,6 +144,14 @@ type refreshAddressResponse struct {
 	SuccessCount    int      `json:"success_count,omitempty"`
 	FailedCount     int      `json:"failed_count,omitempty"`
 	FailedAddresses []string `json:"failed_addresses,omitempty"`
+}
+
+type manualRefreshResponse struct {
+	Success       bool   `json:"success"`
+	Message       string `json:"message"`
+	Chain         string `json:"chain,omitempty"`
+	TotalCount    int    `json:"total_count,omitempty"`
+	NextAllowedAt string `json:"next_allowed_at,omitempty"`
 }
 
 type actionPreviewRequest struct {
@@ -307,6 +324,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/bsc/watch-addresses", s.handleBSCAddWatchAddresses)
 		mux.HandleFunc("/api/bsc/delete-addresses", s.handleBSCDeleteAddresses)
 		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
+		mux.HandleFunc("/api/bsc/manual-refresh-all", s.handleBSCManualRefreshAll)
 		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
 		mux.HandleFunc("/api/refresh-addresses", s.handleRefreshAddresses)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
@@ -316,6 +334,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/watch-addresses", s.handleAddWatchAddresses)
 		mux.HandleFunc("/api/tron/watch-addresses", s.handleAddWatchAddresses)
 		mux.HandleFunc("/api/tron/refresh-address", s.handleRefreshAddress)
+		mux.HandleFunc("/api/tron/manual-refresh-all", s.handleTronManualRefreshAll)
 		mux.HandleFunc("/api/tron/balances", s.handleTronBalancesAPI)
 		mux.HandleFunc("/api/tron/transfers/in", s.handleTronTransfersInAPI)
 		mux.HandleFunc("/api/tron/transfers/out", s.handleTronTransfersOutAPI)
@@ -836,8 +855,48 @@ func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
 	s.handleRefreshAddressesByChain(w, r, "tron")
 }
 
+func (s *Server) handleTronManualRefreshAll(w http.ResponseWriter, r *http.Request) {
+	s.handleManualRefreshAll(w, r, "tron")
+}
+
 func (s *Server) handleRefreshAddresses(w http.ResponseWriter, r *http.Request) {
 	s.handleRefreshAddressesByChain(w, r, "")
+}
+
+func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, chain string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, manualRefreshResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	totalCount, err := s.startManualRefreshAll(chain)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "10分钟") || strings.Contains(err.Error(), "进行中") {
+			status = http.StatusTooManyRequests
+		}
+		s.writeJSON(w, status, manualRefreshResponse{
+			Success:       false,
+			Message:       err.Error(),
+			Chain:         chain,
+			NextAllowedAt: s.nextManualRefreshAllowedAt(chain),
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, manualRefreshResponse{
+		Success:    true,
+		Message:    fmt.Sprintf("已开始手动全量更新 %s 余额，共 %d 个地址", strings.ToUpper(chain), totalCount),
+		Chain:      chain,
+		TotalCount: totalCount,
+	})
 }
 
 func (s *Server) handleRefreshAddressesByChain(w http.ResponseWriter, r *http.Request, defaultChain string) {
@@ -1305,6 +1364,155 @@ func firstAddress(addresses []string) string {
 		return ""
 	}
 	return addresses[0]
+}
+
+const (
+	manualRefreshCooldown  = 10 * time.Minute
+	manualRefreshBatchSize = 50
+	manualRefreshBatchWait = 300 * time.Millisecond
+)
+
+func (s *Server) startManualRefreshAll(chain string) (int, error) {
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain != "tron" && chain != "bsc" {
+		return 0, fmt.Errorf("unsupported chain: %s", chain)
+	}
+	switch chain {
+	case "tron":
+		if s.tronBalances == nil {
+			return 0, fmt.Errorf("tron balance refresher not configured")
+		}
+	case "bsc":
+		if s.bscBalances == nil {
+			return 0, fmt.Errorf("bsc balance refresher not configured")
+		}
+	}
+
+	addresses, err := s.loadManualRefreshAddresses(context.Background(), chain)
+	if err != nil {
+		return 0, err
+	}
+	if len(addresses) == 0 {
+		return 0, fmt.Errorf("当前没有可更新的地址")
+	}
+
+	s.manualRefreshMu.Lock()
+	job := s.manualRefreshJob(chain)
+	now := time.Now()
+	if job.running {
+		s.manualRefreshMu.Unlock()
+		return 0, fmt.Errorf("%s 手动全量更新正在进行中，请稍后再试", strings.ToUpper(chain))
+	}
+	if !job.lastStarted.IsZero() && now.Before(job.lastStarted.Add(manualRefreshCooldown)) {
+		nextAllowed := job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
+		s.manualRefreshMu.Unlock()
+		return 0, fmt.Errorf("%s 手动全量更新 10分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
+	}
+	job.running = true
+	job.lastStarted = now
+	s.manualRefreshMu.Unlock()
+
+	go s.runManualRefreshAll(chain, addresses)
+	return len(addresses), nil
+}
+
+func (s *Server) runManualRefreshAll(chain string, addresses []string) {
+	defer s.finishManualRefresh(chain)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	log.Printf("manual full refresh started: chain=%s total=%d batch_size=%d", chain, len(addresses), manualRefreshBatchSize)
+	for start := 0; start < len(addresses); start += manualRefreshBatchSize {
+		end := start + manualRefreshBatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[start:end]
+		page := start/manualRefreshBatchSize + 1
+		totalPages := (len(addresses) + manualRefreshBatchSize - 1) / manualRefreshBatchSize
+		log.Printf("manual full refresh batch: chain=%s page=%d/%d size=%d", chain, page, totalPages, len(batch))
+
+		switch chain {
+		case "tron":
+			if s.tronBalances == nil {
+				log.Printf("manual full refresh skipped: chain=tron reason=balance refresher not configured")
+				return
+			}
+			if err := s.tronBalances.RefreshAddresses(ctx, batch); err != nil {
+				log.Printf("manual full refresh batch failed: chain=%s page=%d err=%v", chain, page, err)
+			}
+		case "bsc":
+			if s.bscBalances == nil {
+				log.Printf("manual full refresh skipped: chain=bsc reason=balance refresher not configured")
+				return
+			}
+			s.bscBalances.RefreshAddresses(ctx, batch)
+		}
+
+		if end < len(addresses) {
+			timer := time.NewTimer(manualRefreshBatchWait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Printf("manual full refresh canceled: chain=%s err=%v", chain, ctx.Err())
+				return
+			case <-timer.C:
+			}
+		}
+	}
+	log.Printf("manual full refresh finished: chain=%s total=%d", chain, len(addresses))
+}
+
+func (s *Server) finishManualRefresh(chain string) {
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	s.manualRefreshJob(chain).running = false
+}
+
+func (s *Server) nextManualRefreshAllowedAt(chain string) string {
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	job := s.manualRefreshJob(chain)
+	if job.lastStarted.IsZero() {
+		return ""
+	}
+	return job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
+}
+
+func (s *Server) manualRefreshJob(chain string) *manualBalanceRefreshJob {
+	if strings.EqualFold(strings.TrimSpace(chain), "bsc") {
+		return &s.bscManualRefresh
+	}
+	return &s.tronManualRefresh
+}
+
+func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) ([]string, error) {
+	switch chain {
+	case "tron":
+		items, err := s.repo.LoadActiveAddresses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]string, 0, len(items))
+		seen := make(map[string]struct{}, len(items))
+		for _, item := range items {
+			address := strings.TrimSpace(item.AddressBase58)
+			if address == "" {
+				continue
+			}
+			if _, ok := seen[address]; ok {
+				continue
+			}
+			seen[address] = struct{}{}
+			result = append(result, address)
+		}
+		return result, nil
+	case "bsc":
+		return repository.LoadActiveBSCWatchAddresses(ctx, s.repo)
+	default:
+		return nil, fmt.Errorf("unsupported chain: %s", chain)
+	}
 }
 
 func scoreByAction(action string) int {
