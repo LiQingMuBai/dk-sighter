@@ -120,13 +120,21 @@ type addWatchAddressesResponse struct {
 }
 
 type refreshAddressRequest struct {
-	Address string `json:"address"`
+	Chain     string   `json:"chain"`
+	Address   string   `json:"address"`
+	Addresses []string `json:"addresses"`
 }
 
 type refreshAddressResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Address string `json:"address,omitempty"`
+	Success         bool     `json:"success"`
+	Message         string   `json:"message"`
+	Chain           string   `json:"chain,omitempty"`
+	Address         string   `json:"address,omitempty"`
+	Addresses       []string `json:"addresses,omitempty"`
+	TotalCount      int      `json:"total_count,omitempty"`
+	SuccessCount    int      `json:"success_count,omitempty"`
+	FailedCount     int      `json:"failed_count,omitempty"`
+	FailedAddresses []string `json:"failed_addresses,omitempty"`
 }
 
 type actionPreviewRequest struct {
@@ -300,6 +308,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/bsc/delete-addresses", s.handleBSCDeleteAddresses)
 		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
 		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
+		mux.HandleFunc("/api/refresh-addresses", s.handleRefreshAddresses)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
 		mux.HandleFunc("/api/bsc/transfers/in", s.handleBSCTransfersInAPI)
 		mux.HandleFunc("/api/bsc/transfers/out", s.handleBSCTransfersOutAPI)
@@ -824,6 +833,14 @@ func (s *Server) handleCacheMnemonic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
+	s.handleRefreshAddressesByChain(w, r, "tron")
+}
+
+func (s *Server) handleRefreshAddresses(w http.ResponseWriter, r *http.Request) {
+	s.handleRefreshAddressesByChain(w, r, "")
+}
+
+func (s *Server) handleRefreshAddressesByChain(w http.ResponseWriter, r *http.Request, defaultChain string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -832,13 +849,6 @@ func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusUnauthorized, refreshAddressResponse{
 			Success: false,
 			Message: "unauthorized",
-		})
-		return
-	}
-	if s.tronBalances == nil {
-		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
-			Success: false,
-			Message: "tron balance refresher not configured",
 		})
 		return
 	}
@@ -852,29 +862,92 @@ func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	address := strings.TrimSpace(req.Address)
-	if address == "" {
+	chain := strings.ToLower(strings.TrimSpace(defaultChain))
+	if chain == "" {
+		chain = strings.ToLower(strings.TrimSpace(req.Chain))
+	}
+	if chain != "tron" && chain != "bsc" {
 		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
 			Success: false,
-			Message: "address is required",
+			Message: "chain must be tron or bsc",
 		})
 		return
 	}
 
-	if err := s.tronBalances.RefreshAddresses(r.Context(), []string{address}); err != nil {
-		log.Printf("refresh tron address balance failed: address=%s err=%v", address, err)
+	addresses, err := normalizeRefreshAddresses(chain, req.Address, req.Addresses)
+	if err != nil {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: err.Error(),
+			Chain:   chain,
+		})
+		return
+	}
+
+	if chain == "tron" {
+		if s.tronBalances == nil {
+			s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+				Success: false,
+				Message: "tron balance refresher not configured",
+				Chain:   chain,
+			})
+			return
+		}
+		if err := s.tronBalances.RefreshAddresses(r.Context(), addresses); err != nil {
+			log.Printf("refresh tron address balance failed: addresses=%v err=%v", addresses, err)
+			s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+				Success:         false,
+				Message:         "更新 Tron 余额失败",
+				Chain:           chain,
+				Address:         firstAddress(addresses),
+				Addresses:       addresses,
+				TotalCount:      len(addresses),
+				SuccessCount:    0,
+				FailedCount:     len(addresses),
+				FailedAddresses: addresses,
+			})
+			return
+		}
+		message := "Tron 地址余额更新成功"
+		if len(addresses) > 1 {
+			message = fmt.Sprintf("Tron 地址余额批量更新成功 %d / %d", len(addresses), len(addresses))
+		}
+		s.writeJSON(w, http.StatusOK, refreshAddressResponse{
+			Success:      true,
+			Message:      message,
+			Chain:        chain,
+			Address:      firstAddress(addresses),
+			Addresses:    addresses,
+			TotalCount:   len(addresses),
+			SuccessCount: len(addresses),
+		})
+		return
+	}
+
+	if s.bscBalances == nil {
 		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
 			Success: false,
-			Message: "更新 Tron 余额失败",
-			Address: address,
+			Message: "bsc balance refresher not configured",
+			Chain:   chain,
 		})
 		return
 	}
+	refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	s.bscBalances.RefreshAddresses(refreshCtx, addresses)
 
+	message := "BSC 地址余额更新成功"
+	if len(addresses) > 1 {
+		message = fmt.Sprintf("BSC 地址余额批量更新成功 %d / %d", len(addresses), len(addresses))
+	}
 	s.writeJSON(w, http.StatusOK, refreshAddressResponse{
-		Success: true,
-		Message: "Tron 地址余额更新成功",
-		Address: address,
+		Success:      true,
+		Message:      message,
+		Chain:        chain,
+		Address:      firstAddress(addresses),
+		Addresses:    addresses,
+		TotalCount:   len(addresses),
+		SuccessCount: len(addresses),
 	})
 }
 func (s *Server) handleDeleteWatchAddress(w http.ResponseWriter, r *http.Request) {
@@ -1195,6 +1268,36 @@ func normalizeActionAddresses(single string, batch []string) []string {
 		result = append(result, address)
 	}
 	return result
+}
+
+func normalizeRefreshAddresses(chain string, single string, batch []string) ([]string, error) {
+	addresses := normalizeActionAddresses(single, batch)
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("address or addresses is required")
+	}
+	if len(addresses) > 100 {
+		return nil, fmt.Errorf("addresses count cannot exceed 100")
+	}
+
+	result := make([]string, 0, len(addresses))
+	for _, item := range addresses {
+		address := strings.TrimSpace(item)
+		switch chain {
+		case "tron":
+			if _, err := tron.Base58ToHex(address); err != nil {
+				return nil, fmt.Errorf("invalid tron address: %s", address)
+			}
+		case "bsc":
+			address = strings.ToLower(address)
+			if !isValidBSCAddress(address) {
+				return nil, fmt.Errorf("invalid bsc address: %s", strings.TrimSpace(item))
+			}
+		default:
+			return nil, fmt.Errorf("unsupported chain: %s", chain)
+		}
+		result = append(result, address)
+	}
+	return result, nil
 }
 
 func firstAddress(addresses []string) string {

@@ -245,52 +245,7 @@ func (s *Server) handleBSCAddWatchAddresses(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleBSCRefreshAddress(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
-		s.writeJSON(w, http.StatusUnauthorized, refreshAddressResponse{
-			Success: false,
-			Message: "unauthorized",
-		})
-		return
-	}
-	if s.bscBalances == nil {
-		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
-			Success: false,
-			Message: "bsc balance refresher not configured",
-		})
-		return
-	}
-
-	var req refreshAddressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
-			Success: false,
-			Message: "invalid json body",
-		})
-		return
-	}
-
-	address := strings.TrimSpace(req.Address)
-	if address == "" {
-		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
-			Success: false,
-			Message: "address is required",
-		})
-		return
-	}
-
-	refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	s.bscBalances.RefreshAddresses(refreshCtx, []string{address})
-
-	s.writeJSON(w, http.StatusOK, refreshAddressResponse{
-		Success: true,
-		Message: "BSC 地址余额更新成功",
-		Address: address,
-	})
+	s.handleRefreshAddressesByChain(w, r, "bsc")
 }
 
 func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
