@@ -24,18 +24,20 @@ import (
 var manualBSCGasTransferAmount = decimal.RequireFromString("0.001")
 
 type bscDashboardPageData struct {
-	GeneratedAt  string
-	Records      []bscDashboardRecordView
-	Page         int
-	PageSize     int
-	Total        int
-	TotalPages   int
-	HasPrev      bool
-	HasNext      bool
-	PrevPage     int
-	NextPage     int
-	Sort         string
-	AddressQuery string
+	GeneratedAt     string
+	Records         []bscDashboardRecordView
+	Page            int
+	PageSize        int
+	Total           int
+	TotalPages      int
+	HasPrev         bool
+	HasNext         bool
+	PrevPage        int
+	NextPage        int
+	ChartLabelsJSON string
+	ChartValuesJSON string
+	Sort            string
+	AddressQuery    string
 }
 
 type bscDashboardRecordView struct {

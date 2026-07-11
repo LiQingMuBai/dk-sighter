@@ -489,8 +489,17 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	chartPoints, err := s.repo.ListDailyBSCGasTopupChart(r.Context(), 30)
+	if err != nil {
+		http.Error(w, "load bsc gas topup chart failed", http.StatusInternalServerError)
+		log.Printf("load bsc gas topup chart failed: %v", err)
+		return
+	}
+
 	data := buildBSCDashboardPageData(recordViews, page, pageSize, total)
 	data.GeneratedAt = formatBeijingTime(time.Now())
+	data.ChartLabelsJSON = toJSONString(chartLabels(chartPoints))
+	data.ChartValuesJSON = toJSONString(chartValues(chartPoints))
 	data.Sort = string(sort)
 	data.AddressQuery = addressQuery
 	if err := s.templates.ExecuteTemplate(w, "bsc_dashboard.html", data); err != nil {

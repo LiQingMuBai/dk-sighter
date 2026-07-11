@@ -107,6 +107,45 @@
       margin-bottom: 14px;
     }
 
+    .chart-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    .chart-head {
+      margin-bottom: 12px;
+    }
+
+    .chart-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .chart-subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .chart-wrap {
+      overflow-x: auto;
+    }
+
+    .chart-canvas {
+      width: 100%;
+      min-width: 900px;
+      height: auto;
+      display: block;
+      border-radius: 14px;
+      background: #fff;
+    }
+
     .add-head {
       display: flex;
       align-items: flex-start;
@@ -173,6 +212,14 @@
       margin-bottom: 14px;
     }
 
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
     .toolbar-text {
       color: var(--subtext);
       font-size: 14px;
@@ -182,7 +229,9 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      margin-left: auto;
+      justify-content: flex-end;
     }
 
     .sort-form {
@@ -196,7 +245,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
     }
 
     .sort-label {
@@ -216,7 +265,7 @@
     }
 
     .search-input {
-      min-width: 280px;
+      min-width: 220px;
       border: 1px solid var(--line);
       background: #fff;
       color: var(--text);
@@ -678,6 +727,18 @@
       .transfer-close {
         width: 100%;
       }
+
+      .toolbar,
+      .toolbar-left,
+      .toolbar-actions {
+        align-items: stretch;
+      }
+
+      .toolbar-actions {
+        flex-wrap: wrap;
+        margin-left: 0;
+        justify-content: flex-start;
+      }
     }
   </style>
 </head>
@@ -700,26 +761,26 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="add-head">
-        <div>
-          <h2 class="add-title">增加地址</h2>
-          <p class="add-subtitle">支持单个或批量添加，多个地址请每行一个，必须是 0x 开头的 BSC 地址。</p>
-        </div>
+    <div class="chart-card">
+      <div class="chart-head">
+        <h2 class="chart-title">每日Gas充值折线图</h2>
+        <p class="chart-subtitle">横轴按日期，纵轴按每日 Gas 充值成功次数统计。</p>
       </div>
-      <div class="add-form">
-        <div>
-          <label class="add-label" for="addressInput">地址列表</label>
-          <textarea id="addressInput" class="add-textarea" placeholder="0x0000000000000000000000000000000000000000&#10;0x1111111111111111111111111111111111111111"></textarea>
-        </div>
-        <button id="addBtn" class="button button-brand" type="button" onclick="handleAddAddresses()">添加地址</button>
+      <div class="chart-wrap">
+        <canvas
+          id="bscGasChart"
+          class="chart-canvas"
+          width="1100"
+          height="280"
+          data-labels='{{ .ChartLabelsJSON }}'
+          data-values='{{ .ChartValuesJSON }}'></canvas>
       </div>
     </div>
 
     <div class="card">
       <div class="toolbar">
-        <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
-        <div class="toolbar-actions">
+        <div class="toolbar-left">
+          <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
             <input type="hidden" name="address" value="{{ .AddressQuery }}">
@@ -731,10 +792,11 @@
               <option value="bnb_asc" {{ if eq .Sort "bnb_asc" }}selected{{ end }}>BNB 余额 从小到大</option>
             </select>
           </form>
+        </div>
+        <div class="toolbar-actions">
           <form class="search-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
             <input type="hidden" name="sort" value="{{ .Sort }}">
-            <label class="sort-label" for="addressSearch">地址检索</label>
             <input id="addressSearch" class="search-input" type="text" name="address" value="{{ .AddressQuery }}" placeholder="输入 BSC 地址片段快速过滤">
             <button class="button button-brand" type="submit">检索</button>
             {{ if .AddressQuery }}
@@ -1153,6 +1215,97 @@
       }
     }
 
+    function drawBSCGasChart() {
+      const canvas = document.getElementById('bscGasChart');
+      if (!canvas || !canvas.getContext) {
+        return;
+      }
+      const labels = JSON.parse(canvas.dataset.labels || '[]');
+      const values = JSON.parse(canvas.dataset.values || '[]');
+      if (!labels.length || !values.length) {
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 20, right: 16, bottom: 42, left: 42 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const maxValue = Math.max(...values, 1);
+      const stepX = values.length > 1 ? chartWidth / (values.length - 1) : chartWidth;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, padding.top + chartHeight);
+      ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+      ctx.stroke();
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i <= 4; i++) {
+        const value = Math.round((maxValue / 4) * (4 - i));
+        const y = padding.top + (chartHeight / 4) * i;
+        ctx.strokeStyle = '#f3f4f6';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(padding.left + chartWidth, y);
+        ctx.stroke();
+        ctx.fillText(String(value), padding.left - 8, y);
+      }
+
+      ctx.strokeStyle = '#d4af37';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      values.forEach((value, index) => {
+        const x = padding.left + stepX * index;
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = '#d4af37';
+      values.forEach((value, index) => {
+        const x = padding.left + stepX * index;
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillRect(padding.left + 8, 10, 10, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Gas充值次数', padding.left + 22, 15);
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const tickStep = labels.length > 10 ? Math.ceil(labels.length / 6) : 1;
+      labels.forEach((label, index) => {
+        if (index % tickStep !== 0 && index !== labels.length - 1) {
+          return;
+        }
+        const x = padding.left + stepX * index;
+        ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
+      });
+    }
+
     async function handleRefreshBSCAddress(button) {
       const address = button.dataset.address || '';
       if (!address) {
@@ -1403,10 +1556,10 @@
       }
     });
 
+    drawBSCGasChart();
     updateSelectedCount();
     syncSelectAll();
     refreshManualRefreshStatus();
     manualRefreshStatusTimer = window.setInterval(refreshManualRefreshStatus, 5000);
   </script>
-</body>
 </html>
