@@ -10,6 +10,7 @@ import (
 
 type walletDashboardPageData struct {
 	GeneratedAt string
+	DesktopMode bool
 }
 
 type saveHDWalletConfigRequest struct {
@@ -22,6 +23,7 @@ type saveHDWalletConfigRequest struct {
 type hdWalletSweepRequest struct {
 	Chain       string `json:"chain"`
 	Destination string `json:"destination"`
+	Address     string `json:"address"`
 }
 
 type hdWalletRefreshAddressRequest struct {
@@ -40,6 +42,7 @@ func (s *Server) handleHDWalletDashboard(w http.ResponseWriter, r *http.Request)
 	}
 	if err := s.templates.ExecuteTemplate(w, "wallet_dashboard.html", walletDashboardPageData{
 		GeneratedAt: formatBeijingTime(time.Now()),
+		DesktopMode: s.desktopMode,
 	}); err != nil {
 		http.Error(w, "render wallet dashboard failed", http.StatusInternalServerError)
 		log.Printf("render wallet dashboard failed: %v", err)
@@ -133,7 +136,11 @@ func (s *Server) handleHDWalletSweepPreview(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	preview, err := s.walletService.PreviewSweep(req.Chain, req.Destination)
+	sourceAddress := ""
+	if s.desktopMode {
+		sourceAddress = req.Address
+	}
+	preview, err := s.walletService.PreviewSweep(req.Chain, req.Destination, sourceAddress)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -159,7 +166,11 @@ func (s *Server) handleHDWalletSweepExecute(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.walletService.StartSweep(req.Chain, req.Destination); err != nil {
+	sourceAddress := ""
+	if s.desktopMode {
+		sourceAddress = req.Address
+	}
+	if err := s.walletService.StartSweep(req.Chain, req.Destination, sourceAddress); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

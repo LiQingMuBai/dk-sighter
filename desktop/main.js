@@ -98,6 +98,7 @@ async function startGoServer() {
 
   const env = {
     ...process.env,
+    TRON_WATCHER_DESKTOP: "1",
     TRON_WATCHER_APP_MODE: "hd_wallet",
     TRON_WATCHER_WEB_LISTEN: `127.0.0.1:${port}`,
     TRON_WATCHER_CONFIG: cfgPath,

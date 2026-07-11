@@ -47,8 +47,6 @@ func main() {
 	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, cfg.QuickNodeMinRequestInterval())
 	activatorPrivateKeys := []string{
 		// Fill your Tron private keys here. Each record ID is hashed to one fixed signer.
-		// "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-
 	}
 
 	activator, err := service.NewTronAddressActivatorWithPrivateKeys(tronClient, repo, activatorPrivateKeys, 64)
