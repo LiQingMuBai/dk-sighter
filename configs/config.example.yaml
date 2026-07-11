@@ -36,8 +36,8 @@ quicknode:
   refresh_http_url: ""
   # 手动全量更新、定时刷新余额专用的 Tron WebSocket，可选
   refresh_wss_url: ""
-  # 刷新专用 Tron 节点请求最小间隔，50次/秒建议填 20
-  refresh_min_request_interval_ms: 20
+  # 刷新专用 Tron 节点请求最小间隔，当前默认 30ms
+  refresh_min_request_interval_ms: 30
 
 # Tron 激活地址配置
 tron_activator:
@@ -147,8 +147,8 @@ bsc:
   refresh_rpc_http_url: ""
   # 手动全量更新、定时刷新余额专用的 BSC WebSocket，可选
   refresh_rpc_wss_url: ""
-  # 刷新专用 BSC 节点请求最小间隔，50次/秒建议填 20
-  refresh_min_request_interval_ms: 20
+  # 刷新专用 BSC 节点请求最小间隔，当前默认 30ms
+  refresh_min_request_interval_ms: 30
   # 起始块高，0 表示自动处理
   start_block: 0
   # 扫块轮询间隔，单位秒

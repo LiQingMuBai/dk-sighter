@@ -180,13 +180,13 @@ func (c *Config) setDefaults() {
 		c.QuickNode.MinRequestIntervalMS = 10
 	}
 	if c.QuickNode.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.QuickNode.RefreshHTTPURL) != "" {
-		c.QuickNode.RefreshMinIntervalMS = 20
+		c.QuickNode.RefreshMinIntervalMS = 30
 	}
 	if c.BSC.MinRequestIntervalMS == 0 {
 		c.BSC.MinRequestIntervalMS = 10
 	}
 	if c.BSC.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.BSC.RefreshRPCHTTPURL) != "" {
-		c.BSC.RefreshMinIntervalMS = 20
+		c.BSC.RefreshMinIntervalMS = 30
 	}
 	if len(c.TronActivator.PrivateKeys) == 0 && strings.TrimSpace(c.TronActivator.PrivateKey) != "" {
 		c.TronActivator.PrivateKeys = []string{strings.TrimSpace(c.TronActivator.PrivateKey)}
