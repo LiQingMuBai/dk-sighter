@@ -26,20 +26,22 @@ import (
 )
 
 type App struct {
-	cfg        *config.Config
-	db         *sql.DB
-	cache      *service.AddressCache
-	scanner    *service.Scanner
-	balances   *service.BalanceService
-	notifier   service.TransferNotifier
-	tronClient *tron.Client
-	bscClient  *bsc.Client
-	bscCache   *service.BSCAddressCache
-	bscScanner *service.BSCScanner
-	bscEnabled bool
-	webServer  *web.Server
-	wallets    *hdwallet.Service
-	activator  *service.TronAddressActivator
+	cfg                 *config.Config
+	db                  *sql.DB
+	cache               *service.AddressCache
+	scanner             *service.Scanner
+	balances            *service.BalanceService
+	scheduledBalances   *service.BalanceService
+	notifier            service.TransferNotifier
+	tronClient          *tron.Client
+	bscClient           *bsc.Client
+	bscCache            *service.BSCAddressCache
+	bscScanner          *service.BSCScanner
+	scheduledBSCScanner *service.BSCScanner
+	bscEnabled          bool
+	webServer           *web.Server
+	wallets             *hdwallet.Service
+	activator           *service.TronAddressActivator
 }
 
 func New(cfgPath string) (*App, error) {
@@ -127,6 +129,10 @@ func New(cfgPath string) (*App, error) {
 	repo := repository.New(db)
 	cache := service.NewAddressCache(repo)
 	balanceService := service.NewBalanceService(tronClient, repo, cache)
+	scheduledRefreshTronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, cfg.QuickNodeMinRequestInterval())
+	scheduledRefreshBalanceService := service.NewBalanceService(scheduledRefreshTronClient, repo, cache)
+	manualRefreshTronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, manualRefreshMinInterval(cfg.QuickNodeMinRequestInterval()))
+	manualRefreshBalanceService := service.NewBalanceService(manualRefreshTronClient, repo, cache)
 	notifier := service.NewMultiTransferNotifier(
 		service.NewTelegramNotifier(cfg.Telegram),
 		service.NewCallbackNotifier(cfg.Callback),
@@ -135,9 +141,17 @@ func New(cfgPath string) (*App, error) {
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner
+	var scheduledRefreshBSCScanner *service.BSCScanner
+	var manualRefreshBSCScanner *service.BSCScanner
 	if bscEnabled {
 		bscCache = service.NewBSCAddressCache(repo)
 		bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+		scheduledRefreshBSCClient := bsc.NewClient(cfg.BSC.RPCHTTPURL, cfg.BSC.RPCWSSURL, cfg.BSC.USDTContract)
+		scheduledRefreshBSCClient.SetMinRequestInterval(cfg.BSCMinRequestInterval())
+		scheduledRefreshBSCScanner = service.NewBSCScanner(scheduledRefreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+		manualRefreshBSCClient := bsc.NewClient(cfg.BSC.RPCHTTPURL, cfg.BSC.RPCWSSURL, cfg.BSC.USDTContract)
+		manualRefreshBSCClient.SetMinRequestInterval(manualRefreshMinInterval(cfg.BSCMinRequestInterval()))
+		manualRefreshBSCScanner = service.NewBSCScanner(manualRefreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
 	}
 
 	energyProviders := buildEnergyProviders(cfg)
@@ -150,7 +164,9 @@ func New(cfgPath string) (*App, error) {
 		cfg.Web,
 		cache,
 		balanceService,
+		manualRefreshBalanceService,
 		bscScanner,
+		manualRefreshBSCScanner,
 		activator,
 		bscClient,
 		cfg.BSC.GasTransferPrivateKey,
@@ -162,20 +178,29 @@ func New(cfgPath string) (*App, error) {
 	}
 
 	return &App{
-		cfg:        cfg,
-		db:         db,
-		cache:      cache,
-		scanner:    scanner,
-		balances:   balanceService,
-		notifier:   notifier,
-		tronClient: tronClient,
-		bscClient:  bscClient,
-		bscCache:   bscCache,
-		bscScanner: bscScanner,
-		bscEnabled: bscEnabled,
-		webServer:  webServer,
-		activator:  activator,
+		cfg:                 cfg,
+		db:                  db,
+		cache:               cache,
+		scanner:             scanner,
+		balances:            balanceService,
+		scheduledBalances:   scheduledRefreshBalanceService,
+		notifier:            notifier,
+		tronClient:          tronClient,
+		bscClient:           bscClient,
+		bscCache:            bscCache,
+		bscScanner:          bscScanner,
+		scheduledBSCScanner: scheduledRefreshBSCScanner,
+		bscEnabled:          bscEnabled,
+		webServer:           webServer,
+		activator:           activator,
 	}, nil
+}
+
+func manualRefreshMinInterval(base time.Duration) time.Duration {
+	if base < 50*time.Millisecond {
+		return 50 * time.Millisecond
+	}
+	return base * 2
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -297,7 +322,7 @@ func (a *App) Run(ctx context.Context) error {
 		log.Printf("hd wallet mode enabled, scheduled balance refresh disabled")
 	} else {
 		group.Go(a.safeGo("hourly-balance-refresh", func() error {
-			err := service.RunHourlyBalanceRefresh(groupCtx, a.tronClient, a.balances, a.bscScanner, a.cfg.TronBlockSource())
+			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource())
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}

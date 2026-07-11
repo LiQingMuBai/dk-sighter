@@ -4,11 +4,9 @@ import (
 	"context"
 	"strings"
 	"time"
-
-	"tron_watcher/internal/tron"
 )
 
-func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string) error {
+func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string) error {
 	loggerTron := tronLogger()
 	loggerBSC := bscLogger()
 	loc := time.FixedZone("CST", 8*3600)
@@ -42,17 +40,21 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronClient *tron.Client, tronB
 			runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 			blockNumber := int64(0)
 			var err error
-			if blockSource == "solid" {
-				blockNumber, err = tronClient.GetSolidBlockNumber(runCtx)
+			if tronBalances == nil || tronBalances.tronClient == nil {
+				loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=tron balance refresher disabled", tronInterval, tronOffset)
 			} else {
-				blockNumber, err = tronClient.GetHeadBlockNumber(runCtx)
-			}
-			if err != nil {
-				loggerTron.Printf("scheduled refresh failed: interval=%s offset=%s load %s block err=%v", tronInterval, tronOffset, blockSource, err)
-			} else {
-				loggerTron.Printf("scheduled refresh start: interval=%s offset=%s source=%s block=%d throttle=%s", tronInterval, tronOffset, blockSource, blockNumber, perCallDelay)
-				tronBalances.RefreshAllThrottled(runCtx, blockNumber, perCallDelay)
-				loggerTron.Printf("scheduled refresh done: interval=%s offset=%s source=%s block=%d", tronInterval, tronOffset, blockSource, blockNumber)
+				if blockSource == "solid" {
+					blockNumber, err = tronBalances.tronClient.GetSolidBlockNumber(runCtx)
+				} else {
+					blockNumber, err = tronBalances.tronClient.GetHeadBlockNumber(runCtx)
+				}
+				if err != nil {
+					loggerTron.Printf("scheduled refresh failed: interval=%s offset=%s load %s block err=%v", tronInterval, tronOffset, blockSource, err)
+				} else {
+					loggerTron.Printf("scheduled refresh start: interval=%s offset=%s source=%s block=%d throttle=%s", tronInterval, tronOffset, blockSource, blockNumber, perCallDelay)
+					tronBalances.RefreshAllThrottled(runCtx, blockNumber, perCallDelay)
+					loggerTron.Printf("scheduled refresh done: interval=%s offset=%s source=%s block=%d", tronInterval, tronOffset, blockSource, blockNumber)
+				}
 			}
 			cancel()
 		}

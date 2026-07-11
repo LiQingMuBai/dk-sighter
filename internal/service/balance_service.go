@@ -164,6 +164,67 @@ func (s *BalanceService) RefreshAddresses(ctx context.Context, addresses []strin
 	return nil
 }
 
+func (s *BalanceService) RefreshAddressesWithPositiveTRX(ctx context.Context, addresses []string) error {
+	blockNumber, err := s.tronClient.GetHeadBlockNumber(ctx)
+	if err != nil {
+		return err
+	}
+
+	seen := make(map[string]struct{}, len(addresses))
+	for _, addressBase58 := range addresses {
+		addressBase58 = strings.TrimSpace(addressBase58)
+		if addressBase58 == "" {
+			continue
+		}
+		if _, ok := seen[addressBase58]; ok {
+			continue
+		}
+		seen[addressBase58] = struct{}{}
+
+		addressHex, err := tron.Base58ToHex(addressBase58)
+		if err != nil {
+			s.logger.Printf("convert address to hex failed: %s err=%v", addressBase58, err)
+			continue
+		}
+
+		active, trxBalance, err := s.tronClient.GetAccountState(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh tron account state failed during manual full refresh: %s err=%v", addressBase58, err)
+			continue
+		}
+		if !active || !trxBalance.GreaterThan(decimal.Zero) {
+			s.logger.Printf("manual full refresh skipped: address=%s active=%t trx_balance=%s", addressBase58, active, trxBalance.String())
+			continue
+		}
+
+		if err := s.repo.UpsertBalance(ctx, addressBase58, "TRX", trxBalance, blockNumber); err != nil {
+			s.logger.Printf("save trx balance failed during manual full refresh: %s err=%v", addressBase58, err)
+			continue
+		}
+		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", addressBase58, trxBalance.String(), blockNumber)
+
+		usdtBalance, err := s.tronClient.GetUSDTBalance(ctx, addressHex)
+		if err != nil {
+			s.logger.Printf("refresh usdt balance failed during manual full refresh: %s err=%v", addressBase58, err)
+			continue
+		}
+
+		currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, addressBase58)
+		if balanceErr != nil {
+			s.logger.Printf("load current usdt balance failed: %s err=%v", addressBase58, balanceErr)
+		}
+		if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
+			s.logger.Printf("save usdt balance failed during manual full refresh: %s err=%v", addressBase58, err)
+			continue
+		}
+		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+		if balanceErr == nil {
+			s.syncRecentUSDTTransfersIfNeeded(ctx, addressBase58, addressHex, currentDBBalance, usdtBalance)
+		}
+	}
+	return nil
+}
+
 func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber int64, perCallDelay time.Duration) {
 	addresses := s.cache.List()
 	for _, addressBase58 := range addresses {

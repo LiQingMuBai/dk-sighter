@@ -29,10 +29,12 @@ import (
 
 type addressReloader interface {
 	Reload(context.Context) error
+	List() []string
 }
 
 type tronBalanceRefresher interface {
 	RefreshAddresses(context.Context, []string) error
+	RefreshAddressesWithPositiveTRX(context.Context, []string) error
 }
 
 type bscBalanceRefresher interface {
@@ -48,7 +50,9 @@ type Server struct {
 	repo                  *repository.DB
 	reloader              addressReloader
 	tronBalances          tronBalanceRefresher
+	tronManualBalances    tronBalanceRefresher
 	bscBalances           bscBalanceRefresher
+	bscManualBalances     bscBalanceRefresher
 	tronActivator         tronAddressActivator
 	bscClient             *bsc.Client
 	bscGasTopupPrivateKey string
@@ -219,7 +223,9 @@ func NewServer(
 	cfg config.WebConfig,
 	reloader addressReloader,
 	tronBalances tronBalanceRefresher,
+	tronManualBalances tronBalanceRefresher,
 	bscBalances bscBalanceRefresher,
+	bscManualBalances bscBalanceRefresher,
 	tronActivator tronAddressActivator,
 	bscClient *bsc.Client,
 	bscGasTopupPrivateKey string,
@@ -238,7 +244,9 @@ func NewServer(
 		repo:                  repo,
 		reloader:              reloader,
 		tronBalances:          tronBalances,
+		tronManualBalances:    tronManualBalances,
 		bscBalances:           bscBalances,
+		bscManualBalances:     bscManualBalances,
 		tronActivator:         tronActivator,
 		bscClient:             bscClient,
 		bscGasTopupPrivateKey: strings.TrimSpace(bscGasTopupPrivateKey),
@@ -1370,6 +1378,8 @@ const (
 	manualRefreshCooldown  = 10 * time.Minute
 	manualRefreshBatchSize = 50
 	manualRefreshBatchWait = 300 * time.Millisecond
+	tronManualRefreshBatchWait = 1 * time.Second
+	bscManualRefreshBatchWait  = 1 * time.Second
 )
 
 func (s *Server) startManualRefreshAll(chain string) (int, error) {
@@ -1435,23 +1445,29 @@ func (s *Server) runManualRefreshAll(chain string, addresses []string) {
 
 		switch chain {
 		case "tron":
-			if s.tronBalances == nil {
+			if s.tronManualBalances == nil {
 				log.Printf("manual full refresh skipped: chain=tron reason=balance refresher not configured")
 				return
 			}
-			if err := s.tronBalances.RefreshAddresses(ctx, batch); err != nil {
+			if err := s.tronManualBalances.RefreshAddressesWithPositiveTRX(ctx, batch); err != nil {
 				log.Printf("manual full refresh batch failed: chain=%s page=%d err=%v", chain, page, err)
 			}
 		case "bsc":
-			if s.bscBalances == nil {
+			if s.bscManualBalances == nil {
 				log.Printf("manual full refresh skipped: chain=bsc reason=balance refresher not configured")
 				return
 			}
-			s.bscBalances.RefreshAddresses(ctx, batch)
+			s.bscManualBalances.RefreshAddresses(ctx, batch)
 		}
 
 		if end < len(addresses) {
-			timer := time.NewTimer(manualRefreshBatchWait)
+			waitDuration := manualRefreshBatchWait
+			if chain == "tron" {
+				waitDuration = tronManualRefreshBatchWait
+			} else if chain == "bsc" {
+				waitDuration = bscManualRefreshBatchWait
+			}
+			timer := time.NewTimer(waitDuration)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -1490,7 +1506,10 @@ func (s *Server) manualRefreshJob(chain string) *manualBalanceRefreshJob {
 func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) ([]string, error) {
 	switch chain {
 	case "tron":
-		return s.repo.LoadActiveAddressesWithPositiveTRXBalance(ctx)
+		if s.reloader == nil {
+			return nil, fmt.Errorf("tron address cache not configured")
+		}
+		return s.reloader.List(), nil
 	case "bsc":
 		return repository.LoadActiveBSCWatchAddressesWithPositiveBNBBalance(ctx, s.repo)
 	default:
