@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string) error {
+func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string, tracker *ScheduledRefreshStateTracker, manualTracker *ScheduledRefreshStateTracker) error {
 	loggerTron := tronLogger()
 	loggerBSC := bscLogger()
 	loc := time.FixedZone("CST", 8*3600)
@@ -36,39 +36,84 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, 
 		}
 
 		runAt := time.Now().In(loc)
+		scheduledRefreshStarted := false
 		if !runAt.Before(nextTron) {
-			runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-			blockNumber := int64(0)
-			var err error
-			if tronBalances == nil || tronBalances.tronClient == nil {
-				loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=tron balance refresher disabled", tronInterval, tronOffset)
+			if scheduledRefreshStarted {
+				loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=another scheduled refresh already started", tronInterval, tronOffset)
+			} else if activeManualChains := manualTracker.ActiveChains(); len(activeManualChains) > 0 {
+				loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=manual full refresh is running active=%s", tronInterval, tronOffset, strings.Join(activeManualChains, ","))
 			} else {
-				if blockSource == "solid" {
-					blockNumber, err = tronBalances.tronClient.GetSolidBlockNumber(runCtx)
-				} else {
-					blockNumber, err = tronBalances.tronClient.GetHeadBlockNumber(runCtx)
-				}
-				if err != nil {
-					loggerTron.Printf("scheduled refresh failed: interval=%s offset=%s load %s block err=%v", tronInterval, tronOffset, blockSource, err)
-				} else {
-					loggerTron.Printf("scheduled refresh start: interval=%s offset=%s source=%s block=%d throttle=%s", tronInterval, tronOffset, blockSource, blockNumber, perCallDelay)
-					tronBalances.RefreshAllThrottled(runCtx, blockNumber, perCallDelay)
-					loggerTron.Printf("scheduled refresh done: interval=%s offset=%s source=%s block=%d", tronInterval, tronOffset, blockSource, blockNumber)
+				started := false
+				func() {
+					if tracker != nil {
+						ok, activeChains := tracker.TryStart("tron")
+						if !ok {
+							loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=another scheduled refresh is running active=%s", tronInterval, tronOffset, strings.Join(activeChains, ","))
+							return
+						}
+						started = true
+						defer tracker.Finish("tron")
+					}
+					runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+					defer cancel()
+					blockNumber := int64(0)
+					var err error
+					if tronBalances == nil || tronBalances.tronClient == nil {
+						loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=tron balance refresher disabled", tronInterval, tronOffset)
+					} else {
+						started = true
+						if blockSource == "solid" {
+							blockNumber, err = tronBalances.tronClient.GetSolidBlockNumber(runCtx)
+						} else {
+							blockNumber, err = tronBalances.tronClient.GetHeadBlockNumber(runCtx)
+						}
+						if err != nil {
+							loggerTron.Printf("scheduled refresh failed: interval=%s offset=%s load %s block err=%v", tronInterval, tronOffset, blockSource, err)
+						} else {
+							loggerTron.Printf("scheduled refresh start: interval=%s offset=%s source=%s block=%d throttle=%s", tronInterval, tronOffset, blockSource, blockNumber, perCallDelay)
+							tronBalances.RefreshAllThrottled(runCtx, blockNumber, perCallDelay)
+							loggerTron.Printf("scheduled refresh done: interval=%s offset=%s source=%s block=%d", tronInterval, tronOffset, blockSource, blockNumber)
+						}
+					}
+				}()
+				if started {
+					scheduledRefreshStarted = true
 				}
 			}
-			cancel()
 		}
 
 		if !runAt.Before(nextBSC) {
-			runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-			if bscScanner != nil {
-				loggerBSC.Printf("scheduled refresh start: interval=%s throttle=%s", bscInterval, perCallDelay)
-				bscScanner.RefreshAllBalancesThrottled(runCtx, perCallDelay)
-				loggerBSC.Printf("scheduled refresh done: interval=%s", bscInterval)
+			if scheduledRefreshStarted {
+				loggerBSC.Printf("scheduled refresh skipped: interval=%s reason=another scheduled refresh already started", bscInterval)
+			} else if activeManualChains := manualTracker.ActiveChains(); len(activeManualChains) > 0 {
+				loggerBSC.Printf("scheduled refresh skipped: interval=%s reason=manual full refresh is running active=%s", bscInterval, strings.Join(activeManualChains, ","))
 			} else {
-				loggerBSC.Printf("scheduled refresh skipped: interval=%s bsc scanner disabled", bscInterval)
+				started := false
+				func() {
+					if tracker != nil {
+						ok, activeChains := tracker.TryStart("bsc")
+						if !ok {
+							loggerBSC.Printf("scheduled refresh skipped: interval=%s reason=another scheduled refresh is running active=%s", bscInterval, strings.Join(activeChains, ","))
+							return
+						}
+						started = true
+						defer tracker.Finish("bsc")
+					}
+					runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+					defer cancel()
+					if bscScanner != nil {
+						started = true
+						loggerBSC.Printf("scheduled refresh start: interval=%s throttle=%s", bscInterval, perCallDelay)
+						bscScanner.RefreshAllBalancesThrottled(runCtx, perCallDelay)
+						loggerBSC.Printf("scheduled refresh done: interval=%s", bscInterval)
+					} else {
+						loggerBSC.Printf("scheduled refresh skipped: interval=%s bsc scanner disabled", bscInterval)
+					}
+				}()
+				if started {
+					scheduledRefreshStarted = true
+				}
 			}
-			cancel()
 		}
 	}
 }

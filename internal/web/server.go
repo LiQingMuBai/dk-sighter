@@ -46,32 +46,44 @@ type tronAddressActivator interface {
 	EnqueueBatch([]string) (string, int, error)
 }
 
+type scheduledRefreshStatusReader interface {
+	ActiveChains() []string
+}
+
+type manualRefreshStatusTracker interface {
+	ActiveChains() []string
+	Start(string)
+	Finish(string)
+}
+
 type Server struct {
-	repo                  *repository.DB
-	reloader              addressReloader
-	tronBalances          tronBalanceRefresher
-	tronManualBalances    tronBalanceRefresher
-	bscBalances           bscBalanceRefresher
-	bscManualBalances     bscBalanceRefresher
-	tronActivator         tronAddressActivator
-	bscClient             *bsc.Client
-	bscGasTopupPrivateKey string
-	listen                string
-	templates             *template.Template
-	username              string
-	password              string
-	sessionName           string
-	sessionToken          string
-	apiKey                string
-	energyProviders       map[string]infrastructure.EnergyOrderProvider
-	defaultEnergyProvider string
-	mnemonicStore         *mnemonicStore
-	desktopMode           bool
-	walletMode            bool
-	walletService         *hdwallet.Service
-	manualRefreshMu       sync.Mutex
-	tronManualRefresh     manualBalanceRefreshJob
-	bscManualRefresh      manualBalanceRefreshJob
+	repo                   *repository.DB
+	reloader               addressReloader
+	tronBalances           tronBalanceRefresher
+	tronManualBalances     tronBalanceRefresher
+	bscBalances            bscBalanceRefresher
+	bscManualBalances      bscBalanceRefresher
+	scheduledRefreshStatus scheduledRefreshStatusReader
+	manualRefreshStatus    manualRefreshStatusTracker
+	tronActivator          tronAddressActivator
+	bscClient              *bsc.Client
+	bscGasTopupPrivateKey  string
+	listen                 string
+	templates              *template.Template
+	username               string
+	password               string
+	sessionName            string
+	sessionToken           string
+	apiKey                 string
+	energyProviders        map[string]infrastructure.EnergyOrderProvider
+	defaultEnergyProvider  string
+	mnemonicStore          *mnemonicStore
+	desktopMode            bool
+	walletMode             bool
+	walletService          *hdwallet.Service
+	manualRefreshMu        sync.Mutex
+	tronManualRefresh      manualBalanceRefreshJob
+	bscManualRefresh       manualBalanceRefreshJob
 }
 
 type manualBalanceRefreshJob struct {
@@ -158,6 +170,16 @@ type manualRefreshResponse struct {
 	NextAllowedAt string `json:"next_allowed_at,omitempty"`
 }
 
+type manualRefreshStatusResponse struct {
+	Success               bool     `json:"success"`
+	Running               bool     `json:"running"`
+	ActiveChains          []string `json:"active_chains,omitempty"`
+	ManualRunning         bool     `json:"manual_running"`
+	ManualActiveChains    []string `json:"manual_active_chains,omitempty"`
+	ScheduledRunning      bool     `json:"scheduled_running"`
+	ScheduledActiveChains []string `json:"scheduled_active_chains,omitempty"`
+}
+
 type actionPreviewRequest struct {
 	Action    string   `json:"action"`
 	Address   string   `json:"address"`
@@ -229,6 +251,8 @@ func NewServer(
 	tronActivator tronAddressActivator,
 	bscClient *bsc.Client,
 	bscGasTopupPrivateKey string,
+	scheduledRefreshStatus scheduledRefreshStatusReader,
+	manualRefreshStatus manualRefreshStatusTracker,
 	energyProviders map[string]infrastructure.EnergyOrderProvider,
 	defaultEnergyProvider string,
 ) (*Server, error) {
@@ -241,25 +265,27 @@ func NewServer(
 	}
 
 	return &Server{
-		repo:                  repo,
-		reloader:              reloader,
-		tronBalances:          tronBalances,
-		tronManualBalances:    tronManualBalances,
-		bscBalances:           bscBalances,
-		bscManualBalances:     bscManualBalances,
-		tronActivator:         tronActivator,
-		bscClient:             bscClient,
-		bscGasTopupPrivateKey: strings.TrimSpace(bscGasTopupPrivateKey),
-		listen:                cfg.Listen,
-		templates:             tmpl,
-		username:              cfg.Username,
-		password:              cfg.Password,
-		sessionName:           cfg.SessionName,
-		sessionToken:          buildSessionToken(cfg.Username, cfg.Password),
-		apiKey:                strings.TrimSpace(cfg.APIKey),
-		energyProviders:       energyProviders,
-		defaultEnergyProvider: strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
-		mnemonicStore:         newMnemonicStore(),
+		repo:                   repo,
+		reloader:               reloader,
+		tronBalances:           tronBalances,
+		tronManualBalances:     tronManualBalances,
+		bscBalances:            bscBalances,
+		bscManualBalances:      bscManualBalances,
+		scheduledRefreshStatus: scheduledRefreshStatus,
+		manualRefreshStatus:    manualRefreshStatus,
+		tronActivator:          tronActivator,
+		bscClient:              bscClient,
+		bscGasTopupPrivateKey:  strings.TrimSpace(bscGasTopupPrivateKey),
+		listen:                 cfg.Listen,
+		templates:              tmpl,
+		username:               cfg.Username,
+		password:               cfg.Password,
+		sessionName:            cfg.SessionName,
+		sessionToken:           buildSessionToken(cfg.Username, cfg.Password),
+		apiKey:                 strings.TrimSpace(cfg.APIKey),
+		energyProviders:        energyProviders,
+		defaultEnergyProvider:  strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
+		mnemonicStore:          newMnemonicStore(),
 	}, nil
 }
 
@@ -334,6 +360,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
 		mux.HandleFunc("/api/bsc/manual-refresh-all", s.handleBSCManualRefreshAll)
 		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
+		mux.HandleFunc("/api/manual-refresh-status", s.handleManualRefreshStatus)
 		mux.HandleFunc("/api/refresh-addresses", s.handleRefreshAddresses)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
 		mux.HandleFunc("/api/bsc/transfers/in", s.handleBSCTransfersInAPI)
@@ -887,7 +914,7 @@ func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, 
 	totalCount, err := s.startManualRefreshAll(chain)
 	if err != nil {
 		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "10分钟") || strings.Contains(err.Error(), "进行中") {
+		if strings.Contains(err.Error(), "20分钟") || strings.Contains(err.Error(), "进行中") || strings.Contains(err.Error(), "正在执行") {
 			status = http.StatusTooManyRequests
 		}
 		s.writeJSON(w, status, manualRefreshResponse{
@@ -904,6 +931,31 @@ func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, 
 		Message:    fmt.Sprintf("已开始手动全量更新 %s 余额，共 %d 个地址", strings.ToUpper(chain), totalCount),
 		Chain:      chain,
 		TotalCount: totalCount,
+	})
+}
+
+func (s *Server) handleManualRefreshStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, manualRefreshStatusResponse{
+			Success: false,
+		})
+		return
+	}
+
+	manualActiveChains := s.activeManualRefreshChains()
+	scheduledActiveChains := s.activeScheduledRefreshChains()
+	s.writeJSON(w, http.StatusOK, manualRefreshStatusResponse{
+		Success:               true,
+		Running:               len(manualActiveChains) > 0 || len(scheduledActiveChains) > 0,
+		ActiveChains:          firstNonEmptyChains(manualActiveChains, scheduledActiveChains),
+		ManualRunning:         len(manualActiveChains) > 0,
+		ManualActiveChains:    manualActiveChains,
+		ScheduledRunning:      len(scheduledActiveChains) > 0,
+		ScheduledActiveChains: scheduledActiveChains,
 	})
 }
 
@@ -1375,9 +1427,9 @@ func firstAddress(addresses []string) string {
 }
 
 const (
-	manualRefreshCooldown  = 20 * time.Minute
-	manualRefreshBatchSize = 50
-	manualRefreshBatchWait = 300 * time.Millisecond
+	manualRefreshCooldown      = 20 * time.Minute
+	manualRefreshBatchSize     = 50
+	manualRefreshBatchWait     = 300 * time.Millisecond
 	tronManualRefreshBatchWait = 1 * time.Second
 	bscManualRefreshBatchWait  = 1 * time.Second
 )
@@ -1387,6 +1439,18 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	if chain != "tron" && chain != "bsc" {
 		return 0, fmt.Errorf("unsupported chain: %s", chain)
 	}
+	if activeChains := s.activeScheduledRefreshChains(); len(activeChains) > 0 {
+		return 0, fmt.Errorf("当前定时刷新任务正在执行中（%s），请稍后再试手动全量更新", strings.Join(activeChains, ", "))
+	}
+	s.manualRefreshMu.Lock()
+	job := s.manualRefreshJob(chain)
+	now := time.Now()
+	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
+		s.manualRefreshMu.Unlock()
+		return 0, fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+	}
+	s.manualRefreshMu.Unlock()
+
 	switch chain {
 	case "tron":
 		if s.tronBalances == nil {
@@ -1407,11 +1471,11 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	}
 
 	s.manualRefreshMu.Lock()
-	job := s.manualRefreshJob(chain)
-	now := time.Now()
-	if job.running {
+	job = s.manualRefreshJob(chain)
+	now = time.Now()
+	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
 		s.manualRefreshMu.Unlock()
-		return 0, fmt.Errorf("%s 手动全量更新正在进行中，请稍后再试", strings.ToUpper(chain))
+		return 0, fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
 	}
 	if !job.lastStarted.IsZero() && now.Before(job.lastStarted.Add(manualRefreshCooldown)) {
 		nextAllowed := job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
@@ -1420,6 +1484,9 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	}
 	job.running = true
 	job.lastStarted = now
+	if s.manualRefreshStatus != nil {
+		s.manualRefreshStatus.Start(chain)
+	}
 	s.manualRefreshMu.Unlock()
 
 	go s.runManualRefreshAll(chain, addresses)
@@ -1481,6 +1548,9 @@ func (s *Server) runManualRefreshAll(chain string, addresses []string) {
 }
 
 func (s *Server) finishManualRefresh(chain string) {
+	if s.manualRefreshStatus != nil {
+		s.manualRefreshStatus.Finish(chain)
+	}
 	s.manualRefreshMu.Lock()
 	defer s.manualRefreshMu.Unlock()
 	s.manualRefreshJob(chain).running = false
@@ -1494,6 +1564,41 @@ func (s *Server) nextManualRefreshAllowedAt(chain string) string {
 		return ""
 	}
 	return job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
+}
+
+func (s *Server) activeManualRefreshChainsLocked() []string {
+	result := make([]string, 0, 2)
+	if s.tronManualRefresh.running {
+		result = append(result, "TRON")
+	}
+	if s.bscManualRefresh.running {
+		result = append(result, "BSC")
+	}
+	return result
+}
+
+func (s *Server) activeManualRefreshChains() []string {
+	if s == nil {
+		return nil
+	}
+	if s.manualRefreshStatus != nil {
+		active := s.manualRefreshStatus.ActiveChains()
+		if len(active) > 0 {
+			result := make([]string, 0, len(active))
+			for _, chain := range active {
+				chain = strings.ToUpper(strings.TrimSpace(chain))
+				if chain == "" {
+					continue
+				}
+				result = append(result, chain)
+			}
+			return result
+		}
+	}
+
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	return s.activeManualRefreshChainsLocked()
 }
 
 func (s *Server) manualRefreshJob(chain string) *manualBalanceRefreshJob {
@@ -1515,6 +1620,36 @@ func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) (
 	default:
 		return nil, fmt.Errorf("unsupported chain: %s", chain)
 	}
+}
+
+func (s *Server) activeScheduledRefreshChains() []string {
+	if s == nil || s.scheduledRefreshStatus == nil {
+		return nil
+	}
+
+	active := s.scheduledRefreshStatus.ActiveChains()
+	if len(active) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(active))
+	for _, chain := range active {
+		chain = strings.ToUpper(strings.TrimSpace(chain))
+		if chain == "" {
+			continue
+		}
+		result = append(result, chain)
+	}
+	return result
+}
+
+func firstNonEmptyChains(groups ...[]string) []string {
+	for _, group := range groups {
+		if len(group) > 0 {
+			return group
+		}
+	}
+	return nil
 }
 
 func scoreByAction(action string) int {

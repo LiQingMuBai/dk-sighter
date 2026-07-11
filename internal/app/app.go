@@ -26,22 +26,24 @@ import (
 )
 
 type App struct {
-	cfg                 *config.Config
-	db                  *sql.DB
-	cache               *service.AddressCache
-	scanner             *service.Scanner
-	balances            *service.BalanceService
-	scheduledBalances   *service.BalanceService
-	notifier            service.TransferNotifier
-	tronClient          *tron.Client
-	bscClient           *bsc.Client
-	bscCache            *service.BSCAddressCache
-	bscScanner          *service.BSCScanner
-	scheduledBSCScanner *service.BSCScanner
-	bscEnabled          bool
-	webServer           *web.Server
-	wallets             *hdwallet.Service
-	activator           *service.TronAddressActivator
+	cfg                     *config.Config
+	db                      *sql.DB
+	cache                   *service.AddressCache
+	scanner                 *service.Scanner
+	balances                *service.BalanceService
+	scheduledBalances       *service.BalanceService
+	scheduledRefreshTracker *service.ScheduledRefreshStateTracker
+	manualRefreshTracker    *service.ScheduledRefreshStateTracker
+	notifier                service.TransferNotifier
+	tronClient              *tron.Client
+	bscClient               *bsc.Client
+	bscCache                *service.BSCAddressCache
+	bscScanner              *service.BSCScanner
+	scheduledBSCScanner     *service.BSCScanner
+	bscEnabled              bool
+	webServer               *web.Server
+	wallets                 *hdwallet.Service
+	activator               *service.TronAddressActivator
 }
 
 func New(cfgPath string) (*App, error) {
@@ -136,6 +138,8 @@ func New(cfgPath string) (*App, error) {
 	repo := repository.New(db)
 	cache := service.NewAddressCache(repo)
 	balanceService := service.NewBalanceService(tronClient, repo, cache)
+	scheduledRefreshTracker := service.NewScheduledRefreshStateTracker()
+	manualRefreshTracker := service.NewScheduledRefreshStateTracker()
 	refreshTronClient := tron.NewClient(cfg.QuickNodeRefreshHTTPURL(), cfg.QuickNodeRefreshWSSURL(), cfg.QuickNode.USDT, cfg.QuickNodeRefreshMinRequestInterval())
 	refreshBalanceService := service.NewBalanceService(refreshTronClient, repo, cache)
 	notifier := service.NewMultiTransferNotifier(
@@ -171,6 +175,8 @@ func New(cfgPath string) (*App, error) {
 		activator,
 		bscClient,
 		cfg.BSC.GasTransferPrivateKey,
+		scheduledRefreshTracker,
+		manualRefreshTracker,
 		energyProviders,
 		cfg.Energy.Provider,
 	)
@@ -179,21 +185,23 @@ func New(cfgPath string) (*App, error) {
 	}
 
 	return &App{
-		cfg:                 cfg,
-		db:                  db,
-		cache:               cache,
-		scanner:             scanner,
-		balances:            balanceService,
-		scheduledBalances:   refreshBalanceService,
-		notifier:            notifier,
-		tronClient:          tronClient,
-		bscClient:           bscClient,
-		bscCache:            bscCache,
-		bscScanner:          bscScanner,
-		scheduledBSCScanner: refreshBSCScanner,
-		bscEnabled:          bscEnabled,
-		webServer:           webServer,
-		activator:           activator,
+		cfg:                     cfg,
+		db:                      db,
+		cache:                   cache,
+		scanner:                 scanner,
+		balances:                balanceService,
+		scheduledBalances:       refreshBalanceService,
+		scheduledRefreshTracker: scheduledRefreshTracker,
+		manualRefreshTracker:    manualRefreshTracker,
+		notifier:                notifier,
+		tronClient:              tronClient,
+		bscClient:               bscClient,
+		bscCache:                bscCache,
+		bscScanner:              bscScanner,
+		scheduledBSCScanner:     refreshBSCScanner,
+		bscEnabled:              bscEnabled,
+		webServer:               webServer,
+		activator:               activator,
 	}, nil
 }
 
@@ -316,7 +324,7 @@ func (a *App) Run(ctx context.Context) error {
 		log.Printf("hd wallet mode enabled, scheduled balance refresh disabled")
 	} else {
 		group.Go(a.safeGo("hourly-balance-refresh", func() error {
-			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource())
+			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource(), a.scheduledRefreshTracker, a.manualRefreshTracker)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
