@@ -920,12 +920,14 @@ func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	log.Printf("manual full refresh request received: chain=%s remote=%s", strings.ToUpper(chain), r.RemoteAddr)
 	totalCount, err := s.startManualRefreshAll(chain)
 	if err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "20分钟") || strings.Contains(err.Error(), "进行中") || strings.Contains(err.Error(), "正在执行") {
 			status = http.StatusTooManyRequests
 		}
+		log.Printf("manual full refresh request rejected: chain=%s status=%d err=%v next_allowed_at=%s", strings.ToUpper(chain), status, err, s.nextManualRefreshAllowedAt(chain))
 		s.writeJSON(w, status, manualRefreshResponse{
 			Success:       false,
 			Message:       err.Error(),
@@ -935,6 +937,7 @@ func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	log.Printf("manual full refresh request accepted: chain=%s total=%d", strings.ToUpper(chain), totalCount)
 	s.writeJSON(w, http.StatusOK, manualRefreshResponse{
 		Success:    true,
 		Message:    fmt.Sprintf("已开始手动全量更新 %s 余额，共 %d 个地址", strings.ToUpper(chain), totalCount),
@@ -1449,34 +1452,52 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 		return 0, fmt.Errorf("unsupported chain: %s", chain)
 	}
 	if activeChains := s.activeScheduledRefreshChains(); len(activeChains) > 0 {
-		return 0, fmt.Errorf("当前定时刷新任务正在执行中（%s），请稍后再试手动全量更新", strings.Join(activeChains, ", "))
+		err := fmt.Errorf("当前定时刷新任务正在执行中（%s），请稍后再试手动全量更新", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked: chain=%s reason=scheduled refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
 	}
 	s.manualRefreshMu.Lock()
 	job := s.manualRefreshJob(chain)
 	now := time.Now()
 	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
 		s.manualRefreshMu.Unlock()
-		return 0, fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		err := fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked: chain=%s reason=manual refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
 	}
 	s.manualRefreshMu.Unlock()
 
 	switch chain {
 	case "tron":
-		if s.tronBalances == nil {
-			return 0, fmt.Errorf("tron balance refresher not configured")
+		if s.tronManualBalances == nil {
+			err := fmt.Errorf("tron manual balance refresher not configured")
+			log.Printf("manual full refresh blocked: chain=TRON reason=%v", err)
+			return 0, err
 		}
 	case "bsc":
-		if s.bscBalances == nil {
-			return 0, fmt.Errorf("bsc balance refresher not configured")
+		if s.bscManualBalances == nil {
+			err := fmt.Errorf("bsc manual balance refresher not configured")
+			log.Printf("manual full refresh blocked: chain=BSC reason=%v", err)
+			return 0, err
 		}
 	}
 
+	log.Printf("manual full refresh loading addresses: chain=%s", strings.ToUpper(chain))
 	addresses, err := s.loadManualRefreshAddresses(context.Background(), chain)
 	if err != nil {
+		log.Printf("manual full refresh load addresses failed: chain=%s err=%v", strings.ToUpper(chain), err)
 		return 0, err
 	}
+	log.Printf("manual full refresh addresses loaded: chain=%s total=%d", strings.ToUpper(chain), len(addresses))
 	if len(addresses) == 0 {
-		return 0, fmt.Errorf("当前没有可更新的地址")
+		err := fmt.Errorf("当前没有可更新的地址")
+		if chain == "bsc" {
+			err = fmt.Errorf("当前没有 BNB > 0 的 BSC 地址可更新")
+			log.Printf("manual full refresh blocked: chain=BSC reason=no addresses available filter=BNB>0")
+		} else {
+			log.Printf("manual full refresh blocked: chain=%s reason=no addresses available", strings.ToUpper(chain))
+		}
+		return 0, err
 	}
 
 	s.manualRefreshMu.Lock()
@@ -1484,12 +1505,16 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	now = time.Now()
 	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
 		s.manualRefreshMu.Unlock()
-		return 0, fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		err := fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked after loading addresses: chain=%s reason=manual refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
 	}
 	if !job.lastStarted.IsZero() && now.Before(job.lastStarted.Add(manualRefreshCooldown)) {
 		nextAllowed := job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
 		s.manualRefreshMu.Unlock()
-		return 0, fmt.Errorf("%s 手动全量更新 20分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
+		err := fmt.Errorf("%s 手动全量更新 20分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
+		log.Printf("manual full refresh blocked: chain=%s reason=cooldown next_allowed_at=%s", strings.ToUpper(chain), nextAllowed)
+		return 0, err
 	}
 	job.running = true
 	job.lastStarted = now
@@ -1498,6 +1523,7 @@ func (s *Server) startManualRefreshAll(chain string) (int, error) {
 	}
 	s.manualRefreshMu.Unlock()
 
+	log.Printf("manual full refresh queued: chain=%s total=%d cooldown=%s", strings.ToUpper(chain), len(addresses), manualRefreshCooldown)
 	go s.runManualRefreshAll(chain, addresses)
 	return len(addresses), nil
 }
@@ -1533,7 +1559,9 @@ func (s *Server) runManualRefreshAll(chain string, addresses []string) {
 				log.Printf("manual full refresh skipped: chain=bsc reason=balance refresher not configured")
 				return
 			}
+			log.Printf("manual full refresh batch dispatch: chain=bsc page=%d/%d size=%d filter=BNB>0", page, totalPages, len(batch))
 			s.bscManualBalances.RefreshAddresses(ctx, batch)
+			log.Printf("manual full refresh batch dispatched: chain=bsc page=%d/%d size=%d", page, totalPages, len(batch))
 		}
 
 		if end < len(addresses) {
@@ -1563,6 +1591,7 @@ func (s *Server) finishManualRefresh(chain string) {
 	s.manualRefreshMu.Lock()
 	defer s.manualRefreshMu.Unlock()
 	s.manualRefreshJob(chain).running = false
+	log.Printf("manual full refresh state cleared: chain=%s", strings.ToUpper(chain))
 }
 
 func (s *Server) nextManualRefreshAllowedAt(chain string) string {
@@ -1625,6 +1654,9 @@ func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) (
 		}
 		return s.reloader.List(), nil
 	case "bsc":
+		if s.repo == nil {
+			return nil, fmt.Errorf("bsc repository not configured")
+		}
 		return repository.LoadActiveBSCWatchAddressesWithPositiveBNBBalance(ctx, s.repo)
 	default:
 		return nil, fmt.Errorf("unsupported chain: %s", chain)
