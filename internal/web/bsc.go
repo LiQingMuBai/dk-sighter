@@ -2,15 +2,26 @@ package web
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	ethTypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/shopspring/decimal"
+
 	"tron_watcher/internal/repository"
 )
+
+var manualBSCGasTransferAmount = decimal.RequireFromString("0.001")
 
 type bscDashboardPageData struct {
 	GeneratedAt  string
@@ -59,6 +70,23 @@ type bscDeleteAddressesResponse struct {
 	Count        int64    `json:"count"`
 	Addresses    []string `json:"addresses,omitempty"`
 	DeletedCount int64    `json:"deleted_count"`
+}
+
+type bscTransferGasResponse struct {
+	Success         bool     `json:"success"`
+	Message         string   `json:"message"`
+	Address         string   `json:"address,omitempty"`
+	Addresses       []string `json:"addresses,omitempty"`
+	TxHash          string   `json:"tx_hash,omitempty"`
+	TotalCount      int      `json:"total_count,omitempty"`
+	SuccessCount    int      `json:"success_count,omitempty"`
+	FailedCount     int      `json:"failed_count,omitempty"`
+	FailedAddresses []string `json:"failed_addresses,omitempty"`
+}
+
+type bscTransferGasRequest struct {
+	Address   string   `json:"address"`
+	Addresses []string `json:"addresses"`
 }
 
 func (s *Server) handleBSCDeleteAddresses(w http.ResponseWriter, r *http.Request) {
@@ -265,6 +293,179 @@ func (s *Server) handleBSCRefreshAddress(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, bscTransferGasResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+	if s.bscClient == nil {
+		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
+			Success: false,
+			Message: "bsc rpc 未配置",
+		})
+		return
+	}
+	if strings.TrimSpace(s.bscGasTopupPrivateKey) == "" {
+		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
+			Success: false,
+			Message: "未配置 bsc gas 补充私钥",
+		})
+		return
+	}
+
+	var req bscTransferGasRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	addresses := uniqueNonEmptyBSCStrings(append(append(make([]string, 0, len(req.Addresses)+1), req.Address), req.Addresses...))
+	if len(addresses) == 0 {
+		s.writeJSON(w, http.StatusNotFound, bscTransferGasResponse{
+			Success: false,
+			Message: "address is required",
+		})
+		return
+	}
+	for _, address := range addresses {
+		if !isValidBSCAddress(address) {
+			s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
+				Success: false,
+				Message: "invalid bsc address",
+				Address: address,
+			})
+			return
+		}
+	}
+
+	if len(addresses) == 1 {
+		txHash, err := s.transferBSCGasToAddress(r.Context(), addresses[0])
+		if err != nil {
+			s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
+				Success: false,
+				Message: "转手续费失败: " + err.Error(),
+				Address: addresses[0],
+			})
+			return
+		}
+
+		if s.bscBalances != nil {
+			refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
+			defer refreshCancel()
+			s.bscBalances.RefreshAddresses(refreshCtx, []string{addresses[0]})
+		}
+
+		s.writeJSON(w, http.StatusOK, bscTransferGasResponse{
+			Success: true,
+			Message: "转手续费成功",
+			Address: addresses[0],
+			TxHash:  txHash,
+		})
+		return
+	}
+
+	successAddresses := make([]string, 0, len(addresses))
+	failedAddresses := make([]string, 0)
+	for idx, address := range addresses {
+		if _, err := s.transferBSCGasToAddress(r.Context(), address); err != nil {
+			failedAddresses = append(failedAddresses, address)
+			log.Printf("batch transfer bsc gas failed: address=%s err=%v", address, err)
+		} else {
+			successAddresses = append(successAddresses, address)
+		}
+
+		if idx >= len(addresses)-1 {
+			continue
+		}
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-r.Context().Done():
+			timer.Stop()
+			s.writeJSON(w, http.StatusRequestTimeout, bscTransferGasResponse{
+				Success:         len(successAddresses) > 0,
+				Message:         "批量转手续费已中断",
+				Addresses:       successAddresses,
+				TotalCount:      len(addresses),
+				SuccessCount:    len(successAddresses),
+				FailedCount:     len(failedAddresses),
+				FailedAddresses: failedAddresses,
+			})
+			return
+		case <-timer.C:
+		}
+	}
+
+	if len(successAddresses) > 0 && s.bscBalances != nil {
+		refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer refreshCancel()
+		s.bscBalances.RefreshAddresses(refreshCtx, successAddresses)
+	}
+
+	message := fmt.Sprintf("批量转手续费完成，成功 %d 个，失败 %d 个", len(successAddresses), len(failedAddresses))
+	statusCode := http.StatusOK
+	if len(successAddresses) == 0 {
+		statusCode = http.StatusInternalServerError
+		message = "批量转手续费失败"
+	}
+	s.writeJSON(w, statusCode, bscTransferGasResponse{
+		Success:         len(successAddresses) > 0,
+		Message:         message,
+		Addresses:       successAddresses,
+		TotalCount:      len(addresses),
+		SuccessCount:    len(successAddresses),
+		FailedCount:     len(failedAddresses),
+		FailedAddresses: failedAddresses,
+	})
+}
+
+func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (string, error) {
+	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
+	if err != nil {
+		log.Printf("get bsc dashboard record failed: address=%s err=%v", address, err)
+		return "", fmt.Errorf("读取地址信息失败")
+	}
+	if !ok {
+		return "", fmt.Errorf("地址不存在或未启用")
+	}
+
+	transferCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	fromAddress, keySource, txHash, err := s.sendBSCGasTopup(transferCtx, address, manualBSCGasTransferAmount)
+	if err != nil {
+		log.Printf("transfer bsc gas failed: address=%s err=%v", address, err)
+		_ = insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, "", keySource, "FAILED", map[string]any{
+			"address":      address,
+			"from_address": fromAddress,
+			"transfer_bnb": manualBSCGasTransferAmount.StringFixed(3),
+			"current_bnb":  record.BNB,
+			"current_usdt": record.USDT,
+			"key_source":   keySource,
+		}, err.Error())
+		return "", err
+	}
+
+	_ = insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, txHash, keySource, "SUCCESS", map[string]any{
+		"address":      address,
+		"from_address": fromAddress,
+		"transfer_bnb": manualBSCGasTransferAmount.StringFixed(3),
+		"current_bnb":  record.BNB,
+		"current_usdt": record.USDT,
+		"tx_hash":      txHash,
+		"key_source":   keySource,
+	}, "")
+	return txHash, nil
+}
+
 func buildBSCDashboardPageData(records []bscDashboardRecordView, page, pageSize, total int) bscDashboardPageData {
 	totalPages := 1
 	if total > 0 {
@@ -385,4 +586,108 @@ func isValidBSCAddress(address string) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) sendBSCGasTopup(ctx context.Context, toAddress string, amount decimal.Decimal) (string, string, string, error) {
+	privateKey, fromAddress, err := parseWebBSCPrivateKey(s.bscGasTopupPrivateKey)
+	if err != nil {
+		return "", "config.bsc.gas_transfer_private_key", "", err
+	}
+	gasPrice, err := s.bscClient.GasPrice(ctx)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("get gas price: %w", err)
+	}
+	nonce, err := s.bscClient.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("get nonce: %w", err)
+	}
+	chainID, err := s.bscClient.ChainID(ctx)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("get chain id: %w", err)
+	}
+	amountWei, err := webDecimalToTokenUnits(amount, 18)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("convert amount to wei: %w", err)
+	}
+	to := common.HexToAddress(toAddress)
+	callObj := map[string]any{
+		"from":  fromAddress,
+		"to":    toAddress,
+		"value": "0x" + amountWei.Text(16),
+	}
+	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("estimate gas: %w", err)
+	}
+	gasLimit = gasLimit + gasLimit/5 + 5_000
+
+	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
+		Nonce:    nonce,
+		To:       &to,
+		Value:    amountWei,
+		Gas:      gasLimit,
+		GasPrice: gasPrice,
+	})
+	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privateKey)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("sign bsc tx: %w", err)
+	}
+	rawTx, err := signedTx.MarshalBinary()
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("marshal bsc tx: %w", err)
+	}
+	txHash, err := s.bscClient.SendRawTransaction(ctx, hex.EncodeToString(rawTx))
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("send raw transaction: %w", err)
+	}
+	return fromAddress, "config.bsc.gas_transfer_private_key", txHash, nil
+}
+
+func parseWebBSCPrivateKey(value string) (*ecdsa.PrivateKey, string, error) {
+	keyHex := strings.TrimSpace(strings.TrimPrefix(value, "0x"))
+	if keyHex == "" {
+		return nil, "", fmt.Errorf("empty private key")
+	}
+	privateKey, err := crypto.HexToECDSA(keyHex)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse private key: %w", err)
+	}
+	return privateKey, strings.ToLower(crypto.PubkeyToAddress(privateKey.PublicKey).Hex()), nil
+}
+
+func insertWebBSCGasLog(ctx context.Context, repo *repository.DB, address string, fromAddress string, amountBNB string, currentBNB string, currentUSDT string, txHash string, keySource string, status string, payload map[string]any, errMessage string) error {
+	if repo == nil {
+		return nil
+	}
+	body, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		body = []byte(fmt.Sprintf(`{"marshal_error":%q}`, marshalErr.Error()))
+	}
+	return repo.InsertBSCGasTopupLog(ctx, repository.BSCGasTopupLog{
+		Address:      strings.ToLower(strings.TrimSpace(address)),
+		FromAddress:  strings.ToLower(strings.TrimSpace(fromAddress)),
+		AmountBNB:    strings.TrimSpace(amountBNB),
+		CurrentBNB:   strings.TrimSpace(currentBNB),
+		CurrentUSDT:  strings.TrimSpace(currentUSDT),
+		TxHash:       strings.TrimSpace(txHash),
+		KeySource:    strings.TrimSpace(keySource),
+		Status:       strings.ToUpper(strings.TrimSpace(status)),
+		ResponseBody: string(body),
+		ErrorMessage: strings.TrimSpace(errMessage),
+	})
+}
+
+func webDecimalToTokenUnits(amount decimal.Decimal, decimals int32) (*big.Int, error) {
+	if decimals < 0 {
+		return nil, fmt.Errorf("invalid decimals")
+	}
+	if amount.IsNegative() {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+	scale := decimal.NewFromInt(1).Shift(decimals)
+	value := amount.Mul(scale)
+	if !value.Equal(value.Truncate(0)) {
+		return nil, fmt.Errorf("amount has too many decimal places")
+	}
+	return value.BigInt(), nil
 }

@@ -702,6 +702,7 @@
       <div class="toolbar">
         <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
         <div class="toolbar-actions">
+          <button id="batchTransferGasBtn" class="button" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
             <input type="hidden" name="address" value="{{ .AddressQuery }}">
@@ -747,7 +748,12 @@
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
                   <td>{{ .UpdatedAt }}</td>
-                  <td><button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button></td>
+                  <td>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                      <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
+                      <button class="button" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
+                    </div>
+                  </td>
                 </tr>
               {{ end }}
             {{ else }}
@@ -784,6 +790,7 @@
               </div>
               <div class="mobile-actions">
                 <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
+                <button class="button" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
               </div>
             </div>
           {{ end }}
@@ -1116,6 +1123,91 @@
       } finally {
         button.disabled = false;
         button.textContent = originalText;
+      }
+    }
+
+    async function handleTransferBSCGas(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const confirmed = await showConfirm('转手续费', `确认给地址 ${address} 转 0.001 BNB 手续费吗？`);
+      if (!confirmed) {
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '转账中...';
+
+      try {
+        const resp = await fetch('/api/bsc/transfer-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: address })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '转手续费失败');
+          return;
+        }
+        showToast(data.tx_hash ? `转手续费成功: ${data.tx_hash.slice(0, 12)}...` : '转手续费成功');
+        window.setTimeout(() => window.location.reload(), 800);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    async function handleBatchTransferBSCGas() {
+      const addresses = getUniqueSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+
+      const confirmed = await showConfirm('批量转手续费', `确认给当前勾选的 ${addresses.length} 个地址批量转 0.001 BNB 手续费吗？`);
+      if (!confirmed) {
+        return;
+      }
+
+      const button = document.getElementById('batchTransferGasBtn');
+      const originalText = button ? button.textContent : '批量转手续费';
+      if (button) {
+        button.disabled = true;
+        button.textContent = '批量转账中...';
+      }
+
+      try {
+        const resp = await fetch('/api/bsc/transfer-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addresses })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量转手续费失败');
+          return;
+        }
+        const failedCount = Number(data.failed_count || 0);
+        const successCount = Number(data.success_count || 0);
+        if (failedCount > 0) {
+          showToast(`批量完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+        } else {
+          showToast(`批量转手续费成功，共 ${successCount} 个`);
+        }
+        window.setTimeout(() => window.location.reload(), 1000);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
       }
     }
 

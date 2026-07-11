@@ -145,7 +145,18 @@ func New(cfgPath string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	webServer, err := web.NewServer(repo, cfg.Web, cache, balanceService, bscScanner, activator, energyProviders, cfg.Energy.Provider)
+	webServer, err := web.NewServer(
+		repo,
+		cfg.Web,
+		cache,
+		balanceService,
+		bscScanner,
+		activator,
+		bscClient,
+		cfg.BSC.GasTransferPrivateKey,
+		energyProviders,
+		cfg.Energy.Provider,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"tron_watcher/infrastructure"
+	"tron_watcher/internal/bsc"
 	"tron_watcher/internal/config"
 	"tron_watcher/internal/hdwallet"
 	"tron_watcher/internal/repository"
@@ -48,6 +49,8 @@ type Server struct {
 	tronBalances          tronBalanceRefresher
 	bscBalances           bscBalanceRefresher
 	tronActivator         tronAddressActivator
+	bscClient             *bsc.Client
+	bscGasTopupPrivateKey string
 	listen                string
 	templates             *template.Template
 	username              string
@@ -193,6 +196,8 @@ func NewServer(
 	tronBalances tronBalanceRefresher,
 	bscBalances bscBalanceRefresher,
 	tronActivator tronAddressActivator,
+	bscClient *bsc.Client,
+	bscGasTopupPrivateKey string,
 	energyProviders map[string]infrastructure.EnergyOrderProvider,
 	defaultEnergyProvider string,
 ) (*Server, error) {
@@ -210,6 +215,8 @@ func NewServer(
 		tronBalances:          tronBalances,
 		bscBalances:           bscBalances,
 		tronActivator:         tronActivator,
+		bscClient:             bscClient,
+		bscGasTopupPrivateKey: strings.TrimSpace(bscGasTopupPrivateKey),
 		listen:                cfg.Listen,
 		templates:             tmpl,
 		username:              cfg.Username,
@@ -292,6 +299,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/bsc/watch-addresses", s.handleBSCAddWatchAddresses)
 		mux.HandleFunc("/api/bsc/delete-addresses", s.handleBSCDeleteAddresses)
 		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
+		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
 		mux.HandleFunc("/api/bsc/transfers/in", s.handleBSCTransfersInAPI)
 		mux.HandleFunc("/api/bsc/transfers/out", s.handleBSCTransfersOutAPI)
