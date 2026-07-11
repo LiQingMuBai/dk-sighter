@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string, tracker *ScheduledRefreshStateTracker, manualTracker *ScheduledRefreshStateTracker) error {
+func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, bscScanner *BSCScanner, tronBlockSource string, tracker *ScheduledRefreshStateTracker, manualTracker *ScheduledRefreshStateTracker, disableTronScheduledBalanceSync bool, disableBSCScheduledBalanceSync bool) error {
 	loggerTron := tronLogger()
 	loggerBSC := bscLogger()
 	loc := time.FixedZone("CST", 8*3600)
@@ -21,11 +21,22 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, 
 
 	for {
 		now := time.Now().In(loc)
-		nextTron := nextOffsetMinuteBoundary(now, 40, 10)
-		nextBSC := nextOffsetMinuteBoundary(now, 30, 0)
-		next := nextTron
-		if nextBSC.Before(next) {
-			next = nextBSC
+		var nextTron time.Time
+		var nextBSC time.Time
+		var next time.Time
+		if !disableTronScheduledBalanceSync {
+			nextTron = nextOffsetMinuteBoundary(now, 40, 10)
+			next = nextTron
+		}
+		if !disableBSCScheduledBalanceSync {
+			nextBSC = nextOffsetMinuteBoundary(now, 30, 0)
+			if next.IsZero() || nextBSC.Before(next) {
+				next = nextBSC
+			}
+		}
+		if next.IsZero() {
+			<-ctx.Done()
+			return ctx.Err()
 		}
 		timer := time.NewTimer(time.Until(next))
 		select {
@@ -37,7 +48,7 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, 
 
 		runAt := time.Now().In(loc)
 		scheduledRefreshStarted := false
-		if !runAt.Before(nextTron) {
+		if !disableTronScheduledBalanceSync && !runAt.Before(nextTron) {
 			if scheduledRefreshStarted {
 				loggerTron.Printf("scheduled refresh skipped: interval=%s offset=%s reason=another scheduled refresh already started", tronInterval, tronOffset)
 			} else if activeManualChains := manualTracker.ActiveChains(); len(activeManualChains) > 0 {
@@ -82,7 +93,7 @@ func RunHourlyBalanceRefresh(ctx context.Context, tronBalances *BalanceService, 
 			}
 		}
 
-		if !runAt.Before(nextBSC) {
+		if !disableBSCScheduledBalanceSync && !runAt.Before(nextBSC) {
 			if scheduledRefreshStarted {
 				loggerBSC.Printf("scheduled refresh skipped: interval=%s reason=another scheduled refresh already started", bscInterval)
 			} else if activeManualChains := manualTracker.ActiveChains(); len(activeManualChains) > 0 {

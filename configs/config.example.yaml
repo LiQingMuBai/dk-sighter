@@ -120,6 +120,8 @@ catfee:
 watcher:
   # 地址缓存重载间隔，单位秒
   address_reload_interval_seconds: 15
+  # 是否禁用 Tron 定时刷新余额任务；true 时仅暂停 Tron 定时刷新，不影响 BSC 定时刷新和手动全量更新
+  disable_scheduled_balance_sync: false
   # 扫块轮询间隔，单位秒
   block_poll_interval_seconds: 3
   # Tron 扫块来源：head / solid
@@ -141,6 +143,8 @@ bsc:
   usdt_contract: "0x55d398326f99059fF775485246999027B3197955"
   # BSC 转手续费私钥
   gas_transfer_private_key: ""
+  # 是否禁用 BSC 定时刷新余额任务；true 时仅暂停 BSC 定时刷新，不影响 Tron 定时刷新和手动全量更新
+  disable_scheduled_balance_sync: false
   # 主服务请求最小间隔，单位毫秒
   min_request_interval_ms: 10
   # 手动全量更新、定时刷新余额专用的 BSC HTTP RPC，启用 BSC 时必填

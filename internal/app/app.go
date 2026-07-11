@@ -323,8 +323,20 @@ func (a *App) Run(ctx context.Context) error {
 	if isHDWalletMode(a.cfg) {
 		log.Printf("hd wallet mode enabled, scheduled balance refresh disabled")
 	} else {
+		disableTronScheduledBalanceSync := a.cfg.Watcher.DisableScheduledBalanceSync
+		disableBSCScheduledBalanceSync := a.cfg.BSC.DisableScheduledBalanceSync
+		if disableTronScheduledBalanceSync {
+			log.Printf("tron scheduled balance refresh disabled by config: watcher.disable_scheduled_balance_sync=true")
+		}
+		if disableBSCScheduledBalanceSync {
+			log.Printf("bsc scheduled balance refresh disabled by config: bsc.disable_scheduled_balance_sync=true")
+		}
+		if disableTronScheduledBalanceSync && disableBSCScheduledBalanceSync {
+			log.Printf("all scheduled balance refresh jobs are disabled by config")
+			return group.Wait()
+		}
 		group.Go(a.safeGo("hourly-balance-refresh", func() error {
-			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource(), a.scheduledRefreshTracker, a.manualRefreshTracker)
+			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource(), a.scheduledRefreshTracker, a.manualRefreshTracker, disableTronScheduledBalanceSync, disableBSCScheduledBalanceSync)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}

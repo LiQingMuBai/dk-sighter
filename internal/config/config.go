@@ -93,6 +93,7 @@ type CatfeeConfig struct {
 
 type WatcherConfig struct {
 	AddressReloadIntervalSeconds int    `yaml:"address_reload_interval_seconds"`
+	DisableScheduledBalanceSync  bool   `yaml:"disable_scheduled_balance_sync"`
 	BlockPollIntervalSeconds     int    `yaml:"block_poll_interval_seconds"`
 	TronBlockSource              string `yaml:"tron_block_source"`
 	Confirmations                int    `yaml:"confirmations"`
@@ -101,17 +102,18 @@ type WatcherConfig struct {
 }
 
 type BSCConfig struct {
-	RPCHTTPURL               string `yaml:"rpc_http_url"`
-	RPCWSSURL                string `yaml:"rpc_wss_url"`
-	USDTContract             string `yaml:"usdt_contract"`
-	GasTransferPrivateKey    string `yaml:"gas_transfer_private_key"`
-	MinRequestIntervalMS     int    `yaml:"min_request_interval_ms"`
-	RefreshRPCHTTPURL        string `yaml:"refresh_rpc_http_url"`
-	RefreshRPCWSSURL         string `yaml:"refresh_rpc_wss_url"`
-	RefreshMinIntervalMS     int    `yaml:"refresh_min_request_interval_ms"`
-	StartBlock               int64  `yaml:"start_block"`
-	BlockPollIntervalSeconds int    `yaml:"block_poll_interval_seconds"`
-	Confirmations            int    `yaml:"confirmations"`
+	RPCHTTPURL                  string `yaml:"rpc_http_url"`
+	RPCWSSURL                   string `yaml:"rpc_wss_url"`
+	USDTContract                string `yaml:"usdt_contract"`
+	GasTransferPrivateKey       string `yaml:"gas_transfer_private_key"`
+	MinRequestIntervalMS        int    `yaml:"min_request_interval_ms"`
+	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
+	RefreshRPCHTTPURL           string `yaml:"refresh_rpc_http_url"`
+	RefreshRPCWSSURL            string `yaml:"refresh_rpc_wss_url"`
+	RefreshMinIntervalMS        int    `yaml:"refresh_min_request_interval_ms"`
+	StartBlock                  int64  `yaml:"start_block"`
+	BlockPollIntervalSeconds    int    `yaml:"block_poll_interval_seconds"`
+	Confirmations               int    `yaml:"confirmations"`
 }
 
 type TronActivatorConfig struct {
