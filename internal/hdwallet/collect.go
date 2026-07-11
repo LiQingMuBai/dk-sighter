@@ -103,7 +103,7 @@ func (s *Service) StartSweep(chain, destination string) error {
 	}
 	if preview.EligibleCount == 0 {
 		if strings.EqualFold(chain, "tron") {
-			return fmt.Errorf("当前链没有 TRX 余额大于 1 且 USDT 大于等于阈值的地址")
+			return fmt.Errorf("当前链没有 TRX 余额大于等于 1 且 USDT 大于等于阈值的地址")
 		}
 		return fmt.Errorf("当前链没有 BNB 余额大于等于 0.001 且 USDT 大于等于阈值的地址")
 	}
@@ -235,8 +235,8 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 	if !trxActive {
 		return "", "", fmt.Errorf("skip: tron 地址未激活")
 	}
-	if !trxBalance.GreaterThan(decimal.NewFromInt(1)) {
-		return "", "", fmt.Errorf("skip: trx 余额需大于 1")
+	if trxBalance.LessThan(decimal.NewFromInt(1)) {
+		return "", "", fmt.Errorf("skip: trx 余额需大于等于 1")
 	}
 	availableEnergy, err := s.tronClient.GetAvailableEnergy(ctx, wallet.AddressHex)
 	if err != nil {
@@ -611,7 +611,7 @@ func collectEligibleCandidates(chain string, file *ChainFile, threshold decimal.
 				}
 				continue
 			}
-			if !trxBalance.GreaterThan(decimal.NewFromInt(1)) {
+			if trxBalance.LessThan(decimal.NewFromInt(1)) {
 				if isFocus {
 					// #region debug-point D:sweep-filter-focus-skip-trx-threshold
 					debugReport("pre", "D", "hdwallet/collect.go:collectEligibleCandidates", "[DEBUG] sweep filter focus skip: trx <= 1", map[string]any{

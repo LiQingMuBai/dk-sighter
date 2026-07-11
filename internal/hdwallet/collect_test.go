@@ -134,6 +134,42 @@ func TestCollectEligibleCandidatesFiltersByCurrentMnemonicTag(t *testing.T) {
 	}
 }
 
+func TestCollectEligibleCandidatesAllowsTronBalanceEqualToOne(t *testing.T) {
+	file := &ChainFile{
+		Chain: "tron",
+		Addresses: []AddressRecord{
+			{
+				Index:       0,
+				Address:     "T111111111111111111111111111111111",
+				MnemonicTag: "m-current",
+				TRXBalance:  "1.000000",
+				USDTBalance: "15.000000",
+			},
+			{
+				Index:       1,
+				Address:     "T222222222222222222222222222222222",
+				MnemonicTag: "m-current",
+				TRXBalance:  "0.999999",
+				USDTBalance: "15.000000",
+			},
+		},
+	}
+
+	candidates, total := collectEligibleCandidates("tron", file, decimal.RequireFromString("10"), "", "m-current")
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].Address != "T111111111111111111111111111111111" {
+		t.Fatalf("unexpected candidate address: %s", candidates[0].Address)
+	}
+	if candidates[0].TRXBalance != "1.000000" {
+		t.Fatalf("unexpected candidate trx balance: %s", candidates[0].TRXBalance)
+	}
+	if !total.Equal(decimal.RequireFromString("15")) {
+		t.Fatalf("unexpected total usdt: %s", total.String())
+	}
+}
+
 func TestCollectMissingWalletIndexesSkipsExistingIndexes(t *testing.T) {
 	indexes := collectMissingWalletIndexes([]int{0, 1, 3, 5, 999}, 8, 4)
 	expected := []int{2, 4, 6, 7}
