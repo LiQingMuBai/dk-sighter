@@ -825,11 +825,11 @@ func (d *DB) ListTransferOutRecords(ctx context.Context, watchAddress string, li
 }
 
 func (d *DB) ListBSCTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_in_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	return d.listTransferRecords(ctx, "bsc_transfer_in_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
 }
 
 func (d *DB) ListBSCTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_out_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	return d.listTransferRecords(ctx, "bsc_transfer_out_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
 }
 
 func (d *DB) listTransferRecords(ctx context.Context, table, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
