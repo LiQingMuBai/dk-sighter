@@ -20,6 +20,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"tron_watcher/internal/repository"
+	"tron_watcher/internal/service"
 )
 
 var manualBSCGasTransferAmount = decimal.RequireFromString("0.001")
@@ -278,14 +279,15 @@ func (s *Server) handleBSCManualRefreshAll(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
-	log.Printf("bsc transfer gas api entered: method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
+	logger := service.BSCLogger()
+	logger.Printf("bsc transfer gas api entered: method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 	if r.Method != http.MethodPost {
-		log.Printf("bsc transfer gas request rejected: method not allowed method=%s", r.Method)
+		logger.Printf("bsc transfer gas request rejected: method not allowed method=%s", r.Method)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
-		log.Printf("bsc transfer gas request rejected: unauthorized remote=%s", r.RemoteAddr)
+		logger.Printf("bsc transfer gas request rejected: unauthorized remote=%s", r.RemoteAddr)
 		s.writeJSON(w, http.StatusUnauthorized, bscTransferGasResponse{
 			Success: false,
 			Message: "unauthorized",
@@ -293,7 +295,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.bscClient == nil {
-		log.Printf("bsc transfer gas request rejected: bsc client not configured")
+		logger.Printf("bsc transfer gas request rejected: bsc client not configured")
 		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 			Success: false,
 			Message: "bsc rpc 未配置",
@@ -301,7 +303,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(s.bscGasTopupPrivateKey) == "" {
-		log.Printf("bsc transfer gas request rejected: gas topup private key not configured")
+		logger.Printf("bsc transfer gas request rejected: gas topup private key not configured")
 		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 			Success: false,
 			Message: "未配置 bsc gas 补充私钥",
@@ -311,7 +313,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 
 	var req bscTransferGasRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("bsc transfer gas request decode failed: err=%v", err)
+		logger.Printf("bsc transfer gas request decode failed: err=%v", err)
 		s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
 			Success: false,
 			Message: "invalid json body",
@@ -321,7 +323,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 
 	addresses := uniqueNonEmptyBSCStrings(append(append(make([]string, 0, len(req.Addresses)+1), req.Address), req.Addresses...))
 	if len(addresses) == 0 {
-		log.Printf("bsc transfer gas request rejected: no addresses provided")
+		logger.Printf("bsc transfer gas request rejected: no addresses provided")
 		s.writeJSON(w, http.StatusNotFound, bscTransferGasResponse{
 			Success: false,
 			Message: "address is required",
@@ -330,7 +332,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, address := range addresses {
 		if !isValidBSCAddress(address) {
-			log.Printf("bsc transfer gas request rejected: invalid address=%s total=%d", address, len(addresses))
+			logger.Printf("bsc transfer gas request rejected: invalid address=%s total=%d", address, len(addresses))
 			s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
 				Success: false,
 				Message: "invalid bsc address",
@@ -344,13 +346,13 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	if len(addresses) > 1 {
 		mode = "batch"
 	}
-	log.Printf("bsc transfer gas request received: mode=%s total=%d addresses=%s", mode, len(addresses), strings.Join(addresses, ","))
+	logger.Printf("bsc transfer gas request received: mode=%s total=%d addresses=%s", mode, len(addresses), strings.Join(addresses, ","))
 
 	if len(addresses) == 1 {
-		log.Printf("bsc transfer gas start: address=%s amount_bnb=%s", addresses[0], manualBSCGasTransferAmount.StringFixed(3))
+		logger.Printf("bsc transfer gas start: address=%s amount_bnb=%s", addresses[0], manualBSCGasTransferAmount.StringFixed(3))
 		txHash, err := s.transferBSCGasToAddress(r.Context(), addresses[0])
 		if err != nil {
-			log.Printf("bsc transfer gas failed: address=%s err=%v", addresses[0], err)
+			logger.Printf("bsc transfer gas failed: address=%s err=%v", addresses[0], err)
 			s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 				Success: false,
 				Message: "转手续费失败: " + err.Error(),
@@ -358,12 +360,12 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		log.Printf("bsc transfer gas success: address=%s tx_hash=%s", addresses[0], txHash)
+		logger.Printf("bsc transfer gas success: address=%s tx_hash=%s", addresses[0], txHash)
 
 		if s.bscBalances != nil {
 			refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
 			defer refreshCancel()
-			log.Printf("bsc transfer gas refresh balances start: count=1 address=%s", addresses[0])
+			logger.Printf("bsc transfer gas refresh balances start: count=1 address=%s", addresses[0])
 			s.bscBalances.RefreshAddresses(refreshCtx, []string{addresses[0]})
 		}
 
@@ -378,7 +380,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 
 	jobID, err := newBSCGasTransferJobID()
 	if err != nil {
-		log.Printf("batch transfer bsc gas job id generate failed: total=%d err=%v", len(addresses), err)
+		logger.Printf("batch transfer bsc gas job id generate failed: total=%d err=%v", len(addresses), err)
 		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 			Success: false,
 			Message: "生成批量任务ID失败",
@@ -390,7 +392,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	if s.bscGasBatchRunning {
 		runningJobID := strings.TrimSpace(s.bscGasBatchCurrentJob)
 		s.bscGasBatchMu.Unlock()
-		log.Printf("batch transfer bsc gas enqueue rejected: another job is running current_job_id=%s", runningJobID)
+		logger.Printf("batch transfer bsc gas enqueue rejected: another job is running current_job_id=%s", runningJobID)
 		s.writeJSON(w, http.StatusConflict, bscTransferGasResponse{
 			Success: false,
 			Message: "已有批量转手续费任务执行中，请稍后再试",
@@ -408,7 +410,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	}
 	s.bscGasBatchMu.Unlock()
 
-	log.Printf("batch transfer bsc gas enqueued: job_id=%s total=%d addresses=%s", jobID, len(addresses), strings.Join(addresses, ","))
+	logger.Printf("batch transfer bsc gas enqueued: job_id=%s total=%d addresses=%s", jobID, len(addresses), strings.Join(addresses, ","))
 	go s.runBSCGasTransferJob(jobID, addresses)
 
 	s.writeJSON(w, http.StatusOK, bscTransferGasResponse{
@@ -420,24 +422,25 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (string, error) {
-	log.Printf("transfer bsc gas prepare: address=%s", address)
+	logger := service.BSCLogger()
+	logger.Printf("transfer bsc gas prepare: address=%s", address)
 	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
 	if err != nil {
-		log.Printf("get bsc dashboard record failed: address=%s err=%v", address, err)
+		logger.Printf("get bsc dashboard record failed: address=%s err=%v", address, err)
 		return "", fmt.Errorf("读取地址信息失败")
 	}
 	if !ok {
-		log.Printf("transfer bsc gas skipped: address=%s reason=watch address not found or disabled", address)
+		logger.Printf("transfer bsc gas skipped: address=%s reason=watch address not found or disabled", address)
 		return "", fmt.Errorf("地址不存在或未启用")
 	}
-	log.Printf("transfer bsc gas record loaded: address=%s current_bnb=%s current_usdt=%s", address, record.BNB, record.USDT)
+	logger.Printf("transfer bsc gas record loaded: address=%s current_bnb=%s current_usdt=%s", address, record.BNB, record.USDT)
 
 	transferCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	log.Printf("transfer bsc gas send start: address=%s amount_bnb=%s timeout=%s", address, manualBSCGasTransferAmount.StringFixed(3), 45*time.Second)
+	logger.Printf("transfer bsc gas send start: address=%s amount_bnb=%s timeout=%s", address, manualBSCGasTransferAmount.StringFixed(3), 45*time.Second)
 	fromAddress, keySource, txHash, err := s.sendBSCGasTopup(transferCtx, address, manualBSCGasTransferAmount)
 	if err != nil {
-		log.Printf("transfer bsc gas failed: address=%s err=%v", address, err)
+		logger.Printf("transfer bsc gas failed: address=%s err=%v", address, err)
 		if logErr := insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, "", keySource, "FAILED", map[string]any{
 			"address":      address,
 			"from_address": fromAddress,
@@ -446,13 +449,13 @@ func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (s
 			"current_usdt": record.USDT,
 			"key_source":   keySource,
 		}, err.Error()); logErr != nil {
-			log.Printf("insert bsc gas topup failed log error: address=%s err=%v", address, logErr)
+			logger.Printf("insert bsc gas topup failed log error: address=%s err=%v", address, logErr)
 		} else {
-			log.Printf("insert bsc gas topup failed log success: address=%s", address)
+			logger.Printf("insert bsc gas topup failed log success: address=%s", address)
 		}
 		return "", err
 	}
-	log.Printf("transfer bsc gas send success: address=%s from_address=%s tx_hash=%s key_source=%s", address, fromAddress, txHash, keySource)
+	logger.Printf("transfer bsc gas send success: address=%s from_address=%s tx_hash=%s key_source=%s", address, fromAddress, txHash, keySource)
 
 	if logErr := insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, txHash, keySource, "SUCCESS", map[string]any{
 		"address":      address,
@@ -463,9 +466,9 @@ func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (s
 		"tx_hash":      txHash,
 		"key_source":   keySource,
 	}, ""); logErr != nil {
-		log.Printf("insert bsc gas topup success log error: address=%s tx_hash=%s err=%v", address, txHash, logErr)
+		logger.Printf("insert bsc gas topup success log error: address=%s tx_hash=%s err=%v", address, txHash, logErr)
 	} else {
-		log.Printf("insert bsc gas topup success log saved: address=%s tx_hash=%s", address, txHash)
+		logger.Printf("insert bsc gas topup success log saved: address=%s tx_hash=%s", address, txHash)
 	}
 	return txHash, nil
 }
@@ -521,10 +524,11 @@ func (s *Server) handleBSCTransferGasStatus(w http.ResponseWriter, r *http.Reque
 func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	logger := service.BSCLogger()
 
 	successAddresses := make([]string, 0, len(addresses))
 	failedAddresses := make([]string, 0)
-	log.Printf("batch transfer bsc gas job started: job_id=%s total=%d", jobID, len(addresses))
+	logger.Printf("batch transfer bsc gas job started: job_id=%s total=%d", jobID, len(addresses))
 
 	defer func() {
 		s.bscGasBatchMu.Lock()
@@ -538,7 +542,7 @@ func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 	for idx, address := range addresses {
 		select {
 		case <-ctx.Done():
-			log.Printf("batch transfer bsc gas job canceled: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
+			logger.Printf("batch transfer bsc gas job canceled: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
 			s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
 				JobID:           jobID,
 				TotalCount:      len(addresses),
@@ -552,14 +556,14 @@ func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 		default:
 		}
 
-		log.Printf("batch transfer bsc gas job item start: job_id=%s index=%d/%d address=%s amount_bnb=%s", jobID, idx+1, len(addresses), address, manualBSCGasTransferAmount.StringFixed(3))
+		logger.Printf("batch transfer bsc gas job item start: job_id=%s index=%d/%d address=%s amount_bnb=%s", jobID, idx+1, len(addresses), address, manualBSCGasTransferAmount.StringFixed(3))
 		txHash, err := s.transferBSCGasToAddress(ctx, address)
 		if err != nil {
 			failedAddresses = append(failedAddresses, address)
-			log.Printf("batch transfer bsc gas job item failed: job_id=%s address=%s err=%v", jobID, address, err)
+			logger.Printf("batch transfer bsc gas job item failed: job_id=%s address=%s err=%v", jobID, address, err)
 		} else {
 			successAddresses = append(successAddresses, address)
-			log.Printf("batch transfer bsc gas job item success: job_id=%s address=%s tx_hash=%s success=%d failed=%d", jobID, address, txHash, len(successAddresses), len(failedAddresses))
+			logger.Printf("batch transfer bsc gas job item success: job_id=%s address=%s tx_hash=%s success=%d failed=%d", jobID, address, txHash, len(successAddresses), len(failedAddresses))
 		}
 
 		s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
@@ -575,12 +579,12 @@ func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 		if idx >= len(addresses)-1 {
 			continue
 		}
-		log.Printf("batch transfer bsc gas job cooldown: job_id=%s next_address_pending=true wait=5s current_index=%d/%d", jobID, idx+1, len(addresses))
+		logger.Printf("batch transfer bsc gas job cooldown: job_id=%s next_address_pending=true wait=5s current_index=%d/%d", jobID, idx+1, len(addresses))
 		timer := time.NewTimer(5 * time.Second)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			log.Printf("batch transfer bsc gas job interrupted during cooldown: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
+			logger.Printf("batch transfer bsc gas job interrupted during cooldown: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
 			s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
 				JobID:           jobID,
 				TotalCount:      len(addresses),
@@ -598,7 +602,7 @@ func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 	if len(successAddresses) > 0 && s.bscBalances != nil {
 		refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer refreshCancel()
-		log.Printf("batch transfer bsc gas job refresh balances start: job_id=%s success=%d addresses=%s", jobID, len(successAddresses), strings.Join(successAddresses, ","))
+		logger.Printf("batch transfer bsc gas job refresh balances start: job_id=%s success=%d addresses=%s", jobID, len(successAddresses), strings.Join(successAddresses, ","))
 		s.bscBalances.RefreshAddresses(refreshCtx, successAddresses)
 	}
 
@@ -611,7 +615,7 @@ func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
 		Finished:        true,
 		UpdatedAt:       time.Now(),
 	})
-	log.Printf("batch transfer bsc gas job completed: job_id=%s total=%d success=%d failed=%d failed_addresses=%s", jobID, len(addresses), len(successAddresses), len(failedAddresses), strings.Join(failedAddresses, ","))
+	logger.Printf("batch transfer bsc gas job completed: job_id=%s total=%d success=%d failed=%d failed_addresses=%s", jobID, len(addresses), len(successAddresses), len(failedAddresses), strings.Join(failedAddresses, ","))
 }
 
 func (s *Server) setBSCGasTransferJobStatus(status bscGasTransferJobStatus) {

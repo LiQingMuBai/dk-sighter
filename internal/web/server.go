@@ -24,6 +24,7 @@ import (
 	"tron_watcher/internal/config"
 	"tron_watcher/internal/hdwallet"
 	"tron_watcher/internal/repository"
+	"tron_watcher/internal/service"
 	"tron_watcher/internal/tron"
 )
 
@@ -1224,7 +1225,7 @@ func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(addresses) == 1 {
-		log.Printf("tron activate address requested: address=%s", addresses[0])
+		service.TronLogger().Printf("tron activate address requested: address=%s", addresses[0])
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 		txID, err := s.tronActivator.Activate(ctx, addresses[0])
 		cancel()
@@ -1248,7 +1249,7 @@ func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("tron batch activate requested: total=%d", len(addresses))
+	service.TronLogger().Printf("tron batch activate requested: total=%d", len(addresses))
 	jobID, queued, err := s.tronActivator.EnqueueBatch(addresses)
 	if err != nil {
 		s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{

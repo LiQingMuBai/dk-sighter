@@ -36,6 +36,7 @@ type TronAddressActivator struct {
 	jobs       chan activateJob
 	jobMu      sync.RWMutex
 	jobStatus  map[string]ActivateJobStatus
+	logger     *log.Logger
 }
 
 type activateJob struct {
@@ -102,6 +103,7 @@ func NewTronAddressActivatorWithPrivateKeys(tronClient *tron.Client, repo *repos
 		signers:    signers,
 		jobs:       make(chan activateJob, queueSize),
 		jobStatus:  make(map[string]ActivateJobStatus),
+		logger:     tronLogger(),
 	}, nil
 }
 
@@ -185,7 +187,7 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 		Finished:   false,
 		UpdatedAt:  time.Now(),
 	})
-	log.Printf("tron activate job started: job_id=%s total=%d", job.id, len(job.addresses))
+	a.logger.Printf("tron activate job started: job_id=%s total=%d", job.id, len(job.addresses))
 
 	successCount := 0
 	failedCount := 0
@@ -210,10 +212,10 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 		cancel()
 		if err != nil {
 			failedCount++
-			log.Printf("tron activate failed: job_id=%s address=%s err=%v", job.id, address, err)
+			a.logger.Printf("tron activate failed: job_id=%s address=%s err=%v", job.id, address, err)
 		} else {
 			successCount++
-			log.Printf("tron activate sent: job_id=%s address=%s txid=%s", job.id, address, txID)
+			a.logger.Printf("tron activate sent: job_id=%s address=%s txid=%s", job.id, address, txID)
 		}
 		a.setJobStatus(ActivateJobStatus{
 			JobID:        job.id,
@@ -237,7 +239,7 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 					Finished:     true,
 					UpdatedAt:    time.Now(),
 				})
-				log.Printf("tron activate job canceled: job_id=%s", job.id)
+				a.logger.Printf("tron activate job canceled: job_id=%s", job.id)
 				return
 			case <-timer.C:
 			}
@@ -252,7 +254,7 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 		Finished:     true,
 		UpdatedAt:    time.Now(),
 	})
-	log.Printf("tron activate job finished: job_id=%s total=%d", job.id, len(job.addresses))
+	a.logger.Printf("tron activate job finished: job_id=%s total=%d", job.id, len(job.addresses))
 }
 
 func (a *TronAddressActivator) GetJobStatus(jobID string) (int, int, int, bool, bool) {
@@ -307,7 +309,7 @@ func (a *TronAddressActivator) sendOneWithLog(ctx context.Context, jobID string,
 		}
 
 		if logErr := a.repo.InsertTronActivationLog(ctx, item); logErr != nil {
-			log.Printf("insert tron activation log failed: err=%v", logErr)
+			a.logger.Printf("insert tron activation log failed: err=%v", logErr)
 		}
 	}
 

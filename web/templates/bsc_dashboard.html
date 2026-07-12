@@ -460,12 +460,38 @@
       z-index: 30;
     }
 
+    .dialog-mask.show {
+      display: flex;
+    }
+
     .dialog {
       width: min(420px, 100%);
       background: #fff;
       border-radius: 18px;
       padding: 18px;
       box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+    }
+
+    .dialog-success-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(22, 163, 74, 0.1);
+      color: #15803d;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .dialog-success-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.12);
     }
 
     .dialog-title {
@@ -909,6 +935,17 @@
     </div>
   </div>
 
+  <div id="completionMask" class="dialog-mask">
+    <div class="dialog">
+      <div class="dialog-success-badge">任务完成</div>
+      <h3 id="completionTitle" class="dialog-title">操作已完成</h3>
+      <p id="completionText" class="dialog-text"></p>
+      <div class="dialog-actions">
+        <button id="completionOk" class="dialog-ok" type="button">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <div id="transferMask" class="transfer-mask">
     <div class="transfer-dialog">
       <div class="transfer-head">
@@ -982,11 +1019,26 @@
       }, 2200);
     }
 
-    function showCompletionNotice(message) {
+    function showCompletionNotice(message, title = '操作已完成') {
       showToast(message);
-      window.setTimeout(() => {
-        window.alert(message);
-      }, 80);
+      const mask = document.getElementById('completionMask');
+      const titleNode = document.getElementById('completionTitle');
+      const textNode = document.getElementById('completionText');
+      const okBtn = document.getElementById('completionOk');
+      if (!mask || !titleNode || !textNode || !okBtn) {
+        return;
+      }
+      titleNode.textContent = title;
+      textNode.textContent = message;
+      mask.classList.add('show');
+      okBtn.onclick = () => {
+        mask.classList.remove('show');
+      };
+      mask.onclick = (event) => {
+        if (event.target === mask) {
+          mask.classList.remove('show');
+        }
+      };
     }
 
     function setManualRefreshButtonState(status) {
@@ -1492,9 +1544,9 @@
           const failedCount = Number(data.failed_count || 0);
           const successCount = Number(data.success_count || 0);
           if (failedCount > 0) {
-            showCompletionNotice(`批量转手续费已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+            showCompletionNotice(`本次共处理 ${successCount + failedCount} 个地址，成功 ${successCount} 个，失败 ${failedCount} 个。`, '批量转手续费已完成');
           } else {
-            showCompletionNotice(`批量转手续费已全部完成，共 ${successCount} 个`);
+            showCompletionNotice(`本次共成功转出 ${successCount} 个地址的手续费。`, '批量转手续费已完成');
           }
           window.setTimeout(() => window.location.reload(), 1200);
           return;

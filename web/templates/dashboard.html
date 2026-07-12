@@ -774,6 +774,74 @@
       color: #fff;
     }
 
+    .completion-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1250;
+    }
+
+    .completion-mask.show {
+      display: flex;
+    }
+
+    .completion-dialog {
+      width: 100%;
+      max-width: 400px;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+      padding: 18px;
+    }
+
+    .completion-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.1);
+      color: #2563eb;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .completion-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+    }
+
+    .completion-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .completion-text {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+
+    .completion-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
     .mnemonic-mask {
       position: fixed;
       inset: 0;
@@ -1164,6 +1232,16 @@
       </div>
     </div>
   </div>
+  <div id="completionMask" class="completion-mask">
+    <div class="completion-dialog">
+      <div class="completion-badge">任务完成</div>
+      <h3 id="completionTitle" class="completion-title">操作已完成</h3>
+      <p id="completionText" class="completion-text"></p>
+      <div class="completion-actions">
+        <button id="completionOkBtn" class="confirm-btn danger" type="button">知道了</button>
+      </div>
+    </div>
+  </div>
   <div id="mnemonicMask" class="mnemonic-mask">
     <div class="mnemonic-dialog">
       <h3 class="mnemonic-title">输入助记词</h3>
@@ -1253,11 +1331,26 @@
       }, 2200);
     }
 
-    function showCompletionNotice(message) {
+    function showCompletionNotice(message, title = '操作已完成') {
       showToast(message);
-      window.setTimeout(() => {
-        window.alert(message);
-      }, 80);
+      const mask = document.getElementById('completionMask');
+      const titleNode = document.getElementById('completionTitle');
+      const textNode = document.getElementById('completionText');
+      const okBtn = document.getElementById('completionOkBtn');
+      if (!mask || !titleNode || !textNode || !okBtn) {
+        return;
+      }
+      titleNode.textContent = title;
+      textNode.textContent = message;
+      mask.classList.add('show');
+      okBtn.onclick = () => {
+        mask.classList.remove('show');
+      };
+      mask.onclick = (event) => {
+        if (event.target === mask) {
+          mask.classList.remove('show');
+        }
+      };
     }
 
     function showConfirm(title, message, okText = '确认') {
@@ -1826,7 +1919,7 @@
           stopActivateStatusPolling();
           const successCount = Number(data.success_count || 0);
           const failedCount = Number(data.failed_count || 0);
-          showCompletionNotice(`批量激活地址已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+          showCompletionNotice(`本次共处理 ${successCount + failedCount} 个地址，成功 ${successCount} 个，失败 ${failedCount} 个。`, '批量激活地址已完成');
           window.setTimeout(() => window.location.reload(), 1200);
           return;
         }
