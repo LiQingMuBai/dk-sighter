@@ -44,6 +44,7 @@ type bscBalanceRefresher interface {
 type tronAddressActivator interface {
 	Activate(context.Context, string) (string, error)
 	EnqueueBatch([]string) (string, int, error)
+	GetJobStatus(string) (int, int, int, bool, bool)
 }
 
 type scheduledRefreshStatusReader interface {
@@ -230,6 +231,16 @@ type activateAddressResponse struct {
 	JobID        string   `json:"job_id,omitempty"`
 }
 
+type activateAddressStatusResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	JobID        string `json:"job_id,omitempty"`
+	TotalCount   int    `json:"total_count,omitempty"`
+	SuccessCount int    `json:"success_count,omitempty"`
+	FailedCount  int    `json:"failed_count,omitempty"`
+	Finished     bool   `json:"finished"`
+}
+
 type cacheMnemonicRequest struct {
 	Mnemonic string `json:"mnemonic"`
 }
@@ -376,6 +387,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/watch-address/delete", s.handleDeleteWatchAddress)
 		mux.HandleFunc("/api/tron/delete-addresses", s.handleDeleteWatchAddress)
 		mux.HandleFunc("/api/tron/activate-address", s.handleActivateAddress)
+		mux.HandleFunc("/api/tron/activate-address-status", s.handleActivateAddressStatus)
 	}
 
 	server := &http.Server{
@@ -1249,6 +1261,60 @@ func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
 		TotalCount:   len(addresses),
 		SuccessCount: 0,
 		JobID:        jobID,
+	})
+}
+
+func (s *Server) handleActivateAddressStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, activateAddressStatusResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+	if s.tronActivator == nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressStatusResponse{
+			Success: false,
+			Message: "tron activator not configured",
+		})
+		return
+	}
+
+	jobID := strings.TrimSpace(r.URL.Query().Get("job_id"))
+	if jobID == "" {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressStatusResponse{
+			Success: false,
+			Message: "job_id is required",
+		})
+		return
+	}
+
+	totalCount, successCount, failedCount, finished, ok := s.tronActivator.GetJobStatus(jobID)
+	if !ok {
+		s.writeJSON(w, http.StatusNotFound, activateAddressStatusResponse{
+			Success: false,
+			Message: "job not found",
+			JobID:   jobID,
+		})
+		return
+	}
+
+	message := "批量激活地址执行中"
+	if finished {
+		message = fmt.Sprintf("批量激活地址已完成，成功 %d 个，失败 %d 个", successCount, failedCount)
+	}
+	s.writeJSON(w, http.StatusOK, activateAddressStatusResponse{
+		Success:      true,
+		Message:      message,
+		JobID:        jobID,
+		TotalCount:   totalCount,
+		SuccessCount: successCount,
+		FailedCount:  failedCount,
+		Finished:     finished,
 	})
 }
 

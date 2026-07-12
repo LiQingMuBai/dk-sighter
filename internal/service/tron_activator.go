@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"log"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,6 +34,8 @@ type TronAddressActivator struct {
 	signers    []tronActivatorSigner
 	nextSigner uint64
 	jobs       chan activateJob
+	jobMu      sync.RWMutex
+	jobStatus  map[string]ActivateJobStatus
 }
 
 type activateJob struct {
@@ -44,6 +47,15 @@ type tronActivatorSigner struct {
 	privateKey *btcec.PrivateKey
 	fromHex    string
 	fromBase58 string
+}
+
+type ActivateJobStatus struct {
+	JobID        string
+	TotalCount   int
+	SuccessCount int
+	FailedCount  int
+	Finished     bool
+	UpdatedAt    time.Time
 }
 
 func NewTronAddressActivator(tronClient *tron.Client, repo *repository.DB, cfg config.TronActivatorConfig) (*TronAddressActivator, error) {
@@ -89,6 +101,7 @@ func NewTronAddressActivatorWithPrivateKeys(tronClient *tron.Client, repo *repos
 		repo:       repo,
 		signers:    signers,
 		jobs:       make(chan activateJob, queueSize),
+		jobStatus:  make(map[string]ActivateJobStatus),
 	}, nil
 }
 
@@ -150,6 +163,12 @@ func (a *TronAddressActivator) EnqueueBatch(addresses []string) (string, int, er
 
 	select {
 	case a.jobs <- activateJob{id: jobID, addresses: normalized}:
+		a.setJobStatus(ActivateJobStatus{
+			JobID:      jobID,
+			TotalCount: len(normalized),
+			Finished:   false,
+			UpdatedAt:  time.Now(),
+		})
 		return jobID, len(normalized), nil
 	default:
 		return "", 0, fmt.Errorf("activate queue is full")
@@ -160,11 +179,27 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 	if len(job.addresses) == 0 {
 		return
 	}
+	a.setJobStatus(ActivateJobStatus{
+		JobID:      job.id,
+		TotalCount: len(job.addresses),
+		Finished:   false,
+		UpdatedAt:  time.Now(),
+	})
 	log.Printf("tron activate job started: job_id=%s total=%d", job.id, len(job.addresses))
 
+	successCount := 0
+	failedCount := 0
 	for i, address := range job.addresses {
 		select {
 		case <-ctx.Done():
+			a.setJobStatus(ActivateJobStatus{
+				JobID:        job.id,
+				TotalCount:   len(job.addresses),
+				SuccessCount: successCount,
+				FailedCount:  failedCount,
+				Finished:     true,
+				UpdatedAt:    time.Now(),
+			})
 			log.Printf("tron activate job canceled: job_id=%s", job.id)
 			return
 		default:
@@ -174,16 +209,34 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 		txID, err := a.sendOneWithLog(taskCtx, job.id, address, a.pickSigner)
 		cancel()
 		if err != nil {
+			failedCount++
 			log.Printf("tron activate failed: job_id=%s address=%s err=%v", job.id, address, err)
 		} else {
+			successCount++
 			log.Printf("tron activate sent: job_id=%s address=%s txid=%s", job.id, address, txID)
 		}
+		a.setJobStatus(ActivateJobStatus{
+			JobID:        job.id,
+			TotalCount:   len(job.addresses),
+			SuccessCount: successCount,
+			FailedCount:  failedCount,
+			Finished:     false,
+			UpdatedAt:    time.Now(),
+		})
 
 		if i < len(job.addresses)-1 {
 			timer := time.NewTimer(activateInterval)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
+				a.setJobStatus(ActivateJobStatus{
+					JobID:        job.id,
+					TotalCount:   len(job.addresses),
+					SuccessCount: successCount,
+					FailedCount:  failedCount,
+					Finished:     true,
+					UpdatedAt:    time.Now(),
+				})
 				log.Printf("tron activate job canceled: job_id=%s", job.id)
 				return
 			case <-timer.C:
@@ -191,7 +244,37 @@ func (a *TronAddressActivator) processJob(ctx context.Context, job activateJob) 
 		}
 	}
 
+	a.setJobStatus(ActivateJobStatus{
+		JobID:        job.id,
+		TotalCount:   len(job.addresses),
+		SuccessCount: successCount,
+		FailedCount:  failedCount,
+		Finished:     true,
+		UpdatedAt:    time.Now(),
+	})
 	log.Printf("tron activate job finished: job_id=%s total=%d", job.id, len(job.addresses))
+}
+
+func (a *TronAddressActivator) GetJobStatus(jobID string) (int, int, int, bool, bool) {
+	if a == nil {
+		return 0, 0, 0, false, false
+	}
+	a.jobMu.RLock()
+	defer a.jobMu.RUnlock()
+	status, ok := a.jobStatus[strings.TrimSpace(jobID)]
+	if !ok {
+		return 0, 0, 0, false, false
+	}
+	return status.TotalCount, status.SuccessCount, status.FailedCount, status.Finished, true
+}
+
+func (a *TronAddressActivator) setJobStatus(status ActivateJobStatus) {
+	if a == nil || strings.TrimSpace(status.JobID) == "" {
+		return
+	}
+	a.jobMu.Lock()
+	defer a.jobMu.Unlock()
+	a.jobStatus[strings.TrimSpace(status.JobID)] = status
 }
 
 func (a *TronAddressActivator) sendOneWithLog(ctx context.Context, jobID string, toAddress string, picker func() (tronActivatorSigner, error)) (string, error) {

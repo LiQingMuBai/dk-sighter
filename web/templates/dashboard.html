@@ -1226,6 +1226,7 @@
     let confirmResolver = null;
     let mnemonicResolver = null;
     let manualRefreshStatusTimer = null;
+    let activateStatusPollTimer = null;
     const manualRefreshIdleText = '手动全量更新';
     const manualRefreshRunningText = '有手动任务执行中';
     const scheduledRefreshRunningText = '有后台定时任务运行中';
@@ -1250,6 +1251,13 @@
       toastTimer = setTimeout(() => {
         toast.classList.remove('show');
       }, 2200);
+    }
+
+    function showCompletionNotice(message) {
+      showToast(message);
+      window.setTimeout(() => {
+        window.alert(message);
+      }, 80);
     }
 
     function showConfirm(title, message, okText = '确认') {
@@ -1785,11 +1793,55 @@
           showToast(data.message || '批量激活地址失败');
           return;
         }
-
-        showToast(data.message || '已批量激活地址');
+        showToast(data.message || '批量激活地址已提交');
+        if (data.job_id) {
+          startActivateStatusPolling(data.job_id);
+        }
       } catch (error) {
         showToast('请求失败，请稍后重试');
       }
+    }
+
+    function stopActivateStatusPolling() {
+      if (activateStatusPollTimer) {
+        window.clearTimeout(activateStatusPollTimer);
+        activateStatusPollTimer = null;
+      }
+    }
+
+    async function pollActivateStatus(jobId) {
+      try {
+        const resp = await fetch(`/api/tron/activate-address-status?job_id=${encodeURIComponent(jobId)}`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量激活状态查询失败');
+          stopActivateStatusPolling();
+          return;
+        }
+        if (data.finished) {
+          stopActivateStatusPolling();
+          const successCount = Number(data.success_count || 0);
+          const failedCount = Number(data.failed_count || 0);
+          showCompletionNotice(`批量激活地址已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+          window.setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
+        activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 2000);
+      } catch (error) {
+        activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 3000);
+      }
+    }
+
+    function startActivateStatusPolling(jobId) {
+      if (!jobId) {
+        return;
+      }
+      stopActivateStatusPolling();
+      activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 2000);
     }
 
     async function handleAddAddresses() {

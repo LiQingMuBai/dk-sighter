@@ -981,6 +981,13 @@
       }, 2200);
     }
 
+    function showCompletionNotice(message) {
+      showToast(message);
+      window.setTimeout(() => {
+        window.alert(message);
+      }, 80);
+    }
+
     function setManualRefreshButtonState(status) {
       const button = document.getElementById('manualFullRefreshBtn');
       if (!button) {
@@ -1448,9 +1455,9 @@
         const failedCount = Number(data.failed_count || 0);
         const successCount = Number(data.success_count || 0);
         if (failedCount > 0) {
-          showToast(`批量完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+          showCompletionNotice(`批量转手续费已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
         } else {
-          showToast(`批量转手续费成功，共 ${successCount} 个`);
+          showCompletionNotice(`批量转手续费已全部完成，共 ${successCount} 个`);
         }
         window.setTimeout(() => window.location.reload(), 1000);
       } catch (error) {

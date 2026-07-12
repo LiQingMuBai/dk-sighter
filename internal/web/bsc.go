@@ -255,11 +255,14 @@ func (s *Server) handleBSCManualRefreshAll(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
+	log.Printf("bsc transfer gas api entered: method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 	if r.Method != http.MethodPost {
+		log.Printf("bsc transfer gas request rejected: method not allowed method=%s", r.Method)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		log.Printf("bsc transfer gas request rejected: unauthorized remote=%s", r.RemoteAddr)
 		s.writeJSON(w, http.StatusUnauthorized, bscTransferGasResponse{
 			Success: false,
 			Message: "unauthorized",
@@ -267,6 +270,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.bscClient == nil {
+		log.Printf("bsc transfer gas request rejected: bsc client not configured")
 		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 			Success: false,
 			Message: "bsc rpc 未配置",
@@ -274,6 +278,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(s.bscGasTopupPrivateKey) == "" {
+		log.Printf("bsc transfer gas request rejected: gas topup private key not configured")
 		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 			Success: false,
 			Message: "未配置 bsc gas 补充私钥",
@@ -283,6 +288,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 
 	var req bscTransferGasRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("bsc transfer gas request decode failed: err=%v", err)
 		s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
 			Success: false,
 			Message: "invalid json body",
@@ -292,6 +298,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 
 	addresses := uniqueNonEmptyBSCStrings(append(append(make([]string, 0, len(req.Addresses)+1), req.Address), req.Addresses...))
 	if len(addresses) == 0 {
+		log.Printf("bsc transfer gas request rejected: no addresses provided")
 		s.writeJSON(w, http.StatusNotFound, bscTransferGasResponse{
 			Success: false,
 			Message: "address is required",
@@ -300,6 +307,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, address := range addresses {
 		if !isValidBSCAddress(address) {
+			log.Printf("bsc transfer gas request rejected: invalid address=%s total=%d", address, len(addresses))
 			s.writeJSON(w, http.StatusBadRequest, bscTransferGasResponse{
 				Success: false,
 				Message: "invalid bsc address",
@@ -309,9 +317,17 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	mode := "single"
+	if len(addresses) > 1 {
+		mode = "batch"
+	}
+	log.Printf("bsc transfer gas request received: mode=%s total=%d addresses=%s", mode, len(addresses), strings.Join(addresses, ","))
+
 	if len(addresses) == 1 {
+		log.Printf("bsc transfer gas start: address=%s amount_bnb=%s", addresses[0], manualBSCGasTransferAmount.StringFixed(3))
 		txHash, err := s.transferBSCGasToAddress(r.Context(), addresses[0])
 		if err != nil {
+			log.Printf("bsc transfer gas failed: address=%s err=%v", addresses[0], err)
 			s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
 				Success: false,
 				Message: "转手续费失败: " + err.Error(),
@@ -319,10 +335,12 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		log.Printf("bsc transfer gas success: address=%s tx_hash=%s", addresses[0], txHash)
 
 		if s.bscBalances != nil {
 			refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
 			defer refreshCancel()
+			log.Printf("bsc transfer gas refresh balances start: count=1 address=%s", addresses[0])
 			s.bscBalances.RefreshAddresses(refreshCtx, []string{addresses[0]})
 		}
 
@@ -338,20 +356,25 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	successAddresses := make([]string, 0, len(addresses))
 	failedAddresses := make([]string, 0)
 	for idx, address := range addresses {
-		if _, err := s.transferBSCGasToAddress(r.Context(), address); err != nil {
+		log.Printf("batch transfer bsc gas start: index=%d/%d address=%s amount_bnb=%s", idx+1, len(addresses), address, manualBSCGasTransferAmount.StringFixed(3))
+		txHash, err := s.transferBSCGasToAddress(r.Context(), address)
+		if err != nil {
 			failedAddresses = append(failedAddresses, address)
 			log.Printf("batch transfer bsc gas failed: address=%s err=%v", address, err)
 		} else {
 			successAddresses = append(successAddresses, address)
+			log.Printf("batch transfer bsc gas success: address=%s tx_hash=%s success=%d failed=%d", address, txHash, len(successAddresses), len(failedAddresses))
 		}
 
 		if idx >= len(addresses)-1 {
 			continue
 		}
+		log.Printf("batch transfer bsc gas cooldown: next_address_pending=true wait=5s current_index=%d/%d", idx+1, len(addresses))
 		timer := time.NewTimer(5 * time.Second)
 		select {
 		case <-r.Context().Done():
 			timer.Stop()
+			log.Printf("batch transfer bsc gas interrupted: success=%d failed=%d err=%v", len(successAddresses), len(failedAddresses), r.Context().Err())
 			s.writeJSON(w, http.StatusRequestTimeout, bscTransferGasResponse{
 				Success:         len(successAddresses) > 0,
 				Message:         "批量转手续费已中断",
@@ -369,6 +392,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 	if len(successAddresses) > 0 && s.bscBalances != nil {
 		refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer refreshCancel()
+		log.Printf("batch transfer bsc gas refresh balances start: success=%d addresses=%s", len(successAddresses), strings.Join(successAddresses, ","))
 		s.bscBalances.RefreshAddresses(refreshCtx, successAddresses)
 	}
 
@@ -378,6 +402,7 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 		message = "批量转手续费失败"
 	}
+	log.Printf("batch transfer bsc gas completed: total=%d success=%d failed=%d failed_addresses=%s", len(addresses), len(successAddresses), len(failedAddresses), strings.Join(failedAddresses, ","))
 	s.writeJSON(w, statusCode, bscTransferGasResponse{
 		Success:         len(successAddresses) > 0,
 		Message:         message,
@@ -390,32 +415,41 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (string, error) {
+	log.Printf("transfer bsc gas prepare: address=%s", address)
 	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
 	if err != nil {
 		log.Printf("get bsc dashboard record failed: address=%s err=%v", address, err)
 		return "", fmt.Errorf("读取地址信息失败")
 	}
 	if !ok {
+		log.Printf("transfer bsc gas skipped: address=%s reason=watch address not found or disabled", address)
 		return "", fmt.Errorf("地址不存在或未启用")
 	}
+	log.Printf("transfer bsc gas record loaded: address=%s current_bnb=%s current_usdt=%s", address, record.BNB, record.USDT)
 
 	transferCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	log.Printf("transfer bsc gas send start: address=%s amount_bnb=%s timeout=%s", address, manualBSCGasTransferAmount.StringFixed(3), 45*time.Second)
 	fromAddress, keySource, txHash, err := s.sendBSCGasTopup(transferCtx, address, manualBSCGasTransferAmount)
 	if err != nil {
 		log.Printf("transfer bsc gas failed: address=%s err=%v", address, err)
-		_ = insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, "", keySource, "FAILED", map[string]any{
+		if logErr := insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, "", keySource, "FAILED", map[string]any{
 			"address":      address,
 			"from_address": fromAddress,
 			"transfer_bnb": manualBSCGasTransferAmount.StringFixed(3),
 			"current_bnb":  record.BNB,
 			"current_usdt": record.USDT,
 			"key_source":   keySource,
-		}, err.Error())
+		}, err.Error()); logErr != nil {
+			log.Printf("insert bsc gas topup failed log error: address=%s err=%v", address, logErr)
+		} else {
+			log.Printf("insert bsc gas topup failed log success: address=%s", address)
+		}
 		return "", err
 	}
+	log.Printf("transfer bsc gas send success: address=%s from_address=%s tx_hash=%s key_source=%s", address, fromAddress, txHash, keySource)
 
-	_ = insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, txHash, keySource, "SUCCESS", map[string]any{
+	if logErr := insertWebBSCGasLog(ctx, s.repo, address, fromAddress, manualBSCGasTransferAmount.StringFixed(3), record.BNB, record.USDT, txHash, keySource, "SUCCESS", map[string]any{
 		"address":      address,
 		"from_address": fromAddress,
 		"transfer_bnb": manualBSCGasTransferAmount.StringFixed(3),
@@ -423,7 +457,11 @@ func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (s
 		"current_usdt": record.USDT,
 		"tx_hash":      txHash,
 		"key_source":   keySource,
-	}, "")
+	}, ""); logErr != nil {
+		log.Printf("insert bsc gas topup success log error: address=%s tx_hash=%s err=%v", address, txHash, logErr)
+	} else {
+		log.Printf("insert bsc gas topup success log saved: address=%s tx_hash=%s", address, txHash)
+	}
 	return txHash, nil
 }
 
