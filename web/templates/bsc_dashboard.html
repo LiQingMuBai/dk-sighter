@@ -232,6 +232,16 @@
       flex-wrap: nowrap;
       margin-left: auto;
       justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .toolbar-primary-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      justify-content: flex-end;
+      flex-shrink: 0;
     }
 
     .sort-form {
@@ -318,6 +328,20 @@
     th {
       color: var(--subtext);
       font-weight: 600;
+    }
+
+    .action-column {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .row-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      margin-left: auto;
     }
 
     .mono {
@@ -418,6 +442,7 @@
       margin-top: 10px;
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
     }
 
     .balance-link {
@@ -829,8 +854,10 @@
             <a class="button search-link" href="/bsc?sort={{ .Sort }}">清空</a>
             {{ end }}
           </form>
-          <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()">手动全量更新</button>
-          <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
+          <div class="toolbar-primary-actions">
+            <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()">手动全量更新</button>
+            <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
+          </div>
         </div>
       </div>
 
@@ -838,12 +865,12 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 48px;"><input id="selectAll" type="checkbox"></th>
-              <th>地址</th>
-              <th>BNB</th>
-              <th>USDT</th>
-              <th>更新时间</th>
-              <th>功能</th>
+	              <th style="width: 48px;"><input id="selectAll" type="checkbox"></th>
+	              <th>地址</th>
+	              <th>BNB</th>
+	              <th>USDT</th>
+	              <th>更新时间</th>
+	              <th class="action-column">功能</th>
             </tr>
           </thead>
           <tbody>
@@ -854,9 +881,9 @@
                   <td class="mono"><a class="address-link" href="https://bscscan.com/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
-                  <td>{{ .UpdatedAt }}</td>
-                  <td>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+	                  <td>{{ .UpdatedAt }}</td>
+	                  <td class="action-column">
+	                    <div class="row-actions">
                       <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
                       <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
                     </div>
