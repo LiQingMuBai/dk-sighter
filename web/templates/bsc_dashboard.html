@@ -855,7 +855,7 @@
             {{ end }}
           </form>
           <div class="toolbar-primary-actions">
-            <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()">手动全量更新</button>
+            <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()" hidden>手动全量更新</button>
             <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
           </div>
         </div>
@@ -1130,7 +1130,7 @@
     }
 
     function openTransferModal(address, asset) {
-      transferState.address = String(address || '').trim();
+      transferState.address = String(address || '').trim().toLowerCase();
       transferState.asset = String(asset || '').trim().toUpperCase();
       transferState.direction = 'in';
       transferState.page = 1;
@@ -1247,7 +1247,9 @@
         transferState.totalCount = 0;
         loading.style.display = 'none';
         empty.style.display = 'block';
-        empty.textContent = '记录为空';
+        tableWrap.style.display = 'none';
+        pager.style.display = 'none';
+        empty.textContent = (error && error.message) ? `加载失败：${error.message}` : '加载失败';
       }
     }
 

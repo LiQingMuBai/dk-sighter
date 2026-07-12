@@ -19,32 +19,51 @@ const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 6
 
 type BSCScanner struct {
-	client        *bsc.Client
-	repo          *repository.DB
-	cache         *BSCAddressCache
-	notifier      TransferNotifier
-	startBlock    int64
-	confirmations int
-	logger        *log.Logger
+	client         *bsc.Client
+	repo           *repository.DB
+	cache          *BSCAddressCache
+	notifier       TransferNotifier
+	syncKey        string
+	startBlock     int64
+	confirmations  int
+	insertIfAbsent bool
+	logger         *log.Logger
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
 }
 
 func NewBSCScanner(client *bsc.Client, repo *repository.DB, cache *BSCAddressCache, notifier TransferNotifier, startBlock int64, confirmations int) *BSCScanner {
+	return NewBSCScannerWithSyncKey(client, repo, cache, notifier, startBlock, confirmations, "", false)
+}
+
+func NewBSCScannerWithSyncKey(client *bsc.Client, repo *repository.DB, cache *BSCAddressCache, notifier TransferNotifier, startBlock int64, confirmations int, syncKeyOverride string, insertIfAbsent bool) *BSCScanner {
 	if confirmations < 0 {
 		confirmations = 0
 	}
-	return &BSCScanner{
-		client:        client,
-		repo:          repo,
-		cache:         cache,
-		notifier:      notifier,
-		startBlock:    startBlock,
-		confirmations: confirmations,
-		logger:        bscLogger(),
-		triggerCh:     make(chan struct{}, 1),
+	syncKey := bscSyncKey
+	if value := strings.TrimSpace(syncKeyOverride); value != "" {
+		syncKey = value
 	}
+	return &BSCScanner{
+		client:         client,
+		repo:           repo,
+		cache:          cache,
+		notifier:       notifier,
+		syncKey:        syncKey,
+		startBlock:     startBlock,
+		confirmations:  confirmations,
+		insertIfAbsent: insertIfAbsent,
+		logger:         bscLogger(),
+		triggerCh:      make(chan struct{}, 1),
+	}
+}
+
+func (s *BSCScanner) SetLogger(logger *log.Logger) {
+	if s == nil || logger == nil {
+		return
+	}
+	s.logger = logger
 }
 
 func (s *BSCScanner) RefreshAllBalances(ctx context.Context) {
@@ -151,11 +170,26 @@ func (s *BSCScanner) Run(ctx context.Context, interval time.Duration) error {
 	}
 }
 
+func (s *BSCScanner) RunTriggered(ctx context.Context) error {
+	s.Trigger()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.triggerCh:
+			if err := s.scan(ctx); err != nil {
+				s.logger.Printf("scan failed: %v", err)
+			}
+		}
+	}
+}
+
 func (s *BSCScanner) scan(ctx context.Context) error {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 
-	lastBlock, exists, err := s.repo.GetLastBlock(ctx, bscSyncKey)
+	lastBlock, exists, err := s.repo.GetLastBlock(ctx, s.syncKey)
 	if err != nil {
 		return err
 	}
@@ -180,7 +214,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 				initial = latestInt
 			}
 		}
-		if err := s.repo.SaveLastBlock(ctx, bscSyncKey, initial); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, initial); err != nil {
 			return err
 		}
 
@@ -215,7 +249,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	s.logger.Printf("scanner state: head=%d db_last=%d scan_lag=%d", latestInt, lastBlock, scanLag)
 	if shouldSkipToLatestBlock(lastBlock, latestInt) {
 		s.logger.Printf("scanner lag too large, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", lastBlock, latestInt, latestInt-lastBlock, maxAllowedSyncLagBlocks)
-		if err := s.repo.SaveLastBlock(ctx, bscSyncKey, latestInt); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestInt); err != nil {
 			return err
 		}
 		return nil
@@ -227,7 +261,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	currentBlock := lastBlock
 	for currentBlock < latestInt {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
-			return s.repo.GetLastBlock(runCtx, bscSyncKey)
+			return s.repo.GetLastBlock(runCtx, s.syncKey)
 		})
 		if err != nil {
 			return err
@@ -237,7 +271,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 			currentBlock = latestDBBlock
 			if shouldSkipToLatestBlock(currentBlock, latestInt) {
 				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", currentBlock, latestInt, latestInt-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, bscSyncKey, latestInt); err != nil {
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestInt); err != nil {
 					return err
 				}
 				break
@@ -251,7 +285,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		if err := s.scanBlock(ctx, uint64(blockNum)); err != nil {
 			return err
 		}
-		if err := s.repo.SaveLastBlock(ctx, bscSyncKey, blockNum); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, blockNum); err != nil {
 			return err
 		}
 		currentBlock = blockNum
@@ -392,6 +426,21 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64) error {
 }
 
 func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.TransferRecord) {
+	if s.insertIfAbsent {
+		inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
+		if err != nil {
+			s.logger.Printf("insert transfer in failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
+			return
+		}
+		if !inserted {
+			s.logger.Printf("duplicate transfer in skipped: tx=%s asset=%s watch_address=%s log_index=%d", record.TxHash, record.AssetCode, record.WatchAddress, record.LogIndex)
+			return
+		}
+		if s.notifier != nil {
+			s.notifier.NotifyTransfer(ctx, "bsc", "IN", record)
+		}
+		return
+	}
 	if err := s.repo.InsertBSCTransferIn(ctx, record); err != nil {
 		s.logger.Printf("insert transfer in failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
 		return
@@ -402,6 +451,21 @@ func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.Tra
 }
 
 func (s *BSCScanner) insertTransferOut(ctx context.Context, record repository.TransferRecord) {
+	if s.insertIfAbsent {
+		inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
+		if err != nil {
+			s.logger.Printf("insert transfer out failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
+			return
+		}
+		if !inserted {
+			s.logger.Printf("duplicate transfer out skipped: tx=%s asset=%s watch_address=%s log_index=%d", record.TxHash, record.AssetCode, record.WatchAddress, record.LogIndex)
+			return
+		}
+		if s.notifier != nil {
+			s.notifier.NotifyTransfer(ctx, "bsc", "OUT", record)
+		}
+		return
+	}
 	if err := s.repo.InsertBSCTransferOut(ctx, record); err != nil {
 		s.logger.Printf("insert transfer out failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
 		return
@@ -454,26 +518,71 @@ func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, in
 }
 
 func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string, includeZero bool) {
+	currentBalancesLoaded := true
+	currentBNB, currentUSDT, err := s.getCurrentBSCBalances(ctx, address)
+	if err != nil {
+		s.logger.Printf("load current bsc balances failed: %s err=%v", address, err)
+		currentBNB = decimal.Zero
+		currentUSDT = decimal.Zero
+		currentBalancesLoaded = false
+	}
+
 	bnb, err := s.client.GetBNBBalance(ctx, address)
 	if err != nil {
 		s.logger.Printf("refresh bnb balance failed: %s err=%v", address, err)
 	} else {
-		_ = repository.UpsertBSCBalance(ctx, s.repo, address, "BNB", normalizeDecimal(bnb))
+		if !bnb.Equal(currentBNB) {
+			if err := repository.UpsertBSCBalance(ctx, s.repo, address, "BNB", normalizeDecimal(bnb)); err != nil {
+				s.logger.Printf("update bnb balance failed: %s old=%s new=%s err=%v", address, currentBNB.String(), bnb.String(), err)
+			} else {
+				s.logger.Printf("bnb balance updated: address=%s old=%s new=%s source=onchain", address, currentBNB.String(), bnb.String())
+			}
+		}
 	}
 
 	usdt, err := s.client.GetUSDTBalance(ctx, address)
 	if err != nil {
 		s.logger.Printf("refresh usdt balance failed: %s err=%v", address, err)
 	} else {
-		currentDBBalance, balanceErr := s.getCurrentUSDTBalance(ctx, address)
-		if balanceErr != nil {
-			s.logger.Printf("load current bsc usdt balance failed: %s err=%v", address, balanceErr)
+		if !usdt.Equal(currentUSDT) {
+			if err := repository.UpsertBSCBalance(ctx, s.repo, address, "USDT", normalizeDecimal(usdt)); err != nil {
+				s.logger.Printf("update usdt balance failed: %s old=%s new=%s err=%v", address, currentUSDT.String(), usdt.String(), err)
+			} else {
+				s.logger.Printf("usdt balance updated: address=%s old=%s new=%s source=onchain", address, currentUSDT.String(), usdt.String())
+			}
 		}
-		_ = repository.UpsertBSCBalance(ctx, s.repo, address, "USDT", normalizeDecimal(usdt))
-		if balanceErr == nil {
-			s.syncRecentUSDTTransfersIfNeeded(ctx, address, currentDBBalance, usdt)
+		if currentBalancesLoaded {
+			s.syncRecentUSDTTransfersIfNeeded(ctx, address, currentUSDT, usdt)
 		}
 	}
+}
+
+func (s *BSCScanner) getCurrentBSCBalances(ctx context.Context, address string) (decimal.Decimal, decimal.Decimal, error) {
+	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
+	if !ok || record == nil {
+		return decimal.Zero, decimal.Zero, nil
+	}
+
+	bnb := decimal.Zero
+	if value := strings.TrimSpace(record.BNB); value != "" {
+		parsed, err := decimal.NewFromString(value)
+		if err != nil {
+			return decimal.Zero, decimal.Zero, err
+		}
+		bnb = parsed
+	}
+	usdt := decimal.Zero
+	if value := strings.TrimSpace(record.USDT); value != "" {
+		parsed, err := decimal.NewFromString(value)
+		if err != nil {
+			return decimal.Zero, decimal.Zero, err
+		}
+		usdt = parsed
+	}
+	return bnb, usdt, nil
 }
 
 func (s *BSCScanner) getCurrentUSDTBalance(ctx context.Context, address string) (decimal.Decimal, error) {

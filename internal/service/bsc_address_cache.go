@@ -27,6 +27,13 @@ func NewBSCAddressCache(repo *repository.DB) *BSCAddressCache {
 	}
 }
 
+func (c *BSCAddressCache) SetLogger(logger *log.Logger) {
+	if c == nil || logger == nil {
+		return
+	}
+	c.logger = logger
+}
+
 func (c *BSCAddressCache) ConfigureSource(source string) {
 	c.source = strings.TrimSpace(source)
 }
