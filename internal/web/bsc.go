@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -80,6 +81,7 @@ type bscTransferGasResponse struct {
 	Address         string   `json:"address,omitempty"`
 	Addresses       []string `json:"addresses,omitempty"`
 	TxHash          string   `json:"tx_hash,omitempty"`
+	JobID           string   `json:"job_id,omitempty"`
 	TotalCount      int      `json:"total_count,omitempty"`
 	SuccessCount    int      `json:"success_count,omitempty"`
 	FailedCount     int      `json:"failed_count,omitempty"`
@@ -89,6 +91,27 @@ type bscTransferGasResponse struct {
 type bscTransferGasRequest struct {
 	Address   string   `json:"address"`
 	Addresses []string `json:"addresses"`
+}
+
+type bscTransferGasStatusResponse struct {
+	Success         bool     `json:"success"`
+	Message         string   `json:"message"`
+	JobID           string   `json:"job_id,omitempty"`
+	TotalCount      int      `json:"total_count,omitempty"`
+	SuccessCount    int      `json:"success_count,omitempty"`
+	FailedCount     int      `json:"failed_count,omitempty"`
+	FailedAddresses []string `json:"failed_addresses,omitempty"`
+	Finished        bool     `json:"finished"`
+}
+
+type bscGasTransferJobStatus struct {
+	JobID           string
+	TotalCount      int
+	SuccessCount    int
+	FailedCount     int
+	FailedAddresses []string
+	Finished        bool
+	UpdatedAt       time.Time
 }
 
 func (s *Server) handleBSCDeleteAddresses(w http.ResponseWriter, r *http.Request) {
@@ -353,64 +376,46 @@ func (s *Server) handleBSCTransferGas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	successAddresses := make([]string, 0, len(addresses))
-	failedAddresses := make([]string, 0)
-	for idx, address := range addresses {
-		log.Printf("batch transfer bsc gas start: index=%d/%d address=%s amount_bnb=%s", idx+1, len(addresses), address, manualBSCGasTransferAmount.StringFixed(3))
-		txHash, err := s.transferBSCGasToAddress(r.Context(), address)
-		if err != nil {
-			failedAddresses = append(failedAddresses, address)
-			log.Printf("batch transfer bsc gas failed: address=%s err=%v", address, err)
-		} else {
-			successAddresses = append(successAddresses, address)
-			log.Printf("batch transfer bsc gas success: address=%s tx_hash=%s success=%d failed=%d", address, txHash, len(successAddresses), len(failedAddresses))
-		}
-
-		if idx >= len(addresses)-1 {
-			continue
-		}
-		log.Printf("batch transfer bsc gas cooldown: next_address_pending=true wait=5s current_index=%d/%d", idx+1, len(addresses))
-		timer := time.NewTimer(5 * time.Second)
-		select {
-		case <-r.Context().Done():
-			timer.Stop()
-			log.Printf("batch transfer bsc gas interrupted: success=%d failed=%d err=%v", len(successAddresses), len(failedAddresses), r.Context().Err())
-			s.writeJSON(w, http.StatusRequestTimeout, bscTransferGasResponse{
-				Success:         len(successAddresses) > 0,
-				Message:         "批量转手续费已中断",
-				Addresses:       successAddresses,
-				TotalCount:      len(addresses),
-				SuccessCount:    len(successAddresses),
-				FailedCount:     len(failedAddresses),
-				FailedAddresses: failedAddresses,
-			})
-			return
-		case <-timer.C:
-		}
+	jobID, err := newBSCGasTransferJobID()
+	if err != nil {
+		log.Printf("batch transfer bsc gas job id generate failed: total=%d err=%v", len(addresses), err)
+		s.writeJSON(w, http.StatusInternalServerError, bscTransferGasResponse{
+			Success: false,
+			Message: "生成批量任务ID失败",
+		})
+		return
 	}
 
-	if len(successAddresses) > 0 && s.bscBalances != nil {
-		refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 20*time.Second)
-		defer refreshCancel()
-		log.Printf("batch transfer bsc gas refresh balances start: success=%d addresses=%s", len(successAddresses), strings.Join(successAddresses, ","))
-		s.bscBalances.RefreshAddresses(refreshCtx, successAddresses)
+	s.bscGasBatchMu.Lock()
+	if s.bscGasBatchRunning {
+		runningJobID := strings.TrimSpace(s.bscGasBatchCurrentJob)
+		s.bscGasBatchMu.Unlock()
+		log.Printf("batch transfer bsc gas enqueue rejected: another job is running current_job_id=%s", runningJobID)
+		s.writeJSON(w, http.StatusConflict, bscTransferGasResponse{
+			Success: false,
+			Message: "已有批量转手续费任务执行中，请稍后再试",
+			JobID:   runningJobID,
+		})
+		return
 	}
+	s.bscGasBatchRunning = true
+	s.bscGasBatchCurrentJob = jobID
+	s.bscGasBatchStatus[jobID] = bscGasTransferJobStatus{
+		JobID:      jobID,
+		TotalCount: len(addresses),
+		Finished:   false,
+		UpdatedAt:  time.Now(),
+	}
+	s.bscGasBatchMu.Unlock()
 
-	message := fmt.Sprintf("批量转手续费完成，成功 %d 个，失败 %d 个", len(successAddresses), len(failedAddresses))
-	statusCode := http.StatusOK
-	if len(successAddresses) == 0 {
-		statusCode = http.StatusInternalServerError
-		message = "批量转手续费失败"
-	}
-	log.Printf("batch transfer bsc gas completed: total=%d success=%d failed=%d failed_addresses=%s", len(addresses), len(successAddresses), len(failedAddresses), strings.Join(failedAddresses, ","))
-	s.writeJSON(w, statusCode, bscTransferGasResponse{
-		Success:         len(successAddresses) > 0,
-		Message:         message,
-		Addresses:       successAddresses,
-		TotalCount:      len(addresses),
-		SuccessCount:    len(successAddresses),
-		FailedCount:     len(failedAddresses),
-		FailedAddresses: failedAddresses,
+	log.Printf("batch transfer bsc gas enqueued: job_id=%s total=%d addresses=%s", jobID, len(addresses), strings.Join(addresses, ","))
+	go s.runBSCGasTransferJob(jobID, addresses)
+
+	s.writeJSON(w, http.StatusOK, bscTransferGasResponse{
+		Success:    true,
+		Message:    fmt.Sprintf("批量转手续费任务已提交，共 %d 个地址", len(addresses)),
+		JobID:      jobID,
+		TotalCount: len(addresses),
 	})
 }
 
@@ -463,6 +468,184 @@ func (s *Server) transferBSCGasToAddress(ctx context.Context, address string) (s
 		log.Printf("insert bsc gas topup success log saved: address=%s tx_hash=%s", address, txHash)
 	}
 	return txHash, nil
+}
+
+func (s *Server) handleBSCTransferGasStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, bscTransferGasStatusResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	jobID := strings.TrimSpace(r.URL.Query().Get("job_id"))
+	if jobID == "" {
+		s.writeJSON(w, http.StatusBadRequest, bscTransferGasStatusResponse{
+			Success: false,
+			Message: "job_id is required",
+		})
+		return
+	}
+
+	status, ok := s.getBSCGasTransferJobStatus(jobID)
+	if !ok {
+		s.writeJSON(w, http.StatusNotFound, bscTransferGasStatusResponse{
+			Success: false,
+			Message: "job not found",
+			JobID:   jobID,
+		})
+		return
+	}
+
+	message := "批量转手续费执行中"
+	if status.Finished {
+		message = fmt.Sprintf("批量转手续费已完成，成功 %d 个，失败 %d 个", status.SuccessCount, status.FailedCount)
+	}
+	s.writeJSON(w, http.StatusOK, bscTransferGasStatusResponse{
+		Success:         true,
+		Message:         message,
+		JobID:           status.JobID,
+		TotalCount:      status.TotalCount,
+		SuccessCount:    status.SuccessCount,
+		FailedCount:     status.FailedCount,
+		FailedAddresses: append([]string(nil), status.FailedAddresses...),
+		Finished:        status.Finished,
+	})
+}
+
+func (s *Server) runBSCGasTransferJob(jobID string, addresses []string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	successAddresses := make([]string, 0, len(addresses))
+	failedAddresses := make([]string, 0)
+	log.Printf("batch transfer bsc gas job started: job_id=%s total=%d", jobID, len(addresses))
+
+	defer func() {
+		s.bscGasBatchMu.Lock()
+		s.bscGasBatchRunning = false
+		if s.bscGasBatchCurrentJob == jobID {
+			s.bscGasBatchCurrentJob = ""
+		}
+		s.bscGasBatchMu.Unlock()
+	}()
+
+	for idx, address := range addresses {
+		select {
+		case <-ctx.Done():
+			log.Printf("batch transfer bsc gas job canceled: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
+			s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
+				JobID:           jobID,
+				TotalCount:      len(addresses),
+				SuccessCount:    len(successAddresses),
+				FailedCount:     len(failedAddresses),
+				FailedAddresses: append([]string(nil), failedAddresses...),
+				Finished:        true,
+				UpdatedAt:       time.Now(),
+			})
+			return
+		default:
+		}
+
+		log.Printf("batch transfer bsc gas job item start: job_id=%s index=%d/%d address=%s amount_bnb=%s", jobID, idx+1, len(addresses), address, manualBSCGasTransferAmount.StringFixed(3))
+		txHash, err := s.transferBSCGasToAddress(ctx, address)
+		if err != nil {
+			failedAddresses = append(failedAddresses, address)
+			log.Printf("batch transfer bsc gas job item failed: job_id=%s address=%s err=%v", jobID, address, err)
+		} else {
+			successAddresses = append(successAddresses, address)
+			log.Printf("batch transfer bsc gas job item success: job_id=%s address=%s tx_hash=%s success=%d failed=%d", jobID, address, txHash, len(successAddresses), len(failedAddresses))
+		}
+
+		s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
+			JobID:           jobID,
+			TotalCount:      len(addresses),
+			SuccessCount:    len(successAddresses),
+			FailedCount:     len(failedAddresses),
+			FailedAddresses: append([]string(nil), failedAddresses...),
+			Finished:        false,
+			UpdatedAt:       time.Now(),
+		})
+
+		if idx >= len(addresses)-1 {
+			continue
+		}
+		log.Printf("batch transfer bsc gas job cooldown: job_id=%s next_address_pending=true wait=5s current_index=%d/%d", jobID, idx+1, len(addresses))
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			log.Printf("batch transfer bsc gas job interrupted during cooldown: job_id=%s success=%d failed=%d err=%v", jobID, len(successAddresses), len(failedAddresses), ctx.Err())
+			s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
+				JobID:           jobID,
+				TotalCount:      len(addresses),
+				SuccessCount:    len(successAddresses),
+				FailedCount:     len(failedAddresses),
+				FailedAddresses: append([]string(nil), failedAddresses...),
+				Finished:        true,
+				UpdatedAt:       time.Now(),
+			})
+			return
+		case <-timer.C:
+		}
+	}
+
+	if len(successAddresses) > 0 && s.bscBalances != nil {
+		refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer refreshCancel()
+		log.Printf("batch transfer bsc gas job refresh balances start: job_id=%s success=%d addresses=%s", jobID, len(successAddresses), strings.Join(successAddresses, ","))
+		s.bscBalances.RefreshAddresses(refreshCtx, successAddresses)
+	}
+
+	s.setBSCGasTransferJobStatus(bscGasTransferJobStatus{
+		JobID:           jobID,
+		TotalCount:      len(addresses),
+		SuccessCount:    len(successAddresses),
+		FailedCount:     len(failedAddresses),
+		FailedAddresses: append([]string(nil), failedAddresses...),
+		Finished:        true,
+		UpdatedAt:       time.Now(),
+	})
+	log.Printf("batch transfer bsc gas job completed: job_id=%s total=%d success=%d failed=%d failed_addresses=%s", jobID, len(addresses), len(successAddresses), len(failedAddresses), strings.Join(failedAddresses, ","))
+}
+
+func (s *Server) setBSCGasTransferJobStatus(status bscGasTransferJobStatus) {
+	if s == nil || strings.TrimSpace(status.JobID) == "" {
+		return
+	}
+	s.bscGasBatchMu.Lock()
+	defer s.bscGasBatchMu.Unlock()
+	if s.bscGasBatchStatus == nil {
+		s.bscGasBatchStatus = make(map[string]bscGasTransferJobStatus)
+	}
+	s.bscGasBatchStatus[strings.TrimSpace(status.JobID)] = status
+}
+
+func (s *Server) getBSCGasTransferJobStatus(jobID string) (bscGasTransferJobStatus, bool) {
+	if s == nil {
+		return bscGasTransferJobStatus{}, false
+	}
+	s.bscGasBatchMu.RLock()
+	defer s.bscGasBatchMu.RUnlock()
+	status, ok := s.bscGasBatchStatus[strings.TrimSpace(jobID)]
+	if !ok {
+		return bscGasTransferJobStatus{}, false
+	}
+	status.FailedAddresses = append([]string(nil), status.FailedAddresses...)
+	return status, true
+}
+
+func newBSCGasTransferJobID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate bsc gas transfer job id: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func buildBSCDashboardPageData(records []bscDashboardRecordView, page, pageSize, total int) bscDashboardPageData {
@@ -588,6 +771,9 @@ func isValidBSCAddress(address string) bool {
 }
 
 func (s *Server) sendBSCGasTopup(ctx context.Context, toAddress string, amount decimal.Decimal) (string, string, string, error) {
+	s.bscGasTransferMu.Lock()
+	defer s.bscGasTransferMu.Unlock()
+
 	privateKey, fromAddress, err := parseWebBSCPrivateKey(s.bscGasTopupPrivateKey)
 	if err != nil {
 		return "", "config.bsc.gas_transfer_private_key", "", err

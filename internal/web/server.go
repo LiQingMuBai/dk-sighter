@@ -85,6 +85,11 @@ type Server struct {
 	manualRefreshMu        sync.Mutex
 	tronManualRefresh      manualBalanceRefreshJob
 	bscManualRefresh       manualBalanceRefreshJob
+	bscGasTransferMu       sync.Mutex
+	bscGasBatchMu          sync.RWMutex
+	bscGasBatchRunning     bool
+	bscGasBatchCurrentJob  string
+	bscGasBatchStatus      map[string]bscGasTransferJobStatus
 }
 
 type manualBalanceRefreshJob struct {
@@ -297,6 +302,7 @@ func NewServer(
 		energyProviders:        energyProviders,
 		defaultEnergyProvider:  strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
 		mnemonicStore:          newMnemonicStore(),
+		bscGasBatchStatus:      make(map[string]bscGasTransferJobStatus),
 	}, nil
 }
 
@@ -371,6 +377,7 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
 		mux.HandleFunc("/api/bsc/manual-refresh-all", s.handleBSCManualRefreshAll)
 		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
+		mux.HandleFunc("/api/bsc/transfer-gas-status", s.handleBSCTransferGasStatus)
 		mux.HandleFunc("/api/manual-refresh-status", s.handleManualRefreshStatus)
 		mux.HandleFunc("/api/refresh-addresses", s.handleRefreshAddresses)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)

@@ -970,6 +970,7 @@
     const manualRefreshIdleText = '手动全量更新';
     const manualRefreshRunningText = '有手动任务执行中';
     const scheduledRefreshRunningText = '有后台定时任务运行中';
+    let bscTransferGasStatusPollTimer = null;
 
     function showToast(message) {
       const toast = document.getElementById('toast');
@@ -1452,14 +1453,10 @@
           showToast((data && data.message) ? data.message : '批量转手续费失败');
           return;
         }
-        const failedCount = Number(data.failed_count || 0);
-        const successCount = Number(data.success_count || 0);
-        if (failedCount > 0) {
-          showCompletionNotice(`批量转手续费已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
-        } else {
-          showCompletionNotice(`批量转手续费已全部完成，共 ${successCount} 个`);
+        showToast(data.message || '批量转手续费任务已提交');
+        if (data.job_id) {
+          startBSCTransferGasStatusPolling(data.job_id);
         }
-        window.setTimeout(() => window.location.reload(), 1000);
       } catch (error) {
         showToast('请求失败，请稍后重试');
       } finally {
@@ -1468,6 +1465,52 @@
           button.textContent = originalText;
         }
       }
+    }
+
+    function stopBSCTransferGasStatusPolling() {
+      if (bscTransferGasStatusPollTimer) {
+        window.clearTimeout(bscTransferGasStatusPollTimer);
+        bscTransferGasStatusPollTimer = null;
+      }
+    }
+
+    async function pollBSCTransferGasStatus(jobId) {
+      try {
+        const resp = await fetch(`/api/bsc/transfer-gas-status?job_id=${encodeURIComponent(jobId)}`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量转手续费状态查询失败');
+          stopBSCTransferGasStatusPolling();
+          return;
+        }
+        if (data.finished) {
+          stopBSCTransferGasStatusPolling();
+          const failedCount = Number(data.failed_count || 0);
+          const successCount = Number(data.success_count || 0);
+          if (failedCount > 0) {
+            showCompletionNotice(`批量转手续费已全部完成，成功 ${successCount} 个，失败 ${failedCount} 个`);
+          } else {
+            showCompletionNotice(`批量转手续费已全部完成，共 ${successCount} 个`);
+          }
+          window.setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
+        bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 2000);
+      } catch (error) {
+        bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 3000);
+      }
+    }
+
+    function startBSCTransferGasStatusPolling(jobId) {
+      if (!jobId) {
+        return;
+      }
+      stopBSCTransferGasStatusPolling();
+      bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 2000);
     }
 
     function getUniqueSelectedAddresses() {
