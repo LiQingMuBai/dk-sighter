@@ -30,17 +30,26 @@ type Scanner struct {
 	txWorkers  int
 	logger     *log.Logger
 
+	refreshAllBalancesOnTransfer bool
+
 	triggerCh chan struct{}
 	runMu     sync.Mutex
 }
 
 func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, tronBlockSource string) *Scanner {
+	return NewScannerWithSyncKey(tronClient, repo, cache, balances, notifier, startBlock, txWorkers, tronBlockSource, "")
+}
+
+func NewScannerWithSyncKey(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, tronBlockSource string, syncKeyOverride string) *Scanner {
 	if txWorkers <= 0 {
 		txWorkers = 1
 	}
 	syncKey := syncKeyHead
 	if strings.EqualFold(strings.TrimSpace(tronBlockSource), "solid") {
 		syncKey = syncKeySolid
+	}
+	if value := strings.TrimSpace(syncKeyOverride); value != "" {
+		syncKey = value
 	}
 	return &Scanner{
 		tronClient: tronClient,
@@ -61,6 +70,13 @@ func (s *Scanner) Trigger() {
 	case s.triggerCh <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Scanner) EnableFullBalanceRefreshOnTransfer(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.refreshAllBalancesOnTransfer = enabled
 }
 
 func (s *Scanner) Run(ctx context.Context, interval time.Duration) error {
@@ -314,10 +330,10 @@ func (s *Scanner) handleTRXTransfer(ctx context.Context, tx tron.Transaction, bl
 		tx.TxID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 	if okFrom {
-		s.markBalance(fromBase58, "TRX")
+		s.markBalance(fromBase58, "TRX", tx.TxID, blockNum, "OUT")
 	}
 	if okTo {
-		s.markBalance(toBase58, "TRX")
+		s.markBalance(toBase58, "TRX", tx.TxID, blockNum, "IN")
 	}
 }
 
@@ -394,15 +410,28 @@ func (s *Scanner) handleUSDTTransfers(ctx context.Context, txID string, blockNum
 			txID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 		if okFrom {
-			s.markBalance(fromBase58, "USDT")
+			s.markBalance(fromBase58, "USDT", txID, blockNum, "OUT")
 		}
 		if okTo {
-			s.markBalance(toBase58, "USDT")
+			s.markBalance(toBase58, "USDT", txID, blockNum, "IN")
 		}
 	}
 }
 
-func (s *Scanner) markBalance(addressBase58 string, asset string) {
+func (s *Scanner) markBalance(addressBase58 string, asset string, txID string, blockNum int64, direction string) {
+	if s == nil || s.balances == nil {
+		return
+	}
+	if addressBase58 == "" {
+		return
+	}
+	if s.refreshAllBalancesOnTransfer {
+		s.logger.Printf("transfer matched -> refresh balances: address=%s trigger_asset=%s direction=%s tx=%s block=%d refresh_assets=TRX,USDT source=onchain",
+			addressBase58, asset, direction, txID, blockNum)
+		s.balances.Mark(addressBase58, "TRX")
+		s.balances.Mark(addressBase58, "USDT")
+		return
+	}
 	s.balances.Mark(addressBase58, asset)
 }
 

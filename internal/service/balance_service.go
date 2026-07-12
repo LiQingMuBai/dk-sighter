@@ -253,7 +253,7 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 		if err := s.repo.UpsertBalance(ctx, addressBase58, "TRX", trxBalance, blockNumber); err != nil {
 			s.logger.Printf("save trx balance failed: %s err=%v", addressBase58, err)
 		} else {
-			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", addressBase58, trxBalance.String(), blockNumber)
+			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d source=onchain", addressBase58, trxBalance.String(), blockNumber)
 		}
 		if perCallDelay > 0 {
 			timer := time.NewTimer(perCallDelay)
@@ -276,7 +276,7 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 			if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNumber); err != nil {
 				s.logger.Printf("save usdt balance failed: %s err=%v", addressBase58, err)
 			} else {
-				s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", addressBase58, usdtBalance.String(), blockNumber)
+				s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d source=onchain", addressBase58, usdtBalance.String(), blockNumber)
 				if balanceErr == nil {
 					s.syncRecentUSDTTransfersIfNeeded(ctx, addressBase58, addressHex, currentDBBalance, usdtBalance)
 				}
@@ -307,10 +307,10 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 			return
 		}
 		if !active {
-			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d inactive=true", task.addressBase58, balance.String(), blockNumber)
+			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d inactive=true source=onchain", task.addressBase58, balance.String(), blockNumber)
 			return
 		}
-		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d", task.addressBase58, balance.String(), blockNumber)
+		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d source=onchain", task.addressBase58, balance.String(), blockNumber)
 	case "USDT":
 		balance, err := s.tronClient.GetUSDTBalance(ctx, task.addressHex)
 		if err != nil {
@@ -325,7 +325,7 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 			s.logger.Printf("save usdt balance failed: %s err=%v", task.addressBase58, err)
 			return
 		}
-		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d", task.addressBase58, balance.String(), blockNumber)
+		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d source=onchain", task.addressBase58, balance.String(), blockNumber)
 		if balanceErr == nil {
 			s.syncRecentUSDTTransfersIfNeeded(ctx, task.addressBase58, task.addressHex, currentDBBalance, balance)
 		}
