@@ -18,6 +18,8 @@ import (
 const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 6
 
+type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
+
 type BSCScanner struct {
 	client         *bsc.Client
 	repo           *repository.DB
@@ -28,6 +30,8 @@ type BSCScanner struct {
 	confirmations  int
 	insertIfAbsent bool
 	logger         *log.Logger
+	maxScanBlock   maxScanBlockResolver
+	skipToLatest   bool
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
@@ -55,6 +59,7 @@ func NewBSCScannerWithSyncKey(client *bsc.Client, repo *repository.DB, cache *BS
 		confirmations:  confirmations,
 		insertIfAbsent: insertIfAbsent,
 		logger:         bscLogger(),
+		skipToLatest:   true,
 		triggerCh:      make(chan struct{}, 1),
 	}
 }
@@ -64,6 +69,20 @@ func (s *BSCScanner) SetLogger(logger *log.Logger) {
 		return
 	}
 	s.logger = logger
+}
+
+func (s *BSCScanner) SetMaxScanBlockResolver(resolver func(context.Context, int64) (int64, bool, error)) {
+	if s == nil {
+		return
+	}
+	s.maxScanBlock = resolver
+}
+
+func (s *BSCScanner) SetSkipToLatestOnLag(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.skipToLatest = enabled
 }
 
 func (s *BSCScanner) RefreshAllBalances(ctx context.Context) {
@@ -242,24 +261,49 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		latestInt = latestInt - int64(s.confirmations)
 	}
 
-	scanLag := latestInt - lastBlock
+	scanTarget := latestInt
+	if s.maxScanBlock != nil {
+		resolvedTarget, ok, err := s.maxScanBlock(ctx, latestInt)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			s.logger.Printf("scanner waiting for external scan target: head=%d db_last=%d", latestInt, lastBlock)
+			return nil
+		}
+		if resolvedTarget < 0 {
+			resolvedTarget = 0
+		}
+		if resolvedTarget < scanTarget {
+			scanTarget = resolvedTarget
+		}
+	}
+
+	scanLag := scanTarget - lastBlock
 	if scanLag < 0 {
 		scanLag = 0
 	}
-	s.logger.Printf("scanner state: head=%d db_last=%d scan_lag=%d", latestInt, lastBlock, scanLag)
-	if shouldSkipToLatestBlock(lastBlock, latestInt) {
-		s.logger.Printf("scanner lag too large, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", lastBlock, latestInt, latestInt-lastBlock, maxAllowedSyncLagBlocks)
-		if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestInt); err != nil {
+	if s.maxScanBlock != nil {
+		s.logger.Printf("scanner state: head=%d target=%d db_last=%d scan_lag=%d", latestInt, scanTarget, lastBlock, scanLag)
+	} else {
+		s.logger.Printf("scanner state: head=%d db_last=%d scan_lag=%d", latestInt, lastBlock, scanLag)
+	}
+	if scanTarget <= lastBlock {
+		return nil
+	}
+	if s.skipToLatest && shouldSkipToLatestBlock(lastBlock, scanTarget) {
+		s.logger.Printf("scanner lag too large, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", lastBlock, scanTarget, scanTarget-lastBlock, maxAllowedSyncLagBlocks)
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, scanTarget); err != nil {
 			return err
 		}
 		return nil
 	}
-	if lastBlock < latestInt {
-		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, latestInt)
+	if lastBlock < scanTarget {
+		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, scanTarget)
 	}
 
 	currentBlock := lastBlock
-	for currentBlock < latestInt {
+	for currentBlock < scanTarget {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, s.syncKey)
 		})
@@ -269,14 +313,14 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		if changed {
 			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, latestInt) {
-				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", currentBlock, latestInt, latestInt-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestInt); err != nil {
-					return err
-				}
+			if currentBlock >= scanTarget {
 				break
 			}
-			if currentBlock >= latestInt {
+			if s.skipToLatest && shouldSkipToLatestBlock(currentBlock, scanTarget) {
+				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", currentBlock, scanTarget, scanTarget-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, scanTarget); err != nil {
+					return err
+				}
 				break
 			}
 		}

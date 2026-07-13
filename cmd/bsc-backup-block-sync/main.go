@@ -34,6 +34,7 @@ type syncOptions struct {
 	SyncKey            string
 	StartBlock         int64
 	Confirmations      int
+	FollowBehindBlocks int64
 	MinRequestInterval time.Duration
 }
 
@@ -97,11 +98,31 @@ func main() {
 		true,
 	)
 	scanner.SetLogger(terminalLogger)
+	scanner.SetMaxScanBlockResolver(func(ctx context.Context, chainLatest int64) (int64, bool, error) {
+		mainBlock, exists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
+		if err != nil {
+			return 0, false, fmt.Errorf("load main sync cursor %s: %w", opts.MainSyncKey, err)
+		}
+		if !exists {
+			return 0, false, nil
+		}
 
-	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d min_request_interval=%s",
-		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.MinRequestInterval)
+		target := mainBlock - opts.FollowBehindBlocks
+		if target < 0 {
+			target = 0
+		}
+		if chainLatest >= 0 && target > chainLatest {
+			target = chainLatest
+		}
+		return target, true, nil
+	})
+	scanner.SetSkipToLatestOnLag(false)
+
+	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d follow_behind_blocks=%d min_request_interval=%s",
+		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.FollowBehindBlocks, opts.MinRequestInterval)
 	log.Printf("note: this task uses an independent sync cursor and does not change the main bsc block sync flow")
 	log.Printf("note: backup sync is driven by bsc websocket newHeads events, not by timer polling")
+	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -158,6 +179,13 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		}
 	}
 
+	followBehindBlocks := int64(10)
+	if value := strings.TrimSpace(os.Getenv("BSC_BACKUP_SYNC_FOLLOW_BEHIND_BLOCKS")); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed >= 0 {
+			followBehindBlocks = parsed
+		}
+	}
+
 	minInterval := cfg.BSCRefreshMinRequestInterval()
 	if minInterval < defaultBackupMinRequestDelay {
 		minInterval = defaultBackupMinRequestDelay
@@ -175,6 +203,7 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		SyncKey:            strings.TrimSpace(syncKey),
 		StartBlock:         startBlock,
 		Confirmations:      confirmations,
+		FollowBehindBlocks: followBehindBlocks,
 		MinRequestInterval: minInterval,
 	}
 }
@@ -205,10 +234,15 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, opts syncOp
 		return nil
 	}
 
-	if err := repo.SaveLastBlock(ctx, opts.SyncKey, mainBlock); err != nil {
-		return fmt.Errorf("init backup sync key %s from %s=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, err)
+	initBlock := mainBlock - opts.FollowBehindBlocks
+	if initBlock < 0 {
+		initBlock = 0
 	}
-	log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s block=%d", opts.SyncKey, opts.MainSyncKey, mainBlock)
+
+	if err := repo.SaveLastBlock(ctx, opts.SyncKey, initBlock); err != nil {
+		return fmt.Errorf("init backup sync key %s from %s=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, opts.FollowBehindBlocks, err)
+	}
+	log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d follow_behind_blocks=%d", opts.SyncKey, opts.MainSyncKey, mainBlock, initBlock, opts.FollowBehindBlocks)
 	return nil
 }
 
