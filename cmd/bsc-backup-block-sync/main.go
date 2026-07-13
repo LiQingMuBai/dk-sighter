@@ -27,6 +27,8 @@ const (
 	wsRetryDelay                 = 3 * time.Second
 	defaultBackupMinRequestDelay = 20 * time.Millisecond
 	defaultBackupTriggerInterval = 15 * time.Second
+	defaultLagJumpCheckInterval  = 10 * time.Second
+	defaultLagJumpThreshold      = int64(100)
 )
 
 type syncOptions struct {
@@ -167,6 +169,9 @@ func main() {
 	})
 	group.Go(func() error {
 		return runWSSLoop(groupCtx, client, scanner)
+	})
+	group.Go(func() error {
+		return runLagJumpWatcher(groupCtx, repo, scanner, opts)
 	})
 
 	if err := group.Wait(); err != nil && err != context.Canceled {
@@ -349,6 +354,54 @@ func runTriggerHeartbeat(ctx context.Context, scanner *service.BSCScanner, inter
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			scanner.Trigger()
+		}
+	}
+}
+
+func runLagJumpWatcher(ctx context.Context, repo *repository.DB, scanner *service.BSCScanner, opts syncOptions) error {
+	if repo == nil || scanner == nil {
+		return nil
+	}
+
+	log.Printf("bsc backup lag jump watcher started: interval=%s lag_threshold=%d", defaultLagJumpCheckInterval, defaultLagJumpThreshold)
+	ticker := time.NewTicker(defaultLagJumpCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			mainBlock, exists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
+			if err != nil {
+				log.Printf("bsc backup lag jump watcher load main cursor failed: sync_key=%s err=%v", opts.MainSyncKey, err)
+				continue
+			}
+			if !exists {
+				continue
+			}
+
+			backupBlock, backupExists, err := repo.GetLastBlock(ctx, opts.SyncKey)
+			if err != nil {
+				log.Printf("bsc backup lag jump watcher load backup cursor failed: sync_key=%s err=%v", opts.SyncKey, err)
+				continue
+			}
+			if !backupExists {
+				continue
+			}
+
+			lag := mainBlock - backupBlock
+			if lag <= defaultLagJumpThreshold {
+				continue
+			}
+
+			if err := repo.SaveLastBlock(ctx, opts.SyncKey, mainBlock); err != nil {
+				log.Printf("bsc backup lag jump watcher skip failed: main_sync_key=%s backup_sync_key=%s main_block=%d backup_block=%d lag=%d err=%v", opts.MainSyncKey, opts.SyncKey, mainBlock, backupBlock, lag, err)
+				continue
+			}
+
+			log.Printf("bsc backup lag jump applied: main_sync_key=%s backup_sync_key=%s old_backup_block=%d new_backup_block=%d lag=%d threshold=%d", opts.MainSyncKey, opts.SyncKey, backupBlock, mainBlock, lag, defaultLagJumpThreshold)
 			scanner.Trigger()
 		}
 	}
