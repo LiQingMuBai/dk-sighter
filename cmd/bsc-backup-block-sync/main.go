@@ -37,6 +37,7 @@ type syncOptions struct {
 	StartBlock         int64
 	Confirmations      int
 	FollowBehindBlocks int64
+	FastCatchUpLag     int64
 	MainStaleDuration  time.Duration
 	TriggerInterval    time.Duration
 	MinRequestInterval time.Duration
@@ -103,7 +104,7 @@ func main() {
 	)
 	scanner.SetLogger(terminalLogger)
 	scanner.SetDeferBalanceRefreshInCatchUp(true)
-	scanner.SetFastCatchUpThreshold(100)
+	scanner.SetFastCatchUpThreshold(opts.FastCatchUpLag)
 	var (
 		modeMu        sync.Mutex
 		lastModeLabel string
@@ -143,7 +144,7 @@ func main() {
 	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
 	log.Printf("note: during each catch-up run, backup sync records transfers first and defers matched address balance refresh until the end of the run")
-	log.Printf("note: when scan_lag is greater than 100, backup sync marks the run as fast catch-up mode and switches back automatically after catching up")
+	log.Printf("note: when scan_lag is greater than %d, backup sync marks the run as fast catch-up mode and switches back automatically after catching up", opts.FastCatchUpLag)
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -210,6 +211,13 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		}
 	}
 
+	fastCatchUpLag := int64(20)
+	if value := strings.TrimSpace(os.Getenv("BSC_BACKUP_SYNC_FAST_CATCH_UP_LAG")); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed >= 0 {
+			fastCatchUpLag = parsed
+		}
+	}
+
 	mainStaleDuration := 60 * time.Second
 	if value := strings.TrimSpace(os.Getenv("BSC_BACKUP_SYNC_MAIN_STALE_SECONDS")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
@@ -242,6 +250,7 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		StartBlock:         startBlock,
 		Confirmations:      confirmations,
 		FollowBehindBlocks: followBehindBlocks,
+		FastCatchUpLag:     fastCatchUpLag,
 		MainStaleDuration:  mainStaleDuration,
 		TriggerInterval:    triggerInterval,
 		MinRequestInterval: minInterval,
