@@ -723,7 +723,7 @@ func (s *BSCScanner) syncRecentUSDTTransfersIfNeeded(ctx context.Context, addres
 		return
 	}
 
-	insertedIn, insertedOut, err := s.syncRecentBSCUSDTTransfers(ctx, address, time.Now().Add(-time.Hour))
+	insertedIn, insertedOut, err := s.syncRecentBSCUSDTTransfers(ctx, address, time.Now().Add(-5*time.Minute))
 	if err != nil {
 		s.logger.Printf("repair bsc usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", address, currentDBBalance.String(), latestBalance.String(), err)
 		return
