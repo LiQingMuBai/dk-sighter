@@ -60,14 +60,14 @@ func TestResolveSyncCursorReturnsLoaderError(t *testing.T) {
 }
 
 func TestShouldSkipToLatestBlockWhenLagExceedsThreshold(t *testing.T) {
-	if !shouldSkipToLatestBlock(100, 151) {
-		t.Fatalf("expected lag 51 to trigger skip")
+	if !shouldSkipToLatestBlock(100, 121) {
+		t.Fatalf("expected lag 21 to trigger skip")
 	}
 }
 
 func TestShouldNotSkipToLatestBlockWhenLagWithinThreshold(t *testing.T) {
-	if shouldSkipToLatestBlock(100, 150) {
-		t.Fatalf("expected lag 50 to keep normal catch-up")
+	if shouldSkipToLatestBlock(100, 120) {
+		t.Fatalf("expected lag 20 to keep normal catch-up")
 	}
 	if shouldSkipToLatestBlock(120, 100) {
 		t.Fatalf("expected latest below current to keep current cursor")
