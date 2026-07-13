@@ -29,6 +29,7 @@ const (
 	defaultBackupTriggerInterval = 15 * time.Second
 	defaultLagJumpCheckInterval  = 10 * time.Second
 	defaultLagJumpThreshold      = int64(100)
+	bscMainGapRangeKey           = "bsc_main_gap_range"
 )
 
 type syncOptions struct {
@@ -112,6 +113,26 @@ func main() {
 		lastModeLabel string
 	)
 	scanner.SetMaxScanBlockResolver(func(ctx context.Context, chainLatest int64) (int64, bool, error) {
+		gapFrom, gapTo, gapExists, err := repo.GetBlockGapRange(ctx, bscMainGapRangeKey)
+		if err != nil {
+			return 0, false, fmt.Errorf("load bsc main gap range %s: %w", bscMainGapRangeKey, err)
+		}
+		if gapExists {
+			backupBlock, backupExists, err := repo.GetLastBlock(ctx, opts.SyncKey)
+			if err != nil {
+				return 0, false, fmt.Errorf("load backup sync state %s for gap repair: %w", opts.SyncKey, err)
+			}
+			if backupExists && backupBlock >= gapTo {
+				if err := repo.DeleteRuntimeSetting(ctx, bscMainGapRangeKey); err != nil {
+					return 0, false, fmt.Errorf("clear repaired bsc main gap range %s: %w", bscMainGapRangeKey, err)
+				}
+				log.Printf("bsc backup gap repair finished: gap_key=%s gap_from=%d gap_to=%d backup_block=%d", bscMainGapRangeKey, gapFrom, gapTo, backupBlock)
+			} else {
+				logBackupModeChange(&modeMu, &lastModeLabel, "repair-gap", "backup sync is repairing main gap: gap_from=%d gap_to=%d", gapFrom, gapTo)
+				return gapTo, true, nil
+			}
+		}
+
 		mainBlock, updatedAt, exists, err := repo.GetSyncState(ctx, opts.MainSyncKey)
 		if err != nil {
 			return 0, false, fmt.Errorf("load main sync state %s: %w", opts.MainSyncKey, err)
@@ -145,6 +166,7 @@ func main() {
 	log.Printf("note: backup sync also uses a small periodic trigger as a safety net when websocket events are delayed or silent")
 	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
+	log.Printf("note: when the main scanner skips a lagging block range, backup sync will prioritize repairing that recorded gap before returning to normal follow mode")
 	log.Printf("note: during each catch-up run, backup sync records transfers first and defers matched address balance refresh until the end of the run")
 	log.Printf("note: when scan_lag is greater than %d, backup sync marks the run as fast catch-up mode and switches back automatically after catching up", opts.FastCatchUpLag)
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
@@ -373,6 +395,13 @@ func runLagJumpWatcher(ctx context.Context, repo *repository.DB, scanner *servic
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			if _, _, exists, err := repo.GetBlockGapRange(ctx, bscMainGapRangeKey); err != nil {
+				log.Printf("bsc backup lag jump watcher load gap failed: gap_key=%s err=%v", bscMainGapRangeKey, err)
+				continue
+			} else if exists {
+				continue
+			}
+
 			mainBlock, exists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
 			if err != nil {
 				log.Printf("bsc backup lag jump watcher load main cursor failed: sync_key=%s err=%v", opts.MainSyncKey, err)

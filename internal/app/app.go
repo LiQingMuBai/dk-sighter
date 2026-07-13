@@ -90,6 +90,7 @@ func New(cfgPath string) (*App, error) {
 			bscCache.ConfigureSource(repository.HDWalletSource)
 			bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
 			bscScanner.SetDeferBalanceRefreshInCatchUp(true)
+			bscScanner.SetGapRangeKey("bsc_main_gap_range")
 			bscScanner.SetDisableUSDTRepair(true)
 		}
 
@@ -157,6 +158,7 @@ func New(cfgPath string) (*App, error) {
 		bscCache = service.NewBSCAddressCache(repo)
 		bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
 		bscScanner.SetDeferBalanceRefreshInCatchUp(true)
+		bscScanner.SetGapRangeKey("bsc_main_gap_range")
 		bscScanner.SetDisableUSDTRepair(true)
 		refreshBSCClient := bsc.NewClient(cfg.BSCRefreshHTTPURL(), cfg.BSCRefreshWSSURL(), cfg.BSC.USDTContract)
 		refreshBSCClient.SetMinRequestInterval(cfg.BSCRefreshMinRequestInterval())

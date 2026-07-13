@@ -34,6 +34,7 @@ type BSCScanner struct {
 	maxScanBlock               maxScanBlockResolver
 	skipToLatest               bool
 	deferBalanceRefreshInCatch bool
+	gapRangeKey                string
 	disableUSDTRepair          bool
 	fastCatchUpThreshold       int64
 	fastCatchUpActive          bool
@@ -95,6 +96,13 @@ func (s *BSCScanner) SetDeferBalanceRefreshInCatchUp(enabled bool) {
 		return
 	}
 	s.deferBalanceRefreshInCatch = enabled
+}
+
+func (s *BSCScanner) SetGapRangeKey(key string) {
+	if s == nil {
+		return
+	}
+	s.gapRangeKey = strings.TrimSpace(key)
 }
 
 func (s *BSCScanner) SetDisableUSDTRepair(disabled bool) {
@@ -330,6 +338,9 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		return nil
 	}
 	if s.skipToLatest && shouldSkipToLatestBlock(lastBlock, scanTarget) {
+		if err := s.recordSkippedGap(ctx, lastBlock+1, scanTarget); err != nil {
+			return err
+		}
 		s.logger.Printf("scanner lag too large, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", lastBlock, scanTarget, scanTarget-lastBlock, maxAllowedSyncLagBlocks)
 		if err := s.repo.SaveLastBlock(ctx, s.syncKey, scanTarget); err != nil {
 			return err
@@ -360,6 +371,9 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 				break
 			}
 			if s.skipToLatest && shouldSkipToLatestBlock(currentBlock, scanTarget) {
+				if err := s.recordSkippedGap(ctx, currentBlock+1, scanTarget); err != nil {
+					return err
+				}
 				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: db_last=%d latest=%d lag=%d threshold=%d", currentBlock, scanTarget, scanTarget-currentBlock, maxAllowedSyncLagBlocks)
 				if err := s.repo.SaveLastBlock(ctx, s.syncKey, scanTarget); err != nil {
 					return err
@@ -400,6 +414,20 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		s.refreshBalances(ctx, addrs, false)
 	}
 
+	return nil
+}
+
+func (s *BSCScanner) recordSkippedGap(ctx context.Context, fromBlock, toBlock int64) error {
+	if s == nil || s.repo == nil || strings.TrimSpace(s.gapRangeKey) == "" {
+		return nil
+	}
+	if toBlock < fromBlock {
+		return nil
+	}
+	if err := s.repo.UpsertBlockGapRange(ctx, s.gapRangeKey, fromBlock, toBlock); err != nil {
+		return err
+	}
+	s.logger.Printf("scanner skip gap recorded: sync_key=%s gap_key=%s from=%d to=%d", s.syncKey, s.gapRangeKey, fromBlock, toBlock)
 	return nil
 }
 

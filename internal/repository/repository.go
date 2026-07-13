@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -552,6 +553,69 @@ func (d *DB) UpsertRuntimeSetting(ctx context.Context, key, value string) error 
 		return fmt.Errorf("upsert runtime setting %s: %w", key, err)
 	}
 	return nil
+}
+
+func (d *DB) DeleteRuntimeSetting(ctx context.Context, key string) error {
+	_, err := d.sql.ExecContext(ctx, `
+		DELETE FROM runtime_settings
+		WHERE setting_key = ?
+	`, key)
+	if err != nil {
+		return fmt.Errorf("delete runtime setting %s: %w", key, err)
+	}
+	return nil
+}
+
+func (d *DB) GetBlockGapRange(ctx context.Context, key string) (int64, int64, bool, error) {
+	value, exists, err := d.GetRuntimeSetting(ctx, key)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if !exists {
+		return 0, 0, false, nil
+	}
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 {
+		return 0, 0, false, fmt.Errorf("invalid block gap range %s: %s", key, value)
+	}
+	fromBlock, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("parse block gap from %s: %w", key, err)
+	}
+	toBlock, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("parse block gap to %s: %w", key, err)
+	}
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return 0, 0, false, fmt.Errorf("invalid block gap range %s: from=%d to=%d", key, fromBlock, toBlock)
+	}
+	return fromBlock, toBlock, true, nil
+}
+
+func (d *DB) UpsertBlockGapRange(ctx context.Context, key string, fromBlock, toBlock int64) error {
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return fmt.Errorf("invalid block gap range %s: from=%d to=%d", key, fromBlock, toBlock)
+	}
+
+	currentFrom, currentTo, exists, err := d.GetBlockGapRange(ctx, key)
+	if err != nil {
+		return err
+	}
+	if exists {
+		if currentFrom < fromBlock {
+			fromBlock = currentFrom
+		}
+		if currentTo > toBlock {
+			toBlock = currentTo
+		}
+	}
+	return d.UpsertRuntimeSetting(ctx, key, fmt.Sprintf("%d:%d", fromBlock, toBlock))
 }
 
 func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) error {
