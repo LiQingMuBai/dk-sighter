@@ -252,13 +252,9 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, opts syncOp
 		return fmt.Errorf("backup sync key is empty")
 	}
 
-	backupBlock, exists, err := repo.GetLastBlock(ctx, opts.SyncKey)
+	backupBlock, backupExists, err := repo.GetLastBlock(ctx, opts.SyncKey)
 	if err != nil {
 		return fmt.Errorf("load backup sync key %s: %w", opts.SyncKey, err)
-	}
-	if exists {
-		log.Printf("backup sync cursor already initialized: sync_key=%s block=%d", opts.SyncKey, backupBlock)
-		return nil
 	}
 
 	mainBlock, mainExists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
@@ -266,19 +262,42 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, opts syncOp
 		return fmt.Errorf("load main sync key %s: %w", opts.MainSyncKey, err)
 	}
 	if !mainExists {
+		if backupExists {
+			log.Printf("main sync cursor not found, backup sync keeps current cursor: sync_key=%s block=%d", opts.SyncKey, backupBlock)
+			return nil
+		}
 		log.Printf("main sync cursor not found, backup sync will use default init flow: main_sync_key=%s start_block=%d", opts.MainSyncKey, opts.StartBlock)
 		return nil
 	}
 
-	initBlock := mainBlock - opts.FollowBehindBlocks
-	if initBlock < 0 {
-		initBlock = 0
+	targetBlock := mainBlock - opts.FollowBehindBlocks
+	if targetBlock < 0 {
+		targetBlock = 0
 	}
 
-	if err := repo.SaveLastBlock(ctx, opts.SyncKey, initBlock); err != nil {
-		return fmt.Errorf("init backup sync key %s from %s=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, opts.FollowBehindBlocks, err)
+	if !backupExists {
+		if err := repo.SaveLastBlock(ctx, opts.SyncKey, targetBlock); err != nil {
+			return fmt.Errorf("init backup sync key %s from %s=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, opts.FollowBehindBlocks, err)
+		}
+		log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d follow_behind_blocks=%d", opts.SyncKey, opts.MainSyncKey, mainBlock, targetBlock, opts.FollowBehindBlocks)
+		return nil
 	}
-	log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d follow_behind_blocks=%d", opts.SyncKey, opts.MainSyncKey, mainBlock, initBlock, opts.FollowBehindBlocks)
+
+	if mainBlock <= backupBlock {
+		log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d reason=backup_not_behind_main", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock)
+		return nil
+	}
+
+	lag := mainBlock - backupBlock
+	if lag > opts.FollowBehindBlocks {
+		if err := repo.SaveLastBlock(ctx, opts.SyncKey, targetBlock); err != nil {
+			return fmt.Errorf("realign backup sync key %s from %s=%d target=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, targetBlock, lag, err)
+		}
+		log.Printf("backup sync cursor realigned on restart: main_sync_key=%s main_block=%d backup_sync_key=%s old_backup_block=%d new_backup_block=%d lag=%d follow_behind_blocks=%d", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock, targetBlock, lag, opts.FollowBehindBlocks)
+		return nil
+	}
+
+	log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d lag=%d follow_behind_blocks=%d reason=within_follow_window", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock, lag, opts.FollowBehindBlocks)
 	return nil
 }
 
