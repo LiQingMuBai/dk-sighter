@@ -708,6 +708,9 @@ func (s *BSCScanner) syncRecentUSDTTransfersIfNeeded(ctx context.Context, addres
 	if latestBalance.Sub(currentDBBalance).Abs().LessThanOrEqual(usdtTransferRepairThreshold) {
 		return
 	}
+	if s.fastCatchUpActive {
+		return
+	}
 
 	insertedIn, insertedOut, err := s.syncRecentBSCUSDTTransfers(ctx, address, time.Now().Add(-time.Hour))
 	if err != nil {
