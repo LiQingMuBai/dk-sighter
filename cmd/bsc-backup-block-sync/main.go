@@ -26,6 +26,7 @@ import (
 const (
 	wsRetryDelay                 = 3 * time.Second
 	defaultBackupMinRequestDelay = 20 * time.Millisecond
+	defaultBackupTriggerInterval = 15 * time.Second
 )
 
 type syncOptions struct {
@@ -37,6 +38,7 @@ type syncOptions struct {
 	Confirmations      int
 	FollowBehindBlocks int64
 	MainStaleDuration  time.Duration
+	TriggerInterval    time.Duration
 	MinRequestInterval time.Duration
 }
 
@@ -131,10 +133,11 @@ func main() {
 	})
 	scanner.SetSkipToLatestOnLag(false)
 
-	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d follow_behind_blocks=%d main_stale_duration=%s min_request_interval=%s",
-		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.FollowBehindBlocks, opts.MainStaleDuration, opts.MinRequestInterval)
+	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d follow_behind_blocks=%d main_stale_duration=%s trigger_interval=%s min_request_interval=%s",
+		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.FollowBehindBlocks, opts.MainStaleDuration, opts.TriggerInterval, opts.MinRequestInterval)
 	log.Printf("note: this task uses an independent sync cursor and does not change the main bsc block sync flow")
 	log.Printf("note: backup sync is driven by bsc websocket newHeads events, not by timer polling")
+	log.Printf("note: backup sync also uses a small periodic trigger as a safety net when websocket events are delayed or silent")
 	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
@@ -153,6 +156,9 @@ func main() {
 			return err
 		}
 		return nil
+	})
+	group.Go(func() error {
+		return runTriggerHeartbeat(groupCtx, scanner, opts.TriggerInterval)
 	})
 	group.Go(func() error {
 		return runWSSLoop(groupCtx, client, scanner)
@@ -207,6 +213,13 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		}
 	}
 
+	triggerInterval := defaultBackupTriggerInterval
+	if value := strings.TrimSpace(os.Getenv("BSC_BACKUP_SYNC_TRIGGER_INTERVAL_SECONDS")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			triggerInterval = time.Duration(parsed) * time.Second
+		}
+	}
+
 	minInterval := cfg.BSCRefreshMinRequestInterval()
 	if minInterval < defaultBackupMinRequestDelay {
 		minInterval = defaultBackupMinRequestDelay
@@ -226,6 +239,7 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		Confirmations:      confirmations,
 		FollowBehindBlocks: followBehindBlocks,
 		MainStaleDuration:  mainStaleDuration,
+		TriggerInterval:    triggerInterval,
 		MinRequestInterval: minInterval,
 	}
 }
@@ -272,6 +286,7 @@ func runWSSLoop(ctx context.Context, client *bsc.Client, scanner *service.BSCSca
 	for {
 		log.Printf("bsc backup wss listener connecting")
 		err := client.SubscribeNewHeads(ctx, func() {
+			log.Printf("bsc backup wss new head received, trigger scan")
 			scanner.Trigger()
 		})
 		if err == nil || err == context.Canceled {
@@ -285,6 +300,26 @@ func runWSSLoop(ctx context.Context, client *bsc.Client, scanner *service.BSCSca
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+		}
+	}
+}
+
+func runTriggerHeartbeat(ctx context.Context, scanner *service.BSCScanner, interval time.Duration) error {
+	if scanner == nil || interval <= 0 {
+		return nil
+	}
+
+	log.Printf("bsc backup trigger heartbeat started: interval=%s", interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			log.Printf("bsc backup trigger heartbeat tick, trigger scan")
+			scanner.Trigger()
 		}
 	}
 }
