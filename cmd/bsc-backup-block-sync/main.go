@@ -102,6 +102,8 @@ func main() {
 		true,
 	)
 	scanner.SetLogger(terminalLogger)
+	scanner.SetDeferBalanceRefreshInCatchUp(true)
+	scanner.SetFastCatchUpThreshold(100)
 	var (
 		modeMu        sync.Mutex
 		lastModeLabel string
@@ -140,6 +142,8 @@ func main() {
 	log.Printf("note: backup sync also uses a small periodic trigger as a safety net when websocket events are delayed or silent")
 	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
+	log.Printf("note: during each catch-up run, backup sync records transfers first and defers matched address balance refresh until the end of the run")
+	log.Printf("note: when scan_lag is greater than 100, backup sync marks the run as fast catch-up mode and switches back automatically after catching up")
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
 
 	group, groupCtx := errgroup.WithContext(ctx)

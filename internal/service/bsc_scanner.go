@@ -22,17 +22,20 @@ const bscProgressLogInterval int64 = 10
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
 
 type BSCScanner struct {
-	client         *bsc.Client
-	repo           *repository.DB
-	cache          *BSCAddressCache
-	notifier       TransferNotifier
-	syncKey        string
-	startBlock     int64
-	confirmations  int
-	insertIfAbsent bool
-	logger         *log.Logger
-	maxScanBlock   maxScanBlockResolver
-	skipToLatest   bool
+	client                     *bsc.Client
+	repo                       *repository.DB
+	cache                      *BSCAddressCache
+	notifier                   TransferNotifier
+	syncKey                    string
+	startBlock                 int64
+	confirmations              int
+	insertIfAbsent             bool
+	logger                     *log.Logger
+	maxScanBlock               maxScanBlockResolver
+	skipToLatest               bool
+	deferBalanceRefreshInCatch bool
+	fastCatchUpThreshold       int64
+	fastCatchUpActive          bool
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
@@ -84,6 +87,23 @@ func (s *BSCScanner) SetSkipToLatestOnLag(enabled bool) {
 		return
 	}
 	s.skipToLatest = enabled
+}
+
+func (s *BSCScanner) SetDeferBalanceRefreshInCatchUp(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.deferBalanceRefreshInCatch = enabled
+}
+
+func (s *BSCScanner) SetFastCatchUpThreshold(threshold int64) {
+	if s == nil {
+		return
+	}
+	if threshold < 0 {
+		threshold = 0
+	}
+	s.fastCatchUpThreshold = threshold
 }
 
 func (s *BSCScanner) RefreshAllBalances(ctx context.Context) {
@@ -289,6 +309,15 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	} else {
 		s.logger.Printf("scanner state: head=%d db_last=%d scan_lag=%d", latestInt, lastBlock, scanLag)
 	}
+	fastCatchUp := s.fastCatchUpThreshold > 0 && scanLag > s.fastCatchUpThreshold
+	if fastCatchUp != s.fastCatchUpActive {
+		s.fastCatchUpActive = fastCatchUp
+		if fastCatchUp {
+			s.logger.Printf("scanner fast catch-up mode enabled: scan_lag=%d threshold=%d", scanLag, s.fastCatchUpThreshold)
+		} else {
+			s.logger.Printf("scanner fast catch-up mode disabled: scan_lag=%d threshold=%d", scanLag, s.fastCatchUpThreshold)
+		}
+	}
 	if scanTarget <= lastBlock {
 		return nil
 	}
@@ -304,6 +333,11 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	}
 
 	currentBlock := lastBlock
+	deferBalanceRefresh := s.deferBalanceRefreshInCatch && scanTarget > lastBlock
+	deferredRefresh := make(map[string]struct{})
+	if deferBalanceRefresh {
+		s.logger.Printf("scanner deferred balance refresh enabled: from=%d to=%d", lastBlock+1, scanTarget)
+	}
 	for currentBlock < scanTarget {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, s.syncKey)
@@ -327,8 +361,18 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		}
 
 		blockNum := currentBlock + 1
-		if err := s.scanBlock(ctx, uint64(blockNum)); err != nil {
+		hitAddresses, err := s.scanBlock(ctx, uint64(blockNum), !deferBalanceRefresh)
+		if err != nil {
 			return err
+		}
+		if deferBalanceRefresh {
+			for _, addr := range hitAddresses {
+				addr = strings.ToLower(strings.TrimSpace(addr))
+				if addr == "" {
+					continue
+				}
+				deferredRefresh[addr] = struct{}{}
+			}
 		}
 		if err := s.repo.SaveLastBlock(ctx, s.syncKey, blockNum); err != nil {
 			return err
@@ -339,11 +383,19 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 			s.logger.Printf("scanner progress: current=%d target=%d processed=%d remaining=%d", currentBlock, scanTarget, processed, scanTarget-currentBlock)
 		}
 	}
+	if deferBalanceRefresh && len(deferredRefresh) > 0 {
+		addrs := make([]string, 0, len(deferredRefresh))
+		for addr := range deferredRefresh {
+			addrs = append(addrs, addr)
+		}
+		s.logger.Printf("scanner deferred balance refresh start: addresses=%d", len(addrs))
+		s.refreshBalances(ctx, addrs, false)
+	}
 
 	return nil
 }
 
-func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64) error {
+func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, refreshBalances bool) ([]string, error) {
 	var (
 		block         *bsc.Block
 		usdtTransfers []bsc.ERC20Transfer
@@ -366,7 +418,7 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64) error {
 		return nil
 	})
 	if err := group.Wait(); err != nil {
-		return err
+		return nil, err
 	}
 
 	hit := make(map[string]struct{})
@@ -461,7 +513,7 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64) error {
 	}
 
 	if len(hit) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	addrs := make([]string, 0, len(hit))
@@ -470,8 +522,10 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64) error {
 	}
 
 	s.logger.Printf("block matched: number=%d addresses=%d", blockNum, len(addrs))
-	s.refreshBalances(ctx, addrs, false)
-	return nil
+	if refreshBalances {
+		s.refreshBalances(ctx, addrs, false)
+	}
+	return addrs, nil
 }
 
 func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.TransferRecord) {
