@@ -34,7 +34,7 @@ type BSCScanner struct {
 	maxScanBlock               maxScanBlockResolver
 	skipToLatest               bool
 	deferBalanceRefreshInCatch bool
-	gapRangeKey                string
+	syncGapChain               string
 	disableUSDTRepair          bool
 	fastCatchUpThreshold       int64
 	fastCatchUpActive          bool
@@ -98,11 +98,11 @@ func (s *BSCScanner) SetDeferBalanceRefreshInCatchUp(enabled bool) {
 	s.deferBalanceRefreshInCatch = enabled
 }
 
-func (s *BSCScanner) SetGapRangeKey(key string) {
+func (s *BSCScanner) SetSyncGapChain(chain string) {
 	if s == nil {
 		return
 	}
-	s.gapRangeKey = strings.TrimSpace(key)
+	s.syncGapChain = strings.TrimSpace(chain)
 }
 
 func (s *BSCScanner) SetDisableUSDTRepair(disabled bool) {
@@ -418,16 +418,16 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 }
 
 func (s *BSCScanner) recordSkippedGap(ctx context.Context, fromBlock, toBlock int64) error {
-	if s == nil || s.repo == nil || strings.TrimSpace(s.gapRangeKey) == "" {
+	if s == nil || s.repo == nil || strings.TrimSpace(s.syncGapChain) == "" {
 		return nil
 	}
 	if toBlock < fromBlock {
 		return nil
 	}
-	if err := s.repo.UpsertBlockGapRange(ctx, s.gapRangeKey, fromBlock, toBlock); err != nil {
+	if err := s.repo.CreateSyncGap(ctx, s.syncGapChain, s.syncKey, fromBlock, toBlock); err != nil {
 		return err
 	}
-	s.logger.Printf("scanner skip gap recorded: sync_key=%s gap_key=%s from=%d to=%d", s.syncKey, s.gapRangeKey, fromBlock, toBlock)
+	s.logger.Printf("scanner skip gap recorded: sync_key=%s chain=%s from=%d to=%d", s.syncKey, s.syncGapChain, fromBlock, toBlock)
 	return nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +33,19 @@ type TransferRecord struct {
 
 type DB struct {
 	sql *sql.DB
+}
+
+type SyncGap struct {
+	ID            int64
+	Chain         string
+	SourceSyncKey string
+	FromBlock     int64
+	ToBlock       int64
+	Status        string
+	Attempts      int
+	LastError     sql.NullString
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type DashboardRow struct {
@@ -555,67 +567,98 @@ func (d *DB) UpsertRuntimeSetting(ctx context.Context, key, value string) error 
 	return nil
 }
 
-func (d *DB) DeleteRuntimeSetting(ctx context.Context, key string) error {
+func (d *DB) CreateSyncGap(ctx context.Context, chain, sourceSyncKey string, fromBlock, toBlock int64) error {
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return fmt.Errorf("invalid sync gap: chain=%s from=%d to=%d", chain, fromBlock, toBlock)
+	}
+
 	_, err := d.sql.ExecContext(ctx, `
-		DELETE FROM runtime_settings
-		WHERE setting_key = ?
-	`, key)
+		INSERT INTO sync_gaps (chain, source_sync_key, from_block, to_block, status, attempts)
+		VALUES (?, ?, ?, ?, 'pending', 0)
+	`, strings.TrimSpace(chain), strings.TrimSpace(sourceSyncKey), fromBlock, toBlock)
 	if err != nil {
-		return fmt.Errorf("delete runtime setting %s: %w", key, err)
+		return fmt.Errorf("create sync gap chain=%s from=%d to=%d: %w", chain, fromBlock, toBlock, err)
 	}
 	return nil
 }
 
-func (d *DB) GetBlockGapRange(ctx context.Context, key string) (int64, int64, bool, error) {
-	value, exists, err := d.GetRuntimeSetting(ctx, key)
+func (d *DB) GetNextOpenSyncGap(ctx context.Context, chain string) (*SyncGap, bool, error) {
+	var item SyncGap
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT id, chain, source_sync_key, from_block, to_block, status, attempts, last_error, created_at, updated_at
+		FROM sync_gaps
+		WHERE chain = ?
+		  AND status IN ('repairing', 'pending')
+		ORDER BY
+		  CASE status WHEN 'repairing' THEN 0 ELSE 1 END,
+		  from_block ASC,
+		  id ASC
+		LIMIT 1
+	`, strings.TrimSpace(chain)).Scan(
+		&item.ID,
+		&item.Chain,
+		&item.SourceSyncKey,
+		&item.FromBlock,
+		&item.ToBlock,
+		&item.Status,
+		&item.Attempts,
+		&item.LastError,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
 	if err != nil {
-		return 0, 0, false, err
+		return nil, false, fmt.Errorf("get next open sync gap chain=%s: %w", chain, err)
 	}
-	if !exists {
-		return 0, 0, false, nil
-	}
-	parts := strings.Split(strings.TrimSpace(value), ":")
-	if len(parts) != 2 {
-		return 0, 0, false, fmt.Errorf("invalid block gap range %s: %s", key, value)
-	}
-	fromBlock, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
-	if err != nil {
-		return 0, 0, false, fmt.Errorf("parse block gap from %s: %w", key, err)
-	}
-	toBlock, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-	if err != nil {
-		return 0, 0, false, fmt.Errorf("parse block gap to %s: %w", key, err)
-	}
-	if fromBlock < 0 {
-		fromBlock = 0
-	}
-	if toBlock < fromBlock {
-		return 0, 0, false, fmt.Errorf("invalid block gap range %s: from=%d to=%d", key, fromBlock, toBlock)
-	}
-	return fromBlock, toBlock, true, nil
+	return &item, true, nil
 }
 
-func (d *DB) UpsertBlockGapRange(ctx context.Context, key string, fromBlock, toBlock int64) error {
-	if fromBlock < 0 {
-		fromBlock = 0
-	}
-	if toBlock < fromBlock {
-		return fmt.Errorf("invalid block gap range %s: from=%d to=%d", key, fromBlock, toBlock)
-	}
-
-	currentFrom, currentTo, exists, err := d.GetBlockGapRange(ctx, key)
+func (d *DB) MarkSyncGapRepairing(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'repairing',
+		    attempts = attempts + 1,
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("mark sync gap repairing id=%d: %w", id, err)
 	}
-	if exists {
-		if currentFrom < fromBlock {
-			fromBlock = currentFrom
-		}
-		if currentTo > toBlock {
-			toBlock = currentTo
-		}
+	return nil
+}
+
+func (d *DB) MarkSyncGapDone(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'done',
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark sync gap done id=%d: %w", id, err)
 	}
-	return d.UpsertRuntimeSetting(ctx, key, fmt.Sprintf("%d:%d", fromBlock, toBlock))
+	return nil
+}
+
+func (d *DB) MarkSyncGapPendingWithError(ctx context.Context, id int64, errMsg string) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'pending',
+		    last_error = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, strings.TrimSpace(errMsg), id)
+	if err != nil {
+		return fmt.Errorf("mark sync gap pending id=%d: %w", id, err)
+	}
+	return nil
 }
 
 func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) error {
