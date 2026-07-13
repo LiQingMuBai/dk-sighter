@@ -286,7 +286,6 @@ func runWSSLoop(ctx context.Context, client *bsc.Client, scanner *service.BSCSca
 	for {
 		log.Printf("bsc backup wss listener connecting")
 		err := client.SubscribeNewHeads(ctx, func() {
-			log.Printf("bsc backup wss new head received, trigger scan")
 			scanner.Trigger()
 		})
 		if err == nil || err == context.Canceled {
@@ -318,7 +317,6 @@ func runTriggerHeartbeat(ctx context.Context, scanner *service.BSCScanner, inter
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			log.Printf("bsc backup trigger heartbeat tick, trigger scan")
 			scanner.Trigger()
 		}
 	}
