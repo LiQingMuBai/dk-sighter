@@ -16,7 +16,7 @@ import (
 )
 
 const bscSyncKey = "bsc_scanner"
-const bscBalanceWorkers = 6
+const bscBalanceWorkers = 10
 const bscProgressLogInterval int64 = 10
 
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
