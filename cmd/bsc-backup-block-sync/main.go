@@ -27,8 +27,6 @@ const (
 	wsRetryDelay                 = 3 * time.Second
 	defaultBackupMinRequestDelay = 20 * time.Millisecond
 	defaultBackupTriggerInterval = 15 * time.Second
-	defaultLagJumpCheckInterval  = 10 * time.Second
-	defaultLagJumpThreshold      = int64(100)
 	bscMainGapRangeKey           = "bsc_main_gap_range"
 )
 
@@ -133,7 +131,7 @@ func main() {
 			}
 		}
 
-		mainBlock, updatedAt, exists, err := repo.GetSyncState(ctx, opts.MainSyncKey)
+		_, updatedAt, exists, err := repo.GetSyncState(ctx, opts.MainSyncKey)
 		if err != nil {
 			return 0, false, fmt.Errorf("load main sync state %s: %w", opts.MainSyncKey, err)
 		}
@@ -147,15 +145,8 @@ func main() {
 			return chainLatest, true, nil
 		}
 
-		target := mainBlock - opts.FollowBehindBlocks
-		if target < 0 {
-			target = 0
-		}
-		if chainLatest >= 0 && target > chainLatest {
-			target = chainLatest
-		}
-		logBackupModeChange(&modeMu, &lastModeLabel, "follow-main", "main sync cursor active, backup sync follows main cursor with lag=%d blocks", opts.FollowBehindBlocks)
-		return target, true, nil
+		logBackupModeChange(&modeMu, &lastModeLabel, "idle-no-gap", "main sync cursor active and no gap pending, backup sync stays idle")
+		return 0, false, nil
 	})
 	scanner.SetSkipToLatestOnLag(false)
 
@@ -164,7 +155,7 @@ func main() {
 	log.Printf("note: this task uses an independent sync cursor and does not change the main bsc block sync flow")
 	log.Printf("note: backup sync is driven by bsc websocket newHeads events, not by timer polling")
 	log.Printf("note: backup sync also uses a small periodic trigger as a safety net when websocket events are delayed or silent")
-	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
+	log.Printf("note: backup sync is gap-first: when no skipped main gap exists, it will not actively follow the main cursor")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
 	log.Printf("note: when the main scanner skips a lagging block range, backup sync will prioritize repairing that recorded gap before returning to normal follow mode")
 	log.Printf("note: during each catch-up run, backup sync records transfers first and defers matched address balance refresh until the end of the run")
@@ -191,9 +182,6 @@ func main() {
 	})
 	group.Go(func() error {
 		return runWSSLoop(groupCtx, client, scanner)
-	})
-	group.Go(func() error {
-		return runLagJumpWatcher(groupCtx, repo, scanner, opts)
 	})
 
 	if err := group.Wait(); err != nil && err != context.Canceled {
@@ -310,34 +298,15 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, opts syncOp
 		return nil
 	}
 
-	targetBlock := mainBlock - opts.FollowBehindBlocks
-	if targetBlock < 0 {
-		targetBlock = 0
-	}
-
 	if !backupExists {
-		if err := repo.SaveLastBlock(ctx, opts.SyncKey, targetBlock); err != nil {
-			return fmt.Errorf("init backup sync key %s from %s=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, opts.FollowBehindBlocks, err)
+		if err := repo.SaveLastBlock(ctx, opts.SyncKey, mainBlock); err != nil {
+			return fmt.Errorf("init backup sync key %s from %s=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, err)
 		}
-		log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d follow_behind_blocks=%d", opts.SyncKey, opts.MainSyncKey, mainBlock, targetBlock, opts.FollowBehindBlocks)
+		log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d", opts.SyncKey, opts.MainSyncKey, mainBlock, mainBlock)
 		return nil
 	}
 
-	if mainBlock <= backupBlock {
-		log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d reason=backup_not_behind_main", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock)
-		return nil
-	}
-
-	lag := mainBlock - backupBlock
-	if lag > opts.FollowBehindBlocks {
-		if err := repo.SaveLastBlock(ctx, opts.SyncKey, targetBlock); err != nil {
-			return fmt.Errorf("realign backup sync key %s from %s=%d target=%d lag=%d: %w", opts.SyncKey, opts.MainSyncKey, mainBlock, targetBlock, lag, err)
-		}
-		log.Printf("backup sync cursor realigned on restart: main_sync_key=%s main_block=%d backup_sync_key=%s old_backup_block=%d new_backup_block=%d lag=%d follow_behind_blocks=%d", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock, targetBlock, lag, opts.FollowBehindBlocks)
-		return nil
-	}
-
-	log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d lag=%d follow_behind_blocks=%d reason=within_follow_window", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock, lag, opts.FollowBehindBlocks)
+	log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d reason=gap_first_keep_current_cursor", opts.MainSyncKey, mainBlock, opts.SyncKey, backupBlock)
 	return nil
 }
 
@@ -376,61 +345,6 @@ func runTriggerHeartbeat(ctx context.Context, scanner *service.BSCScanner, inter
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			scanner.Trigger()
-		}
-	}
-}
-
-func runLagJumpWatcher(ctx context.Context, repo *repository.DB, scanner *service.BSCScanner, opts syncOptions) error {
-	if repo == nil || scanner == nil {
-		return nil
-	}
-
-	log.Printf("bsc backup lag jump watcher started: interval=%s lag_threshold=%d", defaultLagJumpCheckInterval, defaultLagJumpThreshold)
-	ticker := time.NewTicker(defaultLagJumpCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if _, _, exists, err := repo.GetBlockGapRange(ctx, bscMainGapRangeKey); err != nil {
-				log.Printf("bsc backup lag jump watcher load gap failed: gap_key=%s err=%v", bscMainGapRangeKey, err)
-				continue
-			} else if exists {
-				continue
-			}
-
-			mainBlock, exists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
-			if err != nil {
-				log.Printf("bsc backup lag jump watcher load main cursor failed: sync_key=%s err=%v", opts.MainSyncKey, err)
-				continue
-			}
-			if !exists {
-				continue
-			}
-
-			backupBlock, backupExists, err := repo.GetLastBlock(ctx, opts.SyncKey)
-			if err != nil {
-				log.Printf("bsc backup lag jump watcher load backup cursor failed: sync_key=%s err=%v", opts.SyncKey, err)
-				continue
-			}
-			if !backupExists {
-				continue
-			}
-
-			lag := mainBlock - backupBlock
-			if lag <= defaultLagJumpThreshold {
-				continue
-			}
-
-			if err := repo.SaveLastBlock(ctx, opts.SyncKey, mainBlock); err != nil {
-				log.Printf("bsc backup lag jump watcher skip failed: main_sync_key=%s backup_sync_key=%s main_block=%d backup_block=%d lag=%d err=%v", opts.MainSyncKey, opts.SyncKey, mainBlock, backupBlock, lag, err)
-				continue
-			}
-
-			log.Printf("bsc backup lag jump applied: main_sync_key=%s backup_sync_key=%s old_backup_block=%d new_backup_block=%d lag=%d threshold=%d", opts.MainSyncKey, opts.SyncKey, backupBlock, mainBlock, lag, defaultLagJumpThreshold)
 			scanner.Trigger()
 		}
 	}
