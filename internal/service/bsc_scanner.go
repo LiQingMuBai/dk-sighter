@@ -17,6 +17,7 @@ import (
 
 const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 6
+const bscProgressLogInterval int64 = 10
 
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
 
@@ -333,6 +334,10 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 			return err
 		}
 		currentBlock = blockNum
+		processed := currentBlock - lastBlock
+		if processed%bscProgressLogInterval == 0 || currentBlock == scanTarget {
+			s.logger.Printf("scanner progress: current=%d target=%d processed=%d remaining=%d", currentBlock, scanTarget, processed, scanTarget-currentBlock)
+		}
 	}
 
 	return nil
