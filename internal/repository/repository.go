@@ -276,6 +276,25 @@ func (d *DB) GetLastBlock(ctx context.Context, syncKey string) (int64, bool, err
 	return lastBlock, true, nil
 }
 
+func (d *DB) GetSyncState(ctx context.Context, syncKey string) (int64, time.Time, bool, error) {
+	var (
+		lastBlock int64
+		updatedAt time.Time
+	)
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT last_block, updated_at
+		FROM sync_state
+		WHERE sync_key = ?
+	`, syncKey).Scan(&lastBlock, &updatedAt)
+	if err == sql.ErrNoRows {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, fmt.Errorf("get sync_state: %w", err)
+	}
+	return lastBlock, updatedAt, true, nil
+}
+
 func (d *DB) SaveLastBlock(ctx context.Context, syncKey string, block int64) error {
 	_, err := d.sql.ExecContext(ctx, `
 		INSERT INTO sync_state (sync_key, last_block)

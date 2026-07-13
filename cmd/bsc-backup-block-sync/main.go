@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ type syncOptions struct {
 	StartBlock         int64
 	Confirmations      int
 	FollowBehindBlocks int64
+	MainStaleDuration  time.Duration
 	MinRequestInterval time.Duration
 }
 
@@ -98,13 +100,23 @@ func main() {
 		true,
 	)
 	scanner.SetLogger(terminalLogger)
+	var (
+		modeMu        sync.Mutex
+		lastModeLabel string
+	)
 	scanner.SetMaxScanBlockResolver(func(ctx context.Context, chainLatest int64) (int64, bool, error) {
-		mainBlock, exists, err := repo.GetLastBlock(ctx, opts.MainSyncKey)
+		mainBlock, updatedAt, exists, err := repo.GetSyncState(ctx, opts.MainSyncKey)
 		if err != nil {
-			return 0, false, fmt.Errorf("load main sync cursor %s: %w", opts.MainSyncKey, err)
+			return 0, false, fmt.Errorf("load main sync state %s: %w", opts.MainSyncKey, err)
 		}
 		if !exists {
-			return 0, false, nil
+			logBackupModeChange(&modeMu, &lastModeLabel, "takeover-missing-main", "main sync cursor missing, backup sync enters takeover mode")
+			return chainLatest, true, nil
+		}
+
+		if opts.MainStaleDuration > 0 && !updatedAt.IsZero() && time.Since(updatedAt) > opts.MainStaleDuration {
+			logBackupModeChange(&modeMu, &lastModeLabel, "takeover-stale-main", "main sync cursor stale for %s, backup sync enters takeover mode", time.Since(updatedAt).Truncate(time.Second))
+			return chainLatest, true, nil
 		}
 
 		target := mainBlock - opts.FollowBehindBlocks
@@ -114,15 +126,17 @@ func main() {
 		if chainLatest >= 0 && target > chainLatest {
 			target = chainLatest
 		}
+		logBackupModeChange(&modeMu, &lastModeLabel, "follow-main", "main sync cursor active, backup sync follows main cursor with lag=%d blocks", opts.FollowBehindBlocks)
 		return target, true, nil
 	})
 	scanner.SetSkipToLatestOnLag(false)
 
-	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d follow_behind_blocks=%d min_request_interval=%s",
-		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.FollowBehindBlocks, opts.MinRequestInterval)
+	log.Printf("starting bsc backup block sync: mode=wss sync_key=%s main_sync_key=%s http=%s wss=%s start_block=%d confirmations=%d follow_behind_blocks=%d main_stale_duration=%s min_request_interval=%s",
+		opts.SyncKey, opts.MainSyncKey, opts.HTTPURL, maskEndpoint(opts.WSSURL), opts.StartBlock, opts.Confirmations, opts.FollowBehindBlocks, opts.MainStaleDuration, opts.MinRequestInterval)
 	log.Printf("note: this task uses an independent sync cursor and does not change the main bsc block sync flow")
 	log.Printf("note: backup sync is driven by bsc websocket newHeads events, not by timer polling")
 	log.Printf("note: backup sync will only scan to main sync cursor minus the configured follow-behind window")
+	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
 	log.Printf("note: matched BNB/USDT transfers will be written into transfer records, duplicate hashes will be skipped, and BNB/USDT balances will only be updated when on-chain current balance differs from mysql")
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -186,6 +200,13 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		}
 	}
 
+	mainStaleDuration := 60 * time.Second
+	if value := strings.TrimSpace(os.Getenv("BSC_BACKUP_SYNC_MAIN_STALE_SECONDS")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
+			mainStaleDuration = time.Duration(parsed) * time.Second
+		}
+	}
+
 	minInterval := cfg.BSCRefreshMinRequestInterval()
 	if minInterval < defaultBackupMinRequestDelay {
 		minInterval = defaultBackupMinRequestDelay
@@ -204,6 +225,7 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		StartBlock:         startBlock,
 		Confirmations:      confirmations,
 		FollowBehindBlocks: followBehindBlocks,
+		MainStaleDuration:  mainStaleDuration,
 		MinRequestInterval: minInterval,
 	}
 }
@@ -265,6 +287,21 @@ func runWSSLoop(ctx context.Context, client *bsc.Client, scanner *service.BSCSca
 		case <-timer.C:
 		}
 	}
+}
+
+func logBackupModeChange(mu *sync.Mutex, current *string, next string, format string, args ...any) {
+	if mu == nil || current == nil {
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if *current == next {
+		return
+	}
+
+	*current = next
+	log.Printf(format, args...)
 }
 
 func firstNonEmptyEnv(key, fallback string) string {
