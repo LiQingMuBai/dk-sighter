@@ -1,13 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"log"
-	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -22,52 +18,6 @@ import (
 const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 10
 const bscProgressLogInterval int64 = 10
-
-// #region debug-point shared:bsc-sync-stall
-func reportBSCSyncStallDebug(hypothesisID, location, msg string, data map[string]interface{}) {
-	const envPath = ".dbg/bsc-sync-stall.env"
-	url := "http://127.0.0.1:7777/event"
-	sessionID := "bsc-sync-stall"
-	if content, err := os.ReadFile(envPath); err == nil {
-		for _, line := range strings.Split(string(content), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if strings.HasPrefix(line, "DEBUG_SERVER_URL=") {
-				url = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SERVER_URL="))
-				continue
-			}
-			if strings.HasPrefix(line, "DEBUG_SESSION_ID=") {
-				sessionID = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SESSION_ID="))
-			}
-		}
-	}
-	payload, err := json.Marshal(map[string]interface{}{
-		"sessionId":    sessionID,
-		"runId":        "pre-fix",
-		"hypothesisId": hypothesisID,
-		"location":     location,
-		"msg":          "[DEBUG] " + msg,
-		"data":         data,
-		"ts":           time.Now().UnixMilli(),
-	})
-	if err != nil {
-		return
-	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return
-	}
-	_ = resp.Body.Close()
-}
-
-// #endregion
 
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
 
@@ -84,6 +34,7 @@ type BSCScanner struct {
 	maxScanBlock               maxScanBlockResolver
 	skipToLatest               bool
 	deferBalanceRefreshInCatch bool
+	disableUSDTRepair          bool
 	fastCatchUpThreshold       int64
 	fastCatchUpActive          bool
 
@@ -144,6 +95,13 @@ func (s *BSCScanner) SetDeferBalanceRefreshInCatchUp(enabled bool) {
 		return
 	}
 	s.deferBalanceRefreshInCatch = enabled
+}
+
+func (s *BSCScanner) SetDisableUSDTRepair(disabled bool) {
+	if s == nil {
+		return
+	}
+	s.disableUSDTRepair = disabled
 }
 
 func (s *BSCScanner) SetFastCatchUpThreshold(threshold int64) {
@@ -231,13 +189,6 @@ func (s *BSCScanner) RefreshAllBalancesThrottled(ctx context.Context, perCallDel
 			}
 		}
 	}
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 func (s *BSCScanner) Trigger() {
@@ -367,17 +318,6 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		s.logger.Printf("scanner state: head=%d db_last=%d scan_lag=%d", latestInt, lastBlock, scanLag)
 	}
 	fastCatchUp := s.fastCatchUpThreshold > 0 && scanLag > s.fastCatchUpThreshold
-	// #region debug-point C:run-mode
-	reportBSCSyncStallDebug("C", "internal/service/bsc_scanner.go:scan", "bsc scan run mode resolved", map[string]interface{}{
-		"head":               latestInt,
-		"target":             scanTarget,
-		"db_last":            lastBlock,
-		"scan_lag":           scanLag,
-		"fast_catch_up":      fastCatchUp,
-		"fast_catch_up_lag":  s.fastCatchUpThreshold,
-		"defer_balance_sync": s.deferBalanceRefreshInCatch,
-	})
-	// #endregion
 	if fastCatchUp != s.fastCatchUpActive {
 		s.fastCatchUpActive = fastCatchUp
 		if fastCatchUp {
@@ -457,23 +397,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 			addrs = append(addrs, addr)
 		}
 		s.logger.Printf("scanner deferred balance refresh start: addresses=%d", len(addrs))
-		// #region debug-point A:deferred-refresh-start
-		reportBSCSyncStallDebug("A", "internal/service/bsc_scanner.go:scan", "deferred balance refresh started", map[string]interface{}{
-			"addresses":      len(addrs),
-			"fast_catch_up":  s.fastCatchUpActive,
-			"scan_target":    scanTarget,
-			"last_processed": currentBlock,
-		})
-		// #endregion
 		s.refreshBalances(ctx, addrs, false)
-		// #region debug-point A:deferred-refresh-done
-		reportBSCSyncStallDebug("A", "internal/service/bsc_scanner.go:scan", "deferred balance refresh finished", map[string]interface{}{
-			"addresses":      len(addrs),
-			"fast_catch_up":  s.fastCatchUpActive,
-			"scan_target":    scanTarget,
-			"last_processed": currentBlock,
-		})
-		// #endregion
 	}
 
 	return nil
@@ -671,14 +595,6 @@ func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, in
 	if workers > len(addresses) {
 		workers = len(addresses)
 	}
-	// #region debug-point D:refresh-batch
-	reportBSCSyncStallDebug("D", "internal/service/bsc_scanner.go:refreshBalances", "refresh batch started", map[string]interface{}{
-		"addresses":     len(addresses),
-		"workers":       workers,
-		"include_zero":  includeZero,
-		"fast_catch_up": s.fastCatchUpActive,
-	})
-	// #endregion
 
 	addressCh := make(chan string, len(addresses))
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -710,24 +626,9 @@ func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, in
 	if err := group.Wait(); err != nil && err != context.Canceled {
 		s.logger.Printf("refresh balances failed: %v", err)
 	}
-	// #region debug-point D:refresh-batch-done
-	reportBSCSyncStallDebug("D", "internal/service/bsc_scanner.go:refreshBalances", "refresh batch finished", map[string]interface{}{
-		"addresses":     len(addresses),
-		"workers":       workers,
-		"include_zero":  includeZero,
-		"fast_catch_up": s.fastCatchUpActive,
-	})
-	// #endregion
 }
 
 func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string, includeZero bool) {
-	// #region debug-point B:address-refresh-start
-	reportBSCSyncStallDebug("B", "internal/service/bsc_scanner.go:refreshAddressBalances", "address refresh started", map[string]interface{}{
-		"address":       address,
-		"include_zero":  includeZero,
-		"fast_catch_up": s.fastCatchUpActive,
-	})
-	// #endregion
 	currentBalancesLoaded := true
 	currentBNB, currentUSDT, err := s.getCurrentBSCBalances(ctx, address)
 	if err != nil {
@@ -738,13 +639,6 @@ func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string,
 	}
 
 	bnb, err := s.client.GetBNBBalance(ctx, address)
-	// #region debug-point B:bnb-rpc-done
-	reportBSCSyncStallDebug("B", "internal/service/bsc_scanner.go:refreshAddressBalances", "bnb balance rpc finished", map[string]interface{}{
-		"address":       address,
-		"error":         errString(err),
-		"fast_catch_up": s.fastCatchUpActive,
-	})
-	// #endregion
 	if err != nil {
 		s.logger.Printf("refresh bnb balance failed: %s err=%v", address, err)
 	} else {
@@ -758,13 +652,6 @@ func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string,
 	}
 
 	usdt, err := s.client.GetUSDTBalance(ctx, address)
-	// #region debug-point B:usdt-rpc-done
-	reportBSCSyncStallDebug("B", "internal/service/bsc_scanner.go:refreshAddressBalances", "usdt balance rpc finished", map[string]interface{}{
-		"address":       address,
-		"error":         errString(err),
-		"fast_catch_up": s.fastCatchUpActive,
-	})
-	// #endregion
 	if err != nil {
 		s.logger.Printf("refresh usdt balance failed: %s err=%v", address, err)
 	} else {
@@ -779,13 +666,6 @@ func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string,
 			s.syncRecentUSDTTransfersIfNeeded(ctx, address, currentUSDT, usdt)
 		}
 	}
-	// #region debug-point B:address-refresh-done
-	reportBSCSyncStallDebug("B", "internal/service/bsc_scanner.go:refreshAddressBalances", "address refresh finished", map[string]interface{}{
-		"address":                address,
-		"current_balances_known": currentBalancesLoaded,
-		"fast_catch_up":          s.fastCatchUpActive,
-	})
-	// #endregion
 }
 
 func (s *BSCScanner) getCurrentBSCBalances(ctx context.Context, address string) (decimal.Decimal, decimal.Decimal, error) {
@@ -834,6 +714,9 @@ func (s *BSCScanner) getCurrentUSDTBalance(ctx context.Context, address string) 
 
 func (s *BSCScanner) syncRecentUSDTTransfersIfNeeded(ctx context.Context, address string, currentDBBalance, latestBalance decimal.Decimal) {
 	if latestBalance.Sub(currentDBBalance).Abs().LessThanOrEqual(usdtTransferRepairThreshold) {
+		return
+	}
+	if s.disableUSDTRepair {
 		return
 	}
 	if s.fastCatchUpActive {
