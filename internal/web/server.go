@@ -130,6 +130,17 @@ type dashboardRowView struct {
 }
 
 const defaultDashboardPageSize = 20
+const appFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tronSightPlay" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff5951"/>
+      <stop offset="100%" stop-color="#c80f19"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="10" width="52" height="44" rx="15" fill="url(#tronSightPlay)"/>
+  <path d="M28 22L46 32L28 42V22Z" fill="#ffffff"/>
+  <circle cx="18" cy="18" r="3.5" fill="#ffd4d0" fill-opacity="0.95"/>
+</svg>`
 
 type loginPageData struct {
 	Error           string
@@ -358,6 +369,8 @@ func loadTemplates() (*template.Template, error) {
 func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/favicon.svg", s.handleFavicon)
+	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
@@ -428,6 +441,17 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(appFaviconSVG))
 }
 
 func (s *Server) handleAPIDocs(w http.ResponseWriter, r *http.Request) {

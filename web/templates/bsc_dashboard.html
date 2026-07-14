@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>BSC币安链监控平台</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     :root {
       --bg: #f4f7fb;
@@ -1372,7 +1373,9 @@
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(String(value), x + barWidth / 2, y - 3);
+        if (value > 0) {
+          ctx.fillText(String(value), x + barWidth / 2, y - 3);
+        }
         ctx.fillStyle = '#d4af37';
       });
 
