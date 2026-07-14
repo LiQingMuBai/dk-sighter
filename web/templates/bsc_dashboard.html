@@ -1368,6 +1368,12 @@
           label: labels[index],
           value,
         });
+        ctx.fillStyle = '#4b5563';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(String(value), x + barWidth / 2, y - 3);
+        ctx.fillStyle = '#d4af37';
       });
 
       ctx.fillRect(padding.left + 8, 10, 10, 10);
