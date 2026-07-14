@@ -173,7 +173,14 @@ func (c *GRPCBackupClient) GetTransactionInfoByID(ctx context.Context, txID stri
 	if strings.EqualFold(strings.TrimSpace(source), "solid") {
 		info, err := c.walletSolidity.GetTransactionInfoById(callCtx, request)
 		if err != nil {
-			return nil, fmt.Errorf("get solid tx info %s: %w", txID, err)
+			fallbackCtx, fallbackCancel := c.callContext(ctx)
+			defer fallbackCancel()
+
+			fallbackInfo, fallbackErr := c.wallet.GetTransactionInfoById(fallbackCtx, request)
+			if fallbackErr != nil {
+				return nil, fmt.Errorf("get solid tx info %s: %w; fallback get head tx info: %v", txID, err, fallbackErr)
+			}
+			return fallbackInfo, nil
 		}
 		return info, nil
 	}
