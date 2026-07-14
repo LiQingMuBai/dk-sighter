@@ -82,6 +82,7 @@ func New(cfgPath string) (*App, error) {
 			service.NewCallbackNotifier(cfg.Callback),
 		)
 		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
+		scanner.SetSyncGapChain("tron")
 
 		var bscCache *service.BSCAddressCache
 		var bscScanner *service.BSCScanner
@@ -150,6 +151,7 @@ func New(cfgPath string) (*App, error) {
 		service.NewCallbackNotifier(cfg.Callback),
 	)
 	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
+	scanner.SetSyncGapChain("tron")
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner

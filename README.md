@@ -261,6 +261,7 @@ curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
 - `发能一次` / `发能两次` 按钮已接入真实调用：会优先根据 MySQL `runtime_settings.energy_provider` 在 `trxfee` / `catfee` 间切换，地址取 `address_base58`，能量值分别固定为 `65000` / `130000`
 - `一键归集` 当前会弹出“功能未开发”的提示框，不再弹助记词输入框
 - 如果 `sync_state` 里没有游标，服务会优先用 `watcher.start_block` 初始化；未配置时用当前最新区块（由 `tron_block_source` 决定）
+- Tron 主扫描器在滞后超过阈值并跳块时，会把缺失区间写入 `tron_sync_gaps`；`tron-grpc-block-sync` 会优先修复 `tron_sync_gaps` 里的待处理 gap，再在主游标缺失或过期时接管追块
 - Web 页面展示的最近更新时间来自地址当前余额记录的最新更新时间，并按北京时间显示
 - 余额不是全表重刷，而是命中任意转入转出记录后，定向刷新该地址的 `TRX` 和 `USDT` 余额
 - 如果配置了 `WSS` 且连接断开，扫描器仍会继续通过 HTTP 轮询补块

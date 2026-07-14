@@ -31,6 +31,8 @@ type Scanner struct {
 	logger     *log.Logger
 
 	refreshAllBalancesOnTransfer bool
+	skipToLatest                 bool
+	syncGapChain                 string
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
@@ -52,16 +54,17 @@ func NewScannerWithSyncKey(tronClient *tron.Client, repo *repository.DB, cache *
 		syncKey = value
 	}
 	return &Scanner{
-		tronClient: tronClient,
-		repo:       repo,
-		cache:      cache,
-		balances:   balances,
-		notifier:   notifier,
-		syncKey:    syncKey,
-		startBlock: startBlock,
-		txWorkers:  txWorkers,
-		logger:     tronLogger(),
-		triggerCh:  make(chan struct{}, 1),
+		tronClient:   tronClient,
+		repo:         repo,
+		cache:        cache,
+		balances:     balances,
+		notifier:     notifier,
+		syncKey:      syncKey,
+		startBlock:   startBlock,
+		txWorkers:    txWorkers,
+		logger:       tronLogger(),
+		skipToLatest: true,
+		triggerCh:    make(chan struct{}, 1),
 	}
 }
 
@@ -77,6 +80,20 @@ func (s *Scanner) EnableFullBalanceRefreshOnTransfer(enabled bool) {
 		return
 	}
 	s.refreshAllBalancesOnTransfer = enabled
+}
+
+func (s *Scanner) SetSkipToLatestOnLag(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.skipToLatest = enabled
+}
+
+func (s *Scanner) SetSyncGapChain(chain string) {
+	if s == nil {
+		return
+	}
+	s.syncGapChain = strings.TrimSpace(chain)
 }
 
 func (s *Scanner) Run(ctx context.Context, interval time.Duration) error {
@@ -166,7 +183,10 @@ func (s *Scanner) scan(ctx context.Context) error {
 		s.logger.Printf("scanner initialized: source=%s start_block=%d latest=%d", source, initialBlock, latestBlock)
 		return nil
 	}
-	if shouldSkipToLatestBlock(lastBlock, latestBlock) {
+	if s.skipToLatest && shouldSkipToLatestBlock(lastBlock, latestBlock) {
+		if err := s.recordSkippedGap(ctx, lastBlock+1, latestBlock); err != nil {
+			return err
+		}
 		s.logger.Printf("scanner lag too large, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, lastBlock, latestBlock, latestBlock-lastBlock, maxAllowedSyncLagBlocks)
 		if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 			return err
@@ -188,7 +208,10 @@ func (s *Scanner) scan(ctx context.Context) error {
 		if changed {
 			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, latestBlock) {
+			if s.skipToLatest && shouldSkipToLatestBlock(currentBlock, latestBlock) {
+				if err := s.recordSkippedGap(ctx, currentBlock+1, latestBlock); err != nil {
+					return err
+				}
 				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
 				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 					return err
@@ -455,4 +478,24 @@ func fallbackBase58(hexAddr, base58 string) string {
 		return tron.NormalizeHexAddress(hexAddr)
 	}
 	return converted
+}
+
+func (s *Scanner) recordSkippedGap(ctx context.Context, fromBlock, toBlock int64) error {
+	if s == nil || s.repo == nil || strings.TrimSpace(s.syncGapChain) == "" {
+		return nil
+	}
+	if toBlock < fromBlock {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(s.syncGapChain), "tron") {
+		if err := s.repo.CreateTronSyncGap(ctx, s.syncKey, fromBlock, toBlock); err != nil {
+			return err
+		}
+	} else {
+		if err := s.repo.CreateSyncGap(ctx, s.syncGapChain, s.syncKey, fromBlock, toBlock); err != nil {
+			return err
+		}
+	}
+	s.logger.Printf("scanner skip gap recorded: sync_key=%s chain=%s from=%d to=%d", s.syncKey, s.syncGapChain, fromBlock, toBlock)
+	return nil
 }

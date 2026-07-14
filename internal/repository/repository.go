@@ -661,6 +661,99 @@ func (d *DB) MarkSyncGapPendingWithError(ctx context.Context, id int64, errMsg s
 	return nil
 }
 
+func (d *DB) CreateTronSyncGap(ctx context.Context, sourceSyncKey string, fromBlock, toBlock int64) error {
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return fmt.Errorf("invalid tron sync gap: from=%d to=%d", fromBlock, toBlock)
+	}
+
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO tron_sync_gaps (source_sync_key, from_block, to_block, status, attempts)
+		VALUES (?, ?, ?, 'pending', 0)
+	`, strings.TrimSpace(sourceSyncKey), fromBlock, toBlock)
+	if err != nil {
+		return fmt.Errorf("create tron sync gap from=%d to=%d: %w", fromBlock, toBlock, err)
+	}
+	return nil
+}
+
+func (d *DB) GetNextOpenTronSyncGap(ctx context.Context) (*SyncGap, bool, error) {
+	var item SyncGap
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT id, source_sync_key, from_block, to_block, status, attempts, last_error, created_at, updated_at
+		FROM tron_sync_gaps
+		WHERE status IN ('repairing', 'pending')
+		ORDER BY
+		  CASE status WHEN 'repairing' THEN 0 ELSE 1 END,
+		  from_block ASC,
+		  id ASC
+		LIMIT 1
+	`).Scan(
+		&item.ID,
+		&item.SourceSyncKey,
+		&item.FromBlock,
+		&item.ToBlock,
+		&item.Status,
+		&item.Attempts,
+		&item.LastError,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get next open tron sync gap: %w", err)
+	}
+	item.Chain = "tron"
+	return &item, true, nil
+}
+
+func (d *DB) MarkTronSyncGapRepairing(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'repairing',
+		    attempts = attempts + 1,
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap repairing id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkTronSyncGapDone(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'done',
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap done id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkTronSyncGapPendingWithError(ctx context.Context, id int64, errMsg string) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'pending',
+		    last_error = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, strings.TrimSpace(errMsg), id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap pending id=%d: %w", id, err)
+	}
+	return nil
+}
+
 func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) error {
 	_, err := d.sql.ExecContext(ctx, `
 		INSERT INTO energy_action_logs (

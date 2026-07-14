@@ -68,13 +68,15 @@ func main() {
 	}
 	defer client.Close()
 
-	scanner := service.NewTronGRPCBackupSync(client, repo, cache, opts.StartBlock, opts.TXWorkers, opts.BlockSource, opts.SyncKey)
+	scanner := service.NewTronGRPCBackupSync(client, repo, cache, opts.MainSyncKey, opts.StartBlock, opts.TXWorkers, opts.BlockSource, opts.SyncKey, opts.MainStaleDuration)
+	scanner.SetSkipToLatestOnLag(false)
 
 	log.Printf("starting tron grpc backup block sync: sync_key=%s source=%s grpc=%s start_block=%d tx_workers=%d",
 		opts.SyncKey, opts.BlockSource, maskEndpoint(opts.Address), opts.StartBlock, opts.TXWorkers)
 	log.Printf("note: this task uses an independent sync cursor and does not change the main service block sync flow")
 	log.Printf("note: provider auth header=%s tls=%t timeout=%s min_request_interval=%s", opts.TokenHeader, opts.UseTLS, opts.Timeout, opts.MinRequestInterval)
 	log.Printf("note: this grpc task runs in polling mode and refreshes TRX/USDT balances from on-chain current state when a watched transfer is matched")
+	log.Printf("note: backup sync is gap-first for chain=tron: when no skipped main gap exists, it stays idle unless the main cursor is missing or stale for longer than %s", opts.MainStaleDuration)
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
@@ -110,6 +112,7 @@ type syncOptions struct {
 	SyncKey            string
 	StartBlock         int64
 	TXWorkers          int
+	MainStaleDuration  time.Duration
 	MinRequestInterval time.Duration
 }
 
@@ -142,6 +145,13 @@ func resolveOptions(cfg *config.Config) syncOptions {
 	if value := strings.TrimSpace(os.Getenv("TRON_GRPC_SYNC_TX_WORKERS")); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
 			txWorkers = parsed
+		}
+	}
+
+	mainStaleDuration := 60 * time.Second
+	if value := strings.TrimSpace(os.Getenv("TRON_GRPC_SYNC_MAIN_STALE_SECONDS")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
+			mainStaleDuration = time.Duration(parsed) * time.Second
 		}
 	}
 
@@ -179,6 +189,7 @@ func resolveOptions(cfg *config.Config) syncOptions {
 		SyncKey:            syncKey,
 		StartBlock:         startBlock,
 		TXWorkers:          txWorkers,
+		MainStaleDuration:  mainStaleDuration,
 		MinRequestInterval: minInterval,
 	}
 }
@@ -191,13 +202,9 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, mainSyncKey
 		return fmt.Errorf("backup sync key is empty")
 	}
 
-	backupBlock, exists, err := repo.GetLastBlock(ctx, backupSyncKey)
+	backupBlock, backupExists, err := repo.GetLastBlock(ctx, backupSyncKey)
 	if err != nil {
 		return fmt.Errorf("load backup sync key %s: %w", backupSyncKey, err)
-	}
-	if exists {
-		log.Printf("backup sync cursor already initialized: sync_key=%s block=%d", backupSyncKey, backupBlock)
-		return nil
 	}
 
 	mainBlock, mainExists, err := repo.GetLastBlock(ctx, mainSyncKey)
@@ -205,14 +212,23 @@ func alignBackupSyncCursor(ctx context.Context, repo *repository.DB, mainSyncKey
 		return fmt.Errorf("load main sync key %s: %w", mainSyncKey, err)
 	}
 	if !mainExists {
+		if backupExists {
+			log.Printf("main sync cursor not found, backup sync keeps current cursor: sync_key=%s block=%d", backupSyncKey, backupBlock)
+			return nil
+		}
 		log.Printf("main sync cursor not found, backup sync will use default init flow: main_sync_key=%s start_block=%d", mainSyncKey, startBlock)
 		return nil
 	}
 
-	if err := repo.SaveLastBlock(ctx, backupSyncKey, mainBlock); err != nil {
-		return fmt.Errorf("init backup sync key %s from %s=%d: %w", backupSyncKey, mainSyncKey, mainBlock, err)
+	if !backupExists {
+		if err := repo.SaveLastBlock(ctx, backupSyncKey, mainBlock); err != nil {
+			return fmt.Errorf("init backup sync key %s from %s=%d: %w", backupSyncKey, mainSyncKey, mainBlock, err)
+		}
+		log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s main_block=%d init_block=%d", backupSyncKey, mainSyncKey, mainBlock, mainBlock)
+		return nil
 	}
-	log.Printf("backup sync cursor initialized from main sync cursor: backup_sync_key=%s main_sync_key=%s block=%d", backupSyncKey, mainSyncKey, mainBlock)
+
+	log.Printf("backup sync cursor kept on restart: main_sync_key=%s main_block=%d backup_sync_key=%s backup_block=%d reason=gap_first_keep_current_cursor", mainSyncKey, mainBlock, backupSyncKey, backupBlock)
 	return nil
 }
 

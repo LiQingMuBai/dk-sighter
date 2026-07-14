@@ -20,20 +20,23 @@ import (
 )
 
 type TronGRPCBackupSync struct {
-	client      *tron.GRPCBackupClient
-	repo        *repository.DB
-	cache       *AddressCache
-	syncKey     string
-	startBlock  int64
-	txWorkers   int
-	blockSource string
-	logger      *log.Logger
+	client            *tron.GRPCBackupClient
+	repo              *repository.DB
+	cache             *AddressCache
+	mainSyncKey       string
+	syncKey           string
+	startBlock        int64
+	txWorkers         int
+	blockSource       string
+	logger            *log.Logger
+	mainStaleDuration time.Duration
+	skipToLatest      bool
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
 }
 
-func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, cache *AddressCache, startBlock int64, txWorkers int, blockSource, syncKey string) *TronGRPCBackupSync {
+func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, cache *AddressCache, mainSyncKey string, startBlock int64, txWorkers int, blockSource, syncKey string, mainStaleDuration time.Duration) *TronGRPCBackupSync {
 	if txWorkers <= 0 {
 		txWorkers = 1
 	}
@@ -44,15 +47,18 @@ func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, c
 		}
 	}
 	return &TronGRPCBackupSync{
-		client:      client,
-		repo:        repo,
-		cache:       cache,
-		syncKey:     syncKey,
-		startBlock:  startBlock,
-		txWorkers:   txWorkers,
-		blockSource: blockSource,
-		logger:      tronLogger(),
-		triggerCh:   make(chan struct{}, 1),
+		client:            client,
+		repo:              repo,
+		cache:             cache,
+		mainSyncKey:       strings.TrimSpace(mainSyncKey),
+		syncKey:           syncKey,
+		startBlock:        startBlock,
+		txWorkers:         txWorkers,
+		blockSource:       blockSource,
+		logger:            tronLogger(),
+		mainStaleDuration: mainStaleDuration,
+		skipToLatest:      true,
+		triggerCh:         make(chan struct{}, 1),
 	}
 }
 
@@ -61,6 +67,13 @@ func (s *TronGRPCBackupSync) Trigger() {
 	case s.triggerCh <- struct{}{}:
 	default:
 	}
+}
+
+func (s *TronGRPCBackupSync) SetSkipToLatestOnLag(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.skipToLatest = enabled
 }
 
 func (s *TronGRPCBackupSync) Run(ctx context.Context, interval time.Duration) error {
@@ -116,6 +129,11 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		source = "solid"
 	}
 
+	targetBlock, active, err := s.resolveTargetBlock(ctx, latestBlock)
+	if err != nil {
+		return err
+	}
+
 	lastBlock, exists, err := s.repo.GetLastBlock(ctx, s.syncKey)
 	if err != nil {
 		return err
@@ -126,34 +144,40 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		solidLag = 0
 	}
 	if exists {
-		scanLag := latestBlock - lastBlock
+		scanLag := targetBlock - lastBlock
 		if scanLag < 0 {
 			scanLag = 0
 		}
-		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=%d scan_lag=%d", source, headBlock, solidBlock, solidLag, lastBlock, scanLag)
+		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=%d scan_target=%d scan_lag=%d active=%t", source, headBlock, solidBlock, solidLag, lastBlock, targetBlock, scanLag, active)
 	} else {
-		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=<none>", source, headBlock, solidBlock, solidLag)
+		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=<none> scan_target=%d active=%t", source, headBlock, solidBlock, solidLag, targetBlock, active)
+	}
+	if !active {
+		return nil
 	}
 
 	if !exists {
-		initialBlock := latestBlock
+		initialBlock := targetBlock
 		if s.startBlock > 0 && s.startBlock < initialBlock {
 			initialBlock = s.startBlock
 		}
 		if err := s.repo.SaveLastBlock(ctx, s.syncKey, initialBlock); err != nil {
 			return err
 		}
-		s.logger.Printf("grpc backup scanner initialized: source=%s start_block=%d latest=%d", source, initialBlock, latestBlock)
+		s.logger.Printf("grpc backup scanner initialized: source=%s start_block=%d target=%d", source, initialBlock, targetBlock)
 		return nil
 	}
 
-	if shouldSkipToLatestBlock(lastBlock, latestBlock) {
-		s.logger.Printf("grpc backup scanner lag too large, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, lastBlock, latestBlock, latestBlock-lastBlock, maxAllowedSyncLagBlocks)
-		return s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock)
+	if targetBlock <= lastBlock {
+		return nil
+	}
+	if s.skipToLatest && shouldSkipToLatestBlock(lastBlock, targetBlock) {
+		s.logger.Printf("grpc backup scanner lag too large, skip to latest block: source=%s db_last=%d target=%d lag=%d threshold=%d", source, lastBlock, targetBlock, targetBlock-lastBlock, maxAllowedSyncLagBlocks)
+		return s.repo.SaveLastBlock(ctx, s.syncKey, targetBlock)
 	}
 
 	currentBlock := lastBlock
-	for currentBlock < latestBlock {
+	for currentBlock < targetBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, s.syncKey)
 		})
@@ -163,14 +187,14 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		if changed {
 			s.logger.Printf("grpc backup scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, latestBlock) {
-				s.logger.Printf("grpc backup scanner lag too large after mysql cursor update, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
+			if s.skipToLatest && shouldSkipToLatestBlock(currentBlock, targetBlock) {
+				s.logger.Printf("grpc backup scanner lag too large after mysql cursor update, skip to latest block: source=%s db_last=%d target=%d lag=%d threshold=%d", source, currentBlock, targetBlock, targetBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, targetBlock); err != nil {
 					return err
 				}
 				break
 			}
-			if currentBlock >= latestBlock {
+			if currentBlock >= targetBlock {
 				break
 			}
 		}
@@ -186,6 +210,68 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock int64) (int64, bool, error) {
+	for {
+		gap, exists, err := s.repo.GetNextOpenTronSyncGap(ctx)
+		if err != nil {
+			return 0, false, err
+		}
+		if !exists {
+			break
+		}
+
+		backupBlock, backupExists, err := s.repo.GetLastBlock(ctx, s.syncKey)
+		if err != nil {
+			return 0, false, err
+		}
+		if backupExists && backupBlock >= gap.ToBlock {
+			if err := s.repo.MarkTronSyncGapDone(ctx, gap.ID); err != nil {
+				return 0, false, err
+			}
+			s.logger.Printf("tron grpc backup gap repair finished: gap_id=%d gap_from=%d gap_to=%d backup_block=%d", gap.ID, gap.FromBlock, gap.ToBlock, backupBlock)
+			continue
+		}
+
+		if gap.Status != "repairing" {
+			if err := s.repo.MarkTronSyncGapRepairing(ctx, gap.ID); err != nil {
+				return 0, false, err
+			}
+		}
+
+		if !backupExists || backupBlock < gap.FromBlock-1 || backupBlock > gap.ToBlock {
+			resetTo := gap.FromBlock - 1
+			if resetTo < 0 {
+				resetTo = 0
+			}
+			if err := s.repo.SaveLastBlock(ctx, s.syncKey, resetTo); err != nil {
+				return 0, false, err
+			}
+		}
+
+		s.logger.Printf("tron grpc backup is repairing main gap: gap_id=%d gap_from=%d gap_to=%d", gap.ID, gap.FromBlock, gap.ToBlock)
+		return gap.ToBlock, true, nil
+	}
+
+	if strings.TrimSpace(s.mainSyncKey) == "" {
+		return 0, false, nil
+	}
+
+	_, updatedAt, exists, err := s.repo.GetSyncState(ctx, s.mainSyncKey)
+	if err != nil {
+		return 0, false, err
+	}
+	if !exists {
+		s.logger.Printf("tron grpc backup enters takeover mode: main sync cursor missing")
+		return latestBlock, true, nil
+	}
+	if s.mainStaleDuration > 0 && !updatedAt.IsZero() && time.Since(updatedAt) > s.mainStaleDuration {
+		s.logger.Printf("tron grpc backup enters takeover mode: main sync cursor stale for %s", time.Since(updatedAt).Truncate(time.Second))
+		return latestBlock, true, nil
+	}
+
+	return 0, false, nil
 }
 
 func (s *TronGRPCBackupSync) scanBlock(ctx context.Context, blockNum int64) error {
