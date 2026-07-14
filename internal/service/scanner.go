@@ -18,6 +18,7 @@ import (
 const syncKeySolid = "tron_solid_scanner"
 const syncKeyHead = "tron_head_scanner"
 const tronStateWorkers = 2
+const tronLatestRefreshIntervalBlocks int64 = 5
 
 type Scanner struct {
 	tronClient *tron.Client
@@ -198,6 +199,7 @@ func (s *Scanner) scan(ctx context.Context) error {
 	}
 
 	currentBlock := lastBlock
+	blocksSinceLatestRefresh := int64(0)
 	for currentBlock < latestBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, s.syncKey)
@@ -232,8 +234,38 @@ func (s *Scanner) scan(ctx context.Context) error {
 		}
 		s.balances.Flush(ctx, blockNum)
 		currentBlock = blockNum
+		blocksSinceLatestRefresh++
+
+		if s.skipToLatest && blocksSinceLatestRefresh >= tronLatestRefreshIntervalBlocks {
+			refreshedLatestBlock, err := s.loadLatestBlockForSource(ctx)
+			if err != nil {
+				return err
+			}
+			blocksSinceLatestRefresh = 0
+			if refreshedLatestBlock != latestBlock {
+				s.logger.Printf("scanner progress refresh: source=%s db_last=%d old_latest=%d new_latest=%d", source, currentBlock, latestBlock, refreshedLatestBlock)
+			}
+			latestBlock = refreshedLatestBlock
+			if shouldSkipToLatestBlock(currentBlock, latestBlock) {
+				if err := s.recordSkippedGap(ctx, currentBlock+1, latestBlock); err != nil {
+					return err
+				}
+				s.logger.Printf("scanner lag too large after progress refresh, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
+					return err
+				}
+				break
+			}
+		}
 	}
 	return nil
+}
+
+func (s *Scanner) loadLatestBlockForSource(ctx context.Context) (int64, error) {
+	if s.syncKey == syncKeySolid {
+		return s.tronClient.GetSolidBlockNumber(ctx)
+	}
+	return s.tronClient.GetHeadBlockNumber(ctx)
 }
 
 func (s *Scanner) scanBlock(ctx context.Context, blockNum int64) error {
