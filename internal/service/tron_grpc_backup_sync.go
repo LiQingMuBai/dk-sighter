@@ -22,6 +22,7 @@ import (
 
 const tronGRPCTargetModeGapRepair = "gap-repair"
 const tronGRPCTargetModeTakeover = "takeover"
+const tronGRPCTakeoverMainRecheckIntervalBlocks int64 = 5
 
 type TronGRPCBackupSync struct {
 	client            *tron.GRPCBackupClient
@@ -181,6 +182,7 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 	}
 
 	currentBlock := lastBlock
+	var blocksSinceTakeoverMainRecheck int64
 	for currentBlock < targetBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
 			return s.repo.GetLastBlock(runCtx, s.syncKey)
@@ -212,6 +214,18 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		}
 		currentBlock = blockNum
 		if targetMode == tronGRPCTargetModeTakeover {
+			blocksSinceTakeoverMainRecheck++
+			if blocksSinceTakeoverMainRecheck >= tronGRPCTakeoverMainRecheckIntervalBlocks {
+				blocksSinceTakeoverMainRecheck = 0
+				recovered, err := s.stopTakeoverIfMainRecovered(ctx, currentBlock)
+				if err != nil {
+					return err
+				}
+				if recovered {
+					s.Trigger()
+					return nil
+				}
+			}
 			preempted, err := s.preemptTakeoverForNewGap(ctx, currentBlock)
 			if err != nil {
 				return err
@@ -286,6 +300,33 @@ func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock
 	}
 
 	return 0, false, "", nil
+}
+
+func (s *TronGRPCBackupSync) stopTakeoverIfMainRecovered(ctx context.Context, currentBlock int64) (bool, error) {
+	if strings.TrimSpace(s.mainSyncKey) == "" {
+		return false, nil
+	}
+
+	_, updatedAt, exists, err := s.repo.GetSyncState(ctx, s.mainSyncKey)
+	if err != nil {
+		return false, fmt.Errorf("check main sync state during takeover: %w", err)
+	}
+	if !exists {
+		return false, nil
+	}
+	if s.mainStaleDuration > 0 && !updatedAt.IsZero() && time.Since(updatedAt) > s.mainStaleDuration {
+		return false, nil
+	}
+
+	freshFor := time.Duration(0)
+	if !updatedAt.IsZero() {
+		freshFor = time.Since(updatedAt).Truncate(time.Second)
+		if freshFor < 0 {
+			freshFor = 0
+		}
+	}
+	s.logger.Printf("tron grpc backup takeover stopped after main recovered: current_block=%d main_sync_key=%s main_updated_ago=%s", currentBlock, s.mainSyncKey, freshFor)
+	return true, nil
 }
 
 func (s *TronGRPCBackupSync) preemptTakeoverForNewGap(ctx context.Context, currentBlock int64) (bool, error) {
