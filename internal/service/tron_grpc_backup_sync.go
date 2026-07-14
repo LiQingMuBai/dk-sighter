@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -18,6 +19,9 @@ import (
 	"tron_watcher/internal/repository"
 	"tron_watcher/internal/tron"
 )
+
+const tronGRPCTargetModeGapRepair = "gap-repair"
+const tronGRPCTargetModeTakeover = "takeover"
 
 type TronGRPCBackupSync struct {
 	client            *tron.GRPCBackupClient
@@ -129,7 +133,7 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		source = "solid"
 	}
 
-	targetBlock, active, err := s.resolveTargetBlock(ctx, latestBlock)
+	targetBlock, active, targetMode, err := s.resolveTargetBlock(ctx, latestBlock)
 	if err != nil {
 		return err
 	}
@@ -148,9 +152,9 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 		if scanLag < 0 {
 			scanLag = 0
 		}
-		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=%d scan_target=%d scan_lag=%d active=%t", source, headBlock, solidBlock, solidLag, lastBlock, targetBlock, scanLag, active)
+		s.logger.Printf("grpc backup scanner state: source=%s mode=%s head=%d solid=%d solid_lag=%d db_last=%d scan_target=%d scan_lag=%d active=%t", source, targetMode, headBlock, solidBlock, solidLag, lastBlock, targetBlock, scanLag, active)
 	} else {
-		s.logger.Printf("grpc backup scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=<none> scan_target=%d active=%t", source, headBlock, solidBlock, solidLag, targetBlock, active)
+		s.logger.Printf("grpc backup scanner state: source=%s mode=%s head=%d solid=%d solid_lag=%d db_last=<none> scan_target=%d active=%t", source, targetMode, headBlock, solidBlock, solidLag, targetBlock, active)
 	}
 	if !active {
 		return nil
@@ -207,16 +211,26 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 			return err
 		}
 		currentBlock = blockNum
+		if targetMode == tronGRPCTargetModeTakeover {
+			preempted, err := s.preemptTakeoverForNewGap(ctx, currentBlock)
+			if err != nil {
+				return err
+			}
+			if preempted {
+				s.Trigger()
+				return nil
+			}
+		}
 	}
 
 	return nil
 }
 
-func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock int64) (int64, bool, error) {
+func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock int64) (int64, bool, string, error) {
 	for {
 		gap, exists, err := s.repo.GetNextOpenTronSyncGap(ctx)
 		if err != nil {
-			return 0, false, err
+			return 0, false, "", err
 		}
 		if !exists {
 			break
@@ -224,11 +238,11 @@ func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock
 
 		backupBlock, backupExists, err := s.repo.GetLastBlock(ctx, s.syncKey)
 		if err != nil {
-			return 0, false, err
+			return 0, false, "", err
 		}
 		if backupExists && backupBlock >= gap.ToBlock {
 			if err := s.repo.MarkTronSyncGapDone(ctx, gap.ID); err != nil {
-				return 0, false, err
+				return 0, false, "", err
 			}
 			s.logger.Printf("tron grpc backup gap repair finished: gap_id=%d gap_from=%d gap_to=%d backup_block=%d", gap.ID, gap.FromBlock, gap.ToBlock, backupBlock)
 			continue
@@ -236,7 +250,7 @@ func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock
 
 		if gap.Status != "repairing" {
 			if err := s.repo.MarkTronSyncGapRepairing(ctx, gap.ID); err != nil {
-				return 0, false, err
+				return 0, false, "", err
 			}
 		}
 
@@ -246,32 +260,47 @@ func (s *TronGRPCBackupSync) resolveTargetBlock(ctx context.Context, latestBlock
 				resetTo = 0
 			}
 			if err := s.repo.SaveLastBlock(ctx, s.syncKey, resetTo); err != nil {
-				return 0, false, err
+				return 0, false, "", err
 			}
 		}
 
 		s.logger.Printf("tron grpc backup is repairing main gap: gap_id=%d gap_from=%d gap_to=%d", gap.ID, gap.FromBlock, gap.ToBlock)
-		return gap.ToBlock, true, nil
+		return gap.ToBlock, true, tronGRPCTargetModeGapRepair, nil
 	}
 
 	if strings.TrimSpace(s.mainSyncKey) == "" {
-		return 0, false, nil
+		return 0, false, "", nil
 	}
 
 	_, updatedAt, exists, err := s.repo.GetSyncState(ctx, s.mainSyncKey)
 	if err != nil {
-		return 0, false, err
+		return 0, false, "", err
 	}
 	if !exists {
 		s.logger.Printf("tron grpc backup enters takeover mode: main sync cursor missing")
-		return latestBlock, true, nil
+		return latestBlock, true, tronGRPCTargetModeTakeover, nil
 	}
 	if s.mainStaleDuration > 0 && !updatedAt.IsZero() && time.Since(updatedAt) > s.mainStaleDuration {
 		s.logger.Printf("tron grpc backup enters takeover mode: main sync cursor stale for %s", time.Since(updatedAt).Truncate(time.Second))
-		return latestBlock, true, nil
+		return latestBlock, true, tronGRPCTargetModeTakeover, nil
 	}
 
-	return 0, false, nil
+	return 0, false, "", nil
+}
+
+func (s *TronGRPCBackupSync) preemptTakeoverForNewGap(ctx context.Context, currentBlock int64) (bool, error) {
+	gap, exists, err := s.repo.GetNextOpenTronSyncGap(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check tron gap during takeover: %w", err)
+	}
+	if !exists || gap == nil {
+		return false, nil
+	}
+	if currentBlock >= gap.ToBlock {
+		return false, nil
+	}
+	s.logger.Printf("tron grpc backup takeover preempted by new gap: current_block=%d gap_id=%d gap_from=%d gap_to=%d gap_status=%s", currentBlock, gap.ID, gap.FromBlock, gap.ToBlock, gap.Status)
+	return true, nil
 }
 
 func (s *TronGRPCBackupSync) scanBlock(ctx context.Context, blockNum int64) error {
