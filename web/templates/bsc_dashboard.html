@@ -814,8 +814,8 @@
 
     <div class="chart-card">
       <div class="chart-head">
-        <h2 class="chart-title">每日Gas充值折线图</h2>
-        <p class="chart-subtitle">横轴按日期，纵轴按每日 Gas 充值成功次数统计。</p>
+        <h2 class="chart-title">每日Gas充值柱状图</h2>
+        <p class="chart-subtitle">横轴按日期，纵轴按每日 Gas 充值成功次数统计，点击柱子可查看当天数值。</p>
       </div>
       <div class="chart-wrap">
         <canvas
@@ -1322,7 +1322,9 @@
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
       const maxValue = Math.max(...values, 1);
-      const stepX = values.length > 1 ? chartWidth / (values.length - 1) : chartWidth;
+      const slotWidth = chartWidth / Math.max(values.length, 1);
+      const barWidth = Math.min(28, Math.max(10, slotWidth * 0.58));
+      const barHits = [];
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = '#ffffff';
@@ -1351,27 +1353,21 @@
         ctx.fillText(String(value), padding.left - 8, y);
       }
 
-      ctx.strokeStyle = '#d4af37';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      values.forEach((value, index) => {
-        const x = padding.left + stepX * index;
-        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
-
       ctx.fillStyle = '#d4af37';
       values.forEach((value, index) => {
-        const x = padding.left + stepX * index;
+        const centerX = padding.left + slotWidth * index + slotWidth / 2;
         const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
+        const x = centerX - barWidth / 2;
+        const h = Math.max(2, padding.top + chartHeight - y);
+        ctx.fillRect(x, y, barWidth, h);
+        barHits.push({
+          x,
+          y,
+          width: barWidth,
+          height: h,
+          label: labels[index],
+          value,
+        });
       });
 
       ctx.fillRect(padding.left + 8, 10, 10, 10);
@@ -1390,9 +1386,32 @@
         if (index % tickStep !== 0 && index !== labels.length - 1) {
           return;
         }
-        const x = padding.left + stepX * index;
+        const x = padding.left + slotWidth * index + slotWidth / 2;
         ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
       });
+
+      canvas._barHits = barHits;
+      if (!canvas.dataset.barClickBound) {
+        canvas.dataset.barClickBound = '1';
+        canvas.style.cursor = 'pointer';
+        canvas.addEventListener('click', (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (event.clientX - rect.left) * scaleX;
+          const y = (event.clientY - rect.top) * scaleY;
+          const hit = (canvas._barHits || []).find((item) => (
+            x >= item.x &&
+            x <= item.x + item.width &&
+            y >= item.y &&
+            y <= item.y + item.height
+          ));
+          if (!hit) {
+            return;
+          }
+          showToast(`${hit.label} Gas充值次数：${hit.value}`);
+        });
+      }
     }
 
     async function handleRefreshBSCAddress(button) {

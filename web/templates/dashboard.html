@@ -1081,8 +1081,8 @@
     <div class="chart-card">
       <div class="chart-head">
         <div>
-          <h2 class="chart-title">每日发能和激活折线图</h2>
-          <p class="chart-subtitle">横轴按日期，纵轴按次数累计。蓝色为发能次数（一次记 1，两次记 2），橙色为激活次数。</p>
+          <h2 class="chart-title">每日发能和激活柱状图</h2>
+          <p class="chart-subtitle">横轴按日期，纵轴按次数累计。蓝色为发能次数，橙色为激活次数，点击柱子可查看当天数值。</p>
         </div>
       </div>
       <div class="chart-wrap">
@@ -1991,14 +1991,22 @@
         return;
       }
       const energyChartLabels = JSON.parse(canvas.dataset.labels || '[]');
-      const energyChartValues = JSON.parse(canvas.dataset.values || '[]');
-      let activateChartValues = JSON.parse(canvas.dataset.activateValues || '[]');
-      if (!energyChartLabels.length || !energyChartValues.length) {
+      const energyRawValues = JSON.parse(canvas.dataset.values || '[]');
+      let activateRawValues = JSON.parse(canvas.dataset.activateValues || '[]');
+      if (!Array.isArray(energyChartLabels) || !Array.isArray(energyRawValues) || !energyChartLabels.length || !energyRawValues.length) {
         return;
       }
-      if (!Array.isArray(activateChartValues) || activateChartValues.length !== energyChartValues.length) {
-        activateChartValues = new Array(energyChartValues.length).fill(0);
+      if (!Array.isArray(activateRawValues) || activateRawValues.length !== energyRawValues.length) {
+        activateRawValues = new Array(energyRawValues.length).fill(0);
       }
+      const energyChartValues = energyRawValues.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      });
+      const activateChartValues = activateRawValues.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      });
       const ctx = canvas.getContext('2d');
       const width = canvas.width;
       const height = canvas.height;
@@ -2006,7 +2014,11 @@
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
       const maxValue = Math.max(...energyChartValues, ...activateChartValues, 1);
-      const stepX = energyChartValues.length > 1 ? chartWidth / (energyChartValues.length - 1) : chartWidth;
+      const slotWidth = chartWidth / Math.max(energyChartValues.length, 1);
+      const groupWidth = Math.min(44, Math.max(18, slotWidth * 0.72));
+      const barGap = 4;
+      const barWidth = Math.max(6, Math.floor((groupWidth - barGap) / 2));
+      const barHits = [];
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = '#ffffff';
@@ -2040,30 +2052,47 @@
         { name: '激活次数', color: '#f97316', values: activateChartValues }
       ];
 
-      series.forEach((item) => {
-        ctx.strokeStyle = item.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
+      series.forEach((item, seriesIndex) => {
         item.values.forEach((value, index) => {
-          const x = padding.left + stepX * index;
-          const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-          if (index === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
+          const safeValue = Math.max(0, value);
+          const y = padding.top + chartHeight - (safeValue / maxValue) * chartHeight;
+          const groupCenterX = padding.left + slotWidth * index + slotWidth / 2;
+          const groupLeftX = groupCenterX - (barWidth * 2 + barGap) / 2;
+          const x = groupLeftX + seriesIndex * (barWidth + barGap);
+          const h = safeValue <= 0 ? 0 : Math.max(4, padding.top + chartHeight - y);
+          if (h <= 0) {
+            return;
           }
-        });
-        ctx.stroke();
+          ctx.fillStyle = item.color;
+          ctx.fillRect(x, y, barWidth, h);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, y, barWidth, h);
+          barHits.push({
+            x,
+            y,
+            width: barWidth,
+            height: h,
+            label: energyChartLabels[index],
+            value,
+            name: item.name,
+          });
 
-        ctx.fillStyle = item.color;
-        item.values.forEach((value, index) => {
-          const x = padding.left + stepX * index;
-          const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = '#4b5563';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(String(value), x + barWidth / 2, y - 3);
         });
       });
+
+      if (!barHits.length) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('最近 30 天暂无发能或激活数据', padding.left + chartWidth / 2, padding.top + chartHeight / 2);
+      }
 
       const legendY = 10;
       ctx.font = '12px sans-serif';
@@ -2087,9 +2116,32 @@
         if (index % tickStep !== 0 && index !== energyChartLabels.length - 1) {
           return;
         }
-        const x = padding.left + stepX * index;
+        const x = padding.left + slotWidth * index + slotWidth / 2;
         ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
       });
+
+      canvas._barHits = barHits;
+      if (!canvas.dataset.barClickBound) {
+        canvas.dataset.barClickBound = '1';
+        canvas.style.cursor = 'pointer';
+        canvas.addEventListener('click', (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (event.clientX - rect.left) * scaleX;
+          const y = (event.clientY - rect.top) * scaleY;
+          const hit = (canvas._barHits || []).find((item) => (
+            x >= item.x &&
+            x <= item.x + item.width &&
+            y >= item.y &&
+            y <= item.y + item.height
+          ));
+          if (!hit) {
+            return;
+          }
+          showToast(`${hit.label} ${hit.name}：${hit.value}`);
+        });
+      }
     }
 
     document.getElementById('transferMask').addEventListener('click', (event) => {
