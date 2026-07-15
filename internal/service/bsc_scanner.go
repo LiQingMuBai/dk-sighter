@@ -352,6 +352,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	}
 
 	currentBlock := lastBlock
+	progressBaseBlock := lastBlock
 	deferBalanceRefresh := s.deferBalanceRefreshInCatch && scanTarget > lastBlock
 	deferredRefresh := make(map[string]struct{})
 	if deferBalanceRefresh {
@@ -367,6 +368,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		if changed {
 			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
+			progressBaseBlock = latestDBBlock
 			if currentBlock >= scanTarget {
 				break
 			}
@@ -400,7 +402,7 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 			return err
 		}
 		currentBlock = blockNum
-		processed := currentBlock - lastBlock
+		processed := currentBlock - progressBaseBlock
 		if processed%bscProgressLogInterval == 0 || currentBlock == scanTarget {
 			s.logger.Printf("scanner progress: current=%d target=%d processed=%d remaining=%d", currentBlock, scanTarget, processed, scanTarget-currentBlock)
 		}
