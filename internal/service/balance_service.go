@@ -16,6 +16,7 @@ import (
 )
 
 const tronBalanceWorkers = 4
+const tronUSDTRepairTimeout = 30 * time.Second
 
 var usdtTransferRepairThreshold = decimal.NewFromInt(1)
 
@@ -31,17 +32,19 @@ type BalanceService struct {
 	cache      *AddressCache
 	logger     *log.Logger
 
-	mu    sync.Mutex
-	dirty map[string]map[string]struct{}
+	mu            sync.Mutex
+	dirty         map[string]map[string]struct{}
+	usdtRepairing map[string]struct{}
 }
 
 func NewBalanceService(tronClient *tron.Client, repo *repository.DB, cache *AddressCache) *BalanceService {
 	return &BalanceService{
-		tronClient: tronClient,
-		repo:       repo,
-		cache:      cache,
-		logger:     tronLogger(),
-		dirty:      make(map[string]map[string]struct{}),
+		tronClient:    tronClient,
+		repo:          repo,
+		cache:         cache,
+		logger:        tronLogger(),
+		dirty:         make(map[string]map[string]struct{}),
+		usdtRepairing: make(map[string]struct{}),
 	}
 }
 
@@ -347,14 +350,46 @@ func (s *BalanceService) syncRecentUSDTTransfersIfNeeded(ctx context.Context, ad
 	if latestBalance.Sub(currentDBBalance).Abs().LessThanOrEqual(usdtTransferRepairThreshold) {
 		return
 	}
-
-	insertedIn, insertedOut, err := s.syncRecentTronUSDTTransfers(ctx, addressBase58, addressHex, time.Now().Add(-time.Hour))
-	if err != nil {
-		s.logger.Printf("repair tron usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", addressBase58, currentDBBalance.String(), latestBalance.String(), err)
+	if ctx.Err() != nil {
 		return
 	}
-	s.logger.Printf("repair tron usdt transfers done: address=%s old_balance=%s new_balance=%s inserted_in=%d inserted_out=%d",
-		addressBase58, currentDBBalance.String(), latestBalance.String(), insertedIn, insertedOut)
+	if !s.tryStartUSDTRepair(addressBase58) {
+		s.logger.Printf("skip tron usdt repair sync: address=%s old_balance=%s new_balance=%s reason=repair_inflight",
+			addressBase58, currentDBBalance.String(), latestBalance.String())
+		return
+	}
+
+	go func() {
+		defer s.finishUSDTRepair(addressBase58)
+
+		repairCtx, cancel := context.WithTimeout(context.Background(), tronUSDTRepairTimeout)
+		defer cancel()
+
+		insertedIn, insertedOut, err := s.syncRecentTronUSDTTransfers(repairCtx, addressBase58, addressHex, time.Now().Add(-time.Hour))
+		if err != nil {
+			s.logger.Printf("repair tron usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", addressBase58, currentDBBalance.String(), latestBalance.String(), err)
+			return
+		}
+		s.logger.Printf("repair tron usdt transfers done: address=%s old_balance=%s new_balance=%s inserted_in=%d inserted_out=%d",
+			addressBase58, currentDBBalance.String(), latestBalance.String(), insertedIn, insertedOut)
+	}()
+}
+
+func (s *BalanceService) tryStartUSDTRepair(addressBase58 string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.usdtRepairing[addressBase58]; exists {
+		return false
+	}
+	s.usdtRepairing[addressBase58] = struct{}{}
+	return true
+}
+
+func (s *BalanceService) finishUSDTRepair(addressBase58 string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.usdtRepairing, addressBase58)
 }
 
 func (s *BalanceService) syncRecentTronUSDTTransfers(ctx context.Context, watchAddressBase58, watchAddressHex string, since time.Time) (int, int, error) {
