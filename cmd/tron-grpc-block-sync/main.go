@@ -117,10 +117,8 @@ type syncOptions struct {
 }
 
 func resolveOptions(cfg *config.Config) syncOptions {
-	blockSource := firstNonEmptyEnv("TRON_GRPC_SYNC_BLOCK_SOURCE", cfg.TronBlockSource())
-	if !strings.EqualFold(strings.TrimSpace(blockSource), "solid") {
-		blockSource = "head"
-	} else {
+	blockSource := "head"
+	if value := strings.TrimSpace(os.Getenv("TRON_GRPC_SYNC_BLOCK_SOURCE")); strings.EqualFold(value, "solid") {
 		blockSource = "solid"
 	}
 
