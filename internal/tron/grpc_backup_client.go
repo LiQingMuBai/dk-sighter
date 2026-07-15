@@ -26,6 +26,7 @@ const (
 	grpcDefaultMinRequestInterval = 20 * time.Millisecond
 	grpcTransferTopic             = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 	grpcMaxRecvMsgSize            = 32 * 10e6
+	grpcSolidProbeRetryMultiplier = 2
 )
 
 type GRPCBackupClient struct {
@@ -123,14 +124,23 @@ func (c *GRPCBackupClient) GetSolidBlockNumber(ctx context.Context) (int64, erro
 	if err := c.waitTurn(ctx); err != nil {
 		return 0, err
 	}
-	callCtx, cancel := c.callContext(ctx)
-	defer cancel()
-
-	block, err := c.walletSolidity.GetNowBlock2(callCtx, new(gotronAPI.EmptyMessage))
-	if err != nil {
-		return 0, fmt.Errorf("get solid block: %w", err)
+	block, err := c.getSolidNowBlock(ctx, c.timeout)
+	if err == nil {
+		return block.GetBlockHeader().GetRawData().GetNumber(), nil
 	}
-	return block.GetBlockHeader().GetRawData().GetNumber(), nil
+
+	retryTimeout := c.timeout * grpcSolidProbeRetryMultiplier
+	if retryTimeout <= c.timeout {
+		retryTimeout = c.timeout + grpcDefaultTimeout
+	}
+	if err := c.waitTurn(ctx); err != nil {
+		return 0, err
+	}
+	retryBlock, retryErr := c.getSolidNowBlock(ctx, retryTimeout)
+	if retryErr != nil {
+		return 0, fmt.Errorf("get solid block: %w; retry with extended timeout %s failed: %v", err, retryTimeout, retryErr)
+	}
+	return retryBlock.GetBlockHeader().GetRawData().GetNumber(), nil
 }
 
 func (c *GRPCBackupClient) GetBlockByNum(ctx context.Context, blockNum int64, source string) (*gotronAPI.BlockExtention, error) {
@@ -324,14 +334,32 @@ func (c *GRPCBackupClient) waitTurn(ctx context.Context) error {
 }
 
 func (c *GRPCBackupClient) callContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return c.callContextWithTimeout(parent, c.timeout)
+}
+
+func (c *GRPCBackupClient) callContextWithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, c.timeout)
+	if timeout <= 0 {
+		timeout = c.timeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	if strings.TrimSpace(c.token) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, c.tokenHeader, c.token)
 	}
 	return ctx, cancel
+}
+
+func (c *GRPCBackupClient) getSolidNowBlock(ctx context.Context, timeout time.Duration) (*gotronAPI.BlockExtention, error) {
+	callCtx, cancel := c.callContextWithTimeout(ctx, timeout)
+	defer cancel()
+
+	block, err := c.walletSolidity.GetNowBlock2(callCtx, new(gotronAPI.EmptyMessage))
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
 }
 
 func decodeBase58Address(addressBase58 string) ([]byte, error) {

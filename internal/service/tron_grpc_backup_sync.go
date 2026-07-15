@@ -106,6 +106,7 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 
 	var headBlock int64
 	var solidBlock int64
+	var solidBlockErr error
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		value, err := s.client.GetHeadBlockNumber(groupCtx)
@@ -118,13 +119,21 @@ func (s *TronGRPCBackupSync) scan(ctx context.Context) error {
 	group.Go(func() error {
 		value, err := s.client.GetSolidBlockNumber(groupCtx)
 		if err != nil {
-			return err
+			solidBlockErr = err
+			return nil
 		}
 		solidBlock = value
 		return nil
 	})
 	if err := group.Wait(); err != nil {
 		return err
+	}
+	if solidBlockErr != nil {
+		if s.blockSource == "solid" {
+			return solidBlockErr
+		}
+		solidBlock = headBlock
+		s.logger.Printf("grpc backup solid height probe failed, fallback to head height for state logging: head=%d err=%v", headBlock, solidBlockErr)
 	}
 
 	latestBlock := headBlock
