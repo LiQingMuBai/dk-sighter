@@ -1,32 +1,32 @@
 # Tron Watcher
 
-一个基于 Go 的 Tron 地址监听服务。
+A Go-based monitoring service for Tron addresses.
 
-功能：
+Features:
 
-- 从 MySQL `watch_addresses` 表加载待监控地址
-- 实时跟踪监控地址的 `TRX` 和 `USDT(TRC20)` 转入转出
-- 把流水写入 `transfer_records`
-- 把 `TRX` / `USDT` 最新余额写入 `asset_balances`
-- 提供内置 Web 后台页面，展示地址、TRX 余额、USDT 余额、最近更新时间（北京时间）
-- 提供登录页面，后台账号密码从配置文件读取
-- 登录页包含简单算术验证码
-- 后台页面采用响应式 H5 布局，移动端自动切换为卡片式展示
-- 后台首页支持直接增加地址，支持单个或批量添加
-- 首页顶部已增加 `BSC币安链监控平台` 按钮，入口页面路径为 `/bsc`
-- `/bsc` 页面读取数据库里的 `bsc_watch_addresses` 和 `bsc_asset_balances`，显示 BSC 地址、`BNB`、`USDT`、更新时间，并支持单个删除和批量删除
-- BSC 相关数据表初始化脚本位于 `migrations/003_init_bsc.sql`
-- 每条地址记录在 `发能两次` 旁边支持 `删除地址`，删除时会把 `watch_addresses.status` 设为 `0`
-- 提供对外 API，可单个或批量新增监控地址
-- 后台监控地址按分页显示，默认每页 20 条
-- 首页显示最近 30 天的每日发能折线图：发能一次计 1，发能两次计 2
-- 后台监控地址支持当前页勾选 checkbox 后批量执行 `发能一次` / `发能两次` / `批量删除地址`
-- 用 `sync_state` 持久化扫描游标，进程重启后自动续扫
-- 扫描区块源支持 `watcher.tron_block_source` 配置，可选 `head` / `solid`，默认 `head`
-- 首次启动时可通过 `watcher.start_block` 指定起始区块；不配置时从当前最新区块（由 `tron_block_source` 决定）开始
-- `WSS` 只做新区块触发，实际处理按配置的区块源顺序扫描
+- Loads watched addresses from the MySQL `watch_addresses` table
+- Tracks `TRX` and `USDT (TRC20)` incoming and outgoing transfers for watched addresses in real time
+- Writes transfer records into `transfer_records`
+- Writes the latest `TRX` / `USDT` balances into `asset_balances`
+- Provides a built-in web dashboard showing addresses, TRX balance, USDT balance, and the latest update time in Beijing time
+- Provides a login page, with dashboard credentials loaded from the config file
+- Includes a simple arithmetic captcha on the login page
+- Uses a responsive H5 layout and automatically switches to a card layout on mobile devices
+- Supports adding watched addresses directly from the dashboard, one by one or in batches
+- Adds a `BSC Monitoring Platform` button at the top of the home page, with the entry path at `/bsc`
+- The `/bsc` page reads `bsc_watch_addresses` and `bsc_asset_balances` from MySQL, displays BSC addresses, `BNB`, `USDT`, and update time, and supports single or batch deletion
+- BSC schema initialization scripts are located in `migrations/003_init_bsc.sql`
+- Each address row provides a `Delete Address` action next to `Send Energy Twice`, which sets `watch_addresses.status` to `0`
+- Exposes public APIs for adding watched addresses individually or in batches
+- Displays watched addresses with pagination, 20 items per page by default
+- Shows a 30-day daily energy chart on the home page: sending energy once counts as 1, sending energy twice counts as 2
+- Supports batch actions on checked addresses in the current page: `Send Energy Once`, `Send Energy Twice`, and `Batch Delete`
+- Persists scan cursors in `sync_state` and resumes automatically after restart
+- Supports `watcher.tron_block_source` with `head` or `solid`; the default is `head`
+- Supports `watcher.start_block` on first startup; if not set, the service starts from the latest block based on `tron_block_source`
+- Uses `WSS` only as a new-block trigger; actual block processing still scans in order based on the configured block source
 
-## 目录
+## Layout
 
 ```text
 tron_watcher/
@@ -36,18 +36,18 @@ tron_watcher/
   migrations/001_init.sql
 ```
 
-## 准备
+## Preparation
 
-1. 创建数据库并执行 [migrations/001_init.sql](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/migrations/001_init.sql)
-2. 复制 [configs/config.example.yaml](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/configs/config.example.yaml) 为你自己的配置，例如 `configs/config.yaml` 或 `config.yaml`
-3. 填写 QuickNode Tron `http_url`，`wss_url` 可留空
-4. 确认 USDT 合约地址
-5. 配置 Web 后台监听地址 `web.listen`，以及登录账号密码 `web.username` / `web.password`
-6. 按需配置对外 API 的 `web.api_key`
-7. 按需配置 `watcher.start_block`
-8. 往 `watch_addresses` 插入监控地址，只需要存 `T` 开头的 Tron 地址
+1. Create the database and run [migrations/001_init.sql](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/migrations/001_init.sql)
+2. Copy [configs/config.example.yaml](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/configs/config.example.yaml) to your own config file, for example `configs/config.yaml` or `config.yaml`
+3. Fill in the QuickNode Tron `http_url`; `wss_url` can be left empty
+4. Confirm the USDT contract address
+5. Configure the dashboard listen address `web.listen` and login credentials `web.username` / `web.password`
+6. Configure `web.api_key` if you want to protect the external API
+7. Configure `watcher.start_block` if needed
+8. Insert watched addresses into `watch_addresses`; only Tron Base58 addresses starting with `T` are required
 
-示例：
+Example:
 
 ```sql
 INSERT INTO watch_addresses(address_base58, status)
@@ -55,7 +55,7 @@ VALUES
 ('TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', 1);
 ```
 
-## 启动
+## Start
 
 ```bash
 cd tron_watcher
@@ -63,25 +63,25 @@ go mod tidy
 go run ./cmd/tron-watcher
 ```
 
-## 桌面版打包
+## Desktop Packaging
 
-桌面版基于 `Electron + Go`，入口代码位于 `desktop/` 目录。
+The desktop app is built with `Electron + Go`, and its entry code is under the `desktop/` directory.
 
-目录说明：
+Directory overview:
 
-- `desktop/main.js`：Electron 主进程，负责启动内嵌 Go 服务
-- `desktop/build-go.js`：打包前编译 Go 二进制到 `desktop/bin/<platform>/`
-- `desktop/package.json`：Electron 脚本与 `electron-builder` 配置
-- `configs/config.yaml`：桌面版打包时会被直接带入安装包
+- `desktop/main.js`: Electron main process that launches the embedded Go service
+- `desktop/build-go.js`: Builds the Go binary into `desktop/bin/<platform>/` before packaging
+- `desktop/package.json`: Electron scripts and `electron-builder` config
+- `configs/config.yaml`: Included directly in the installation package during desktop packaging
 
-首次打包前准备：
+Preparation before the first package build:
 
 ```bash
 cd desktop
 npm ci
 ```
 
-开发模式启动：
+Run in development mode:
 
 ```bash
 cd desktop
@@ -89,7 +89,7 @@ npm run build:go
 npm run dev
 ```
 
-打包 mac 版本：
+Build the macOS package:
 
 ```bash
 cd desktop
@@ -98,17 +98,17 @@ npm run build:go
 npm run dist:mac
 ```
 
-说明：
+Notes:
 
-- 桌面版打包现在要求必须存在 `configs/config.yaml`
-- 首次启动桌面版时，会将包内 `config.yaml` 复制到用户目录作为运行配置
+- Desktop packaging now requires `configs/config.yaml` to exist
+- On the first desktop launch, the bundled `config.yaml` is copied to the user directory as the runtime config
 
-默认产物：
+Default artifacts:
 
 - `desktop/dist/TronSight-0.1.0-arm64.dmg`
 - `desktop/dist/mac-arm64/TronSight.app`
 
-打包 Windows 版本：
+Build the Windows package:
 
 ```bash
 cd desktop
@@ -117,66 +117,66 @@ npm run build:go
 npm run dist:win
 ```
 
-默认产物：
+Default artifacts:
 
 - `desktop/dist/*.exe`
 - `desktop/dist/win-*/`
 
-注意事项：
+Additional notes:
 
-- 当前仓库已提交打包脚本，但没有提交 `desktop/node_modules/` 和 `desktop/dist/`
-- mac 包如果没有配置 `Developer ID Application`，会生成未签名安装包
-- Windows 包默认通过 `electron-builder --win` 生成 `nsis` 安装包
-- Go 服务启动时会自动读取：
+- Packaging scripts are committed, but `desktop/node_modules/` and `desktop/dist/` are not
+- If `Developer ID Application` is not configured, the macOS package will be unsigned
+- The Windows package is generated as an `nsis` installer by default through `electron-builder --win`
+- The Go service automatically reads:
   - `config.example.yaml`
   - `web/templates`
   - `desktop/bin/<platform>/tron-watcher`
-- 若要在其他机器打包，请先确认已安装：
+- To package on another machine, make sure these are installed first:
   - `Node.js`
   - `npm`
   - `Go`
 
-更多桌面打包说明见：[docs/desktop-packaging.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/desktop-packaging.md)
+For more desktop packaging details, see [desktop-packaging.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/desktop-packaging.md).
 
-默认会按以下顺序查找配置文件：
+By default, the service searches for config files in this order:
 
 - `configs/config.yaml`
 - `config.yaml`
 - `configs/config.example.yaml`
 
-如果你想手动指定配置文件，仍然可以：
+You can still specify a config file manually:
 
 ```bash
 TRON_WATCHER_CONFIG=configs/config.yaml go run ./cmd/tron-watcher
 ```
 
-`watcher.start_block` 说明：
+`watcher.start_block` behavior:
 
-- `0`：首次启动从当前最新区块（由 `tron_block_source` 决定）开始
-- `> 0`：首次启动从指定区块开始
-- 如果 `sync_state` 里已经有游标，会优先使用数据库游标，忽略 `start_block`
+- `0`: on first startup, begin from the latest block based on `tron_block_source`
+- `> 0`: on first startup, begin from the specified block
+- If a cursor already exists in `sync_state`, the database cursor takes priority and `start_block` is ignored
 
-`watcher.tron_block_source` 说明：
+`watcher.tron_block_source` behavior:
 
-- `head`：使用 `/wallet/getnowblock` 获取最新块号（追最新块）
-- `solid`：使用 `/walletsolidity/getnowblock` 获取 solidity 块号（更稳但延迟更高）
+- `head`: uses `/wallet/getnowblock` to get the latest block number for the most real-time view
+- `solid`: uses `/walletsolidity/getnowblock` to get the solidity block number for higher stability but more delay
 
-Web 后台：
+Dashboard:
 
-- 默认监听 `:8080`
-- 需要先登录
-- 登录时需要填写简单验证码
-- 访问 `http://127.0.0.1:8080/`
-- API 文档页：`http://127.0.0.1:8080/docs`
-- OpenAPI 文件：`http://127.0.0.1:8080/openapi.json`
-- 当前页面先展示以下字段：
-  - 地址
-  - TRX 余额
-  - USDT 余额
-  - 更新时间
-  - 功能按钮占位：`一键归集`、`发能一次`、`发能两次`
+- Default listen address: `:8080`
+- Login is required
+- A simple captcha is required on login
+- Dashboard URL: `http://127.0.0.1:8080/`
+- API docs page: `http://127.0.0.1:8080/docs`
+- OpenAPI file: `http://127.0.0.1:8080/openapi.json`
+- The current page displays:
+  - Address
+  - TRX balance
+  - USDT balance
+  - Update time
+  - Action placeholders: `One-Click Sweep`, `Send Energy Once`, `Send Energy Twice`
 
-示例配置：
+Example config:
 
 ```yaml
 web:
@@ -187,7 +187,7 @@ web:
   api_key: "change_me_api_key"
 
 energy:
-  provider: "trxfee" # 默认回退值，可选: trxfee / catfee
+  provider: "trxfee" # default fallback value, options: trxfee / catfee
 
 trxfee:
   url: "https://your-trxfee-api-host"
@@ -201,23 +201,23 @@ catfee:
   api_secret: "your_catfee_api_secret"
 ```
 
-运行时 provider 切换：
+Runtime provider switching:
 
-- MySQL 表：`runtime_settings`
-- 配置键：`energy_provider`
-- 可选值：
-  - 固定值：`trxfee` / `catfee`
-  - 时间段规则：例如 `10-24`
-- 如果数据库里没有这条配置，才会回退到 `config.yaml` 的 `energy.provider`
+- MySQL table: `runtime_settings`
+- Config key: `energy_provider`
+- Supported values:
+  - Fixed values: `trxfee` / `catfee`
+  - Time-range rule: for example `10-24`
+- If this setting does not exist in MySQL, the service falls back to `energy.provider` from `config.yaml`
 
-时间段规则说明：
+Time-range rule:
 
-- 按北京时间小时判断
-- 当当前小时命中区间时，走 `trxfee`
-- 其他时间走 `catfee`
-- 例如 `10-24` 表示北京时间 `10:00` 到 `23:59` 走 `trxfee`，其他时间走 `catfee`
+- Evaluated by Beijing time hour
+- When the current hour matches the range, the service uses `trxfee`
+- At all other times, the service uses `catfee`
+- For example, `10-24` means `trxfee` is used from Beijing time `10:00` to `23:59`, and `catfee` is used for the rest
 
-示例 SQL：
+Example SQL:
 
 ```sql
 INSERT INTO runtime_settings(setting_key, setting_value)
@@ -225,14 +225,14 @@ VALUES ('energy_provider', '10-24')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 ```
 
-对外 API：
+External API:
 
-- 地址：`POST /api/watch-addresses`
-- 功能：支持单个或批量新增监控地址
-- 鉴权：优先读取请求头 `X-API-Key`，也支持 `Authorization: Bearer <api_key>`
-- 如果 `web.api_key` 为空，则不校验 API Key
+- Endpoint: `POST /api/watch-addresses`
+- Purpose: add watched addresses individually or in batches
+- Authentication: checks `X-API-Key` first, and also supports `Authorization: Bearer <api_key>`
+- If `web.api_key` is empty, API key verification is disabled
 
-单个地址示例：
+Single-address example:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/watch-addresses \
@@ -241,7 +241,7 @@ curl -X POST http://127.0.0.1:8080/api/watch-addresses \
   -d '{"address":"TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"}'
 ```
 
-批量地址示例：
+Batch example:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/watch-addresses \
@@ -250,7 +250,7 @@ curl -X POST http://127.0.0.1:8080/api/watch-addresses \
   -d '{"addresses":["TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX","TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"]}'
 ```
 
-返回示例：
+Response example:
 
 ```json
 {
@@ -266,16 +266,16 @@ curl -X POST http://127.0.0.1:8080/api/watch-addresses \
 }
 ```
 
-刷新余额接口：
+Balance refresh APIs:
 
-- 通用接口：`POST /api/refresh-addresses`
-- 兼容旧接口：
+- Unified endpoint: `POST /api/refresh-addresses`
+- Legacy-compatible endpoints:
   - `POST /api/tron/refresh-address`
   - `POST /api/bsc/refresh-address`
-- 功能：支持 `tron` / `bsc` 单地址或多地址刷新
-- 限制：批量最多 `100` 个地址
+- Purpose: refresh one or more addresses on `tron` or `bsc`
+- Limit: up to `100` addresses per batch
 
-通用接口单地址示例：
+Unified single-address example:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
@@ -287,7 +287,7 @@ curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
   }'
 ```
 
-通用接口批量示例：
+Unified batch example:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
@@ -302,12 +302,12 @@ curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
   }'
 ```
 
-返回示例：
+Response example:
 
 ```json
 {
   "success": true,
-  "message": "BSC 地址余额批量更新成功 2 / 2",
+  "message": "Updated BSC address balances successfully 2 / 2",
   "chain": "bsc",
   "address": "0x1111111111111111111111111111111111111111",
   "addresses": [
@@ -319,34 +319,34 @@ curl -X POST http://127.0.0.1:8080/api/refresh-addresses \
 }
 ```
 
-额外接口文档文件：
+Additional API docs:
 
-- Markdown 文档：[docs/api.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/api.md)
-- OpenAPI JSON：`/openapi.json`
+- Markdown doc: [api.md](file:///Users/masion/Documents/trae_projects/TronSight/tron_watcher/docs/api.md)
+- OpenAPI JSON: `/openapi.json`
 
-## 说明
+## Notes
 
-- `TRX` 原生转账来自 `TransferContract`
-- `USDT` 通过 TRC20 `Transfer(address,address,uint256)` 日志识别
-- 没有 `wss` 节点也可以运行，服务会只使用 HTTP 轮询新区块
-- `quicknode.usdt_contract` 支持填写 `T...` 格式或 `41...` hex 格式，程序会自动转换
-- `mysql.session_time_zone` 默认是 `+08:00`，后续 `CURRENT_TIMESTAMP` 写入的时间按北京时间入库
-- 库里的 `created_at`、`updated_at` 这类 DATETIME 字段按北京时间写入；`block_time` 仍保留链上原始时间戳毫秒值
-- 区块内交易支持并发解析，`watcher.tx_workers` 用于控制并发 worker 数；USDT 回执只对 `TriggerSmartContract` 交易查询
-- 数据库里只存 `T...` 地址，程序启动后会自动转换为 hex 用于链上匹配
-- `发能一次` / `发能两次` 按钮已接入真实调用：会优先根据 MySQL `runtime_settings.energy_provider` 在 `trxfee` / `catfee` 间切换，地址取 `address_base58`，能量值分别固定为 `65000` / `130000`
-- `一键归集` 当前会弹出“功能未开发”的提示框，不再弹助记词输入框
-- 如果 `sync_state` 里没有游标，服务会优先用 `watcher.start_block` 初始化；未配置时用当前最新区块（由 `tron_block_source` 决定）
-- Tron 主扫描器在滞后超过阈值并跳块时，会把缺失区间写入 `tron_sync_gaps`；`tron-grpc-block-sync` 会优先修复 `tron_sync_gaps` 里的待处理 gap，再在主游标缺失或过期时接管追块
-- `tron-grpc-block-sync` 默认按 `head` 模式运行并对齐 `tron_head_scanner`；只有显式设置 `TRON_GRPC_SYNC_BLOCK_SOURCE=solid` 时才会切到 `solid`
-- Web 页面展示的最近更新时间来自地址当前余额记录的最新更新时间，并按北京时间显示
-- 余额不是全表重刷，而是命中任意转入转出记录后，定向刷新该地址的 `TRX` 和 `USDT` 余额
-- 如果配置了 `WSS` 且连接断开，扫描器仍会继续通过 HTTP 轮询补块
-- 后台页中的 `一键归集`、`发能一次`、`发能两次` 当前已支持点击占位：页面会提示功能名称，后端日志会打印功能名称和地址
+- Native `TRX` transfers come from `TransferContract`
+- `USDT` transfers are identified through TRC20 `Transfer(address,address,uint256)` logs
+- The service can run without a `wss` node and will fall back to pure HTTP polling
+- `quicknode.usdt_contract` accepts either `T...` format or `41...` hex format, and the program converts it automatically
+- `mysql.session_time_zone` defaults to `+08:00`, so subsequent `CURRENT_TIMESTAMP` values are written in Beijing time
+- Database `DATETIME` fields such as `created_at` and `updated_at` are stored in Beijing time; `block_time` still keeps the original on-chain millisecond timestamp
+- Transactions inside a block are parsed concurrently, controlled by `watcher.tx_workers`; USDT receipt lookups are only performed for `TriggerSmartContract` transactions
+- Only `T...` addresses are stored in the database; they are converted to hex automatically at startup for on-chain matching
+- `Send Energy Once` / `Send Energy Twice` are wired to real providers: the service switches between `trxfee` and `catfee` according to `runtime_settings.energy_provider`, uses `address_base58` as the target address, and sends fixed energy amounts of `65000` / `130000`
+- `One-Click Sweep` currently shows a "feature not implemented" prompt instead of opening the mnemonic dialog
+- If `sync_state` has no cursor, the service initializes from `watcher.start_block`; otherwise it uses the current latest block based on `tron_block_source`
+- When the Tron main scanner skips blocks because lag exceeds the threshold, missing ranges are written to `tron_sync_gaps`; `tron-grpc-block-sync` repairs pending gaps from `tron_sync_gaps` first and only takes over when the main cursor is missing or stale
+- `tron-grpc-block-sync` runs in `head` mode by default and aligns with `tron_head_scanner`; it only switches to `solid` when `TRON_GRPC_SYNC_BLOCK_SOURCE=solid` is explicitly set
+- The latest update time shown in the dashboard comes from the newest balance record for the current address and is displayed in Beijing time
+- Balances are not refreshed by a full-table sweep; instead, once any incoming or outgoing transfer is matched, the service refreshes that address's `TRX` and `USDT` balances selectively
+- If `WSS` is configured but disconnected, the scanner still keeps catching up through HTTP polling
+- `One-Click Sweep`, `Send Energy Once`, and `Send Energy Twice` currently support click placeholders: the page shows the action name, and the backend logs the action and address
 
-## 后续建议
+## Suggestions
 
-- 给 `transfer_records` 增加业务单号、归集状态、回调状态
-- 增加历史补扫命令
-- 增加 Prometheus 指标和告警
-- 把地址缓存改成增量刷新
+- Add business order IDs, sweep status, and callback status to `transfer_records`
+- Add a historical backfill command
+- Add Prometheus metrics and alerts
+- Change address cache refresh to incremental mode
