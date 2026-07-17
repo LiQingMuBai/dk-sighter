@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,4 +101,127 @@ func TestEnsureRawDataHexBackfillsMissingField(t *testing.T) {
 	if payload["txID"] != "ae80c7aa55e19c2da5e712d4be50e4c9422dd6bfc99039cc42d5deb76938c0e7" {
 		t.Fatalf("unexpected txID: %#v", payload["txID"])
 	}
+}
+
+func TestShouldInspectUSDTTriggerTx(t *testing.T) {
+	client := NewClient("https://example.com", "", "412222222222222222222222222222222222222222", 10*time.Millisecond)
+	watched := map[string]struct{}{
+		NormalizeHexAddress("41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"): {},
+		NormalizeHexAddress("41BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"): {},
+	}
+	isWatchedHex := func(hexAddr string) bool {
+		_, ok := watched[NormalizeHexAddress(hexAddr)]
+		return ok
+	}
+
+	tests := []struct {
+		name string
+		tx   Transaction
+		want bool
+	}{
+		{
+			name: "direct transfer to watched address",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+				trc20TransferMethodID+encodeAddressArg("41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")+strings.Repeat("0", 64),
+			),
+			want: true,
+		},
+		{
+			name: "direct transfer from watched owner",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+				trc20TransferMethodID+encodeAddressArg("41DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")+strings.Repeat("0", 64),
+			),
+			want: true,
+		},
+		{
+			name: "direct transfer without watched addresses",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+				trc20TransferMethodID+encodeAddressArg("41DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")+strings.Repeat("0", 64),
+			),
+			want: false,
+		},
+		{
+			name: "transferFrom with watched source",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+				trc20TransferFromMethodID+
+					encodeAddressArg("41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")+
+					encodeAddressArg("41DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")+
+					strings.Repeat("0", 64),
+			),
+			want: true,
+		},
+		{
+			name: "non usdt contract is skipped",
+			tx: newTriggerSmartContractTx(
+				"413333333333333333333333333333333333333333",
+				"41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				trc20TransferMethodID+encodeAddressArg("41BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")+strings.Repeat("0", 64),
+			),
+			want: false,
+		},
+		{
+			name: "unknown method on usdt contract is skipped",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				"095ea7b3"+encodeAddressArg("41BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")+strings.Repeat("0", 64),
+			),
+			want: false,
+		},
+		{
+			name: "malformed calldata stays conservative",
+			tx: newTriggerSmartContractTx(
+				"412222222222222222222222222222222222222222",
+				"41AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				"abcd",
+			),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := client.ShouldInspectUSDTTriggerTx(tt.tx, isWatchedHex)
+			if got != tt.want {
+				t.Fatalf("ShouldInspectUSDTTriggerTx() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func newTriggerSmartContractTx(contractAddress, ownerAddress, data string) Transaction {
+	payload := fmt.Sprintf(`{
+		"txID":"txid",
+		"raw_data":{
+			"contract":[{
+				"type":"TriggerSmartContract",
+				"parameter":{
+					"value":{
+						"owner_address":"%s",
+						"contract_address":"%s",
+						"data":"%s"
+					}
+				}
+			}]
+		}
+	}`, ownerAddress, contractAddress, data)
+
+	var tx Transaction
+	if err := json.Unmarshal([]byte(payload), &tx); err != nil {
+		panic(err)
+	}
+	return tx
+}
+
+func encodeAddressArg(hexAddr string) string {
+	clean := strings.TrimPrefix(strings.ToLower(NormalizeHexAddress(hexAddr)), "41")
+	return strings.Repeat("0", 24) + clean
 }

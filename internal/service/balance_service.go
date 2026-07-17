@@ -17,6 +17,7 @@ import (
 
 const tronBalanceWorkers = 4
 const tronUSDTRepairTimeout = 30 * time.Second
+const tronUSDTRepairLookback = 5 * time.Minute
 
 var usdtTransferRepairThreshold = decimal.NewFromInt(1)
 
@@ -365,7 +366,7 @@ func (s *BalanceService) syncRecentUSDTTransfersIfNeeded(ctx context.Context, ad
 		repairCtx, cancel := context.WithTimeout(context.Background(), tronUSDTRepairTimeout)
 		defer cancel()
 
-		insertedIn, insertedOut, err := s.syncRecentTronUSDTTransfers(repairCtx, addressBase58, addressHex, time.Now().Add(-time.Hour))
+		insertedIn, insertedOut, err := s.syncRecentTronUSDTTransfers(repairCtx, addressBase58, addressHex, time.Now().Add(-tronUSDTRepairLookback))
 		if err != nil {
 			s.logger.Printf("repair tron usdt transfers failed: address=%s old_balance=%s new_balance=%s err=%v", addressBase58, currentDBBalance.String(), latestBalance.String(), err)
 			return
@@ -417,7 +418,12 @@ func (s *BalanceService) syncRecentTronUSDTTransfers(ctx context.Context, watchA
 		}
 
 		for _, tx := range block.Transactions {
-			if !isTriggerSmartContractTx(tx) {
+			if s == nil || s.tronClient == nil {
+				continue
+			}
+			if !s.tronClient.ShouldInspectUSDTTriggerTx(tx, func(hexAddr string) bool {
+				return strings.EqualFold(tron.NormalizeHexAddress(hexAddr), tron.NormalizeHexAddress(watchAddressHex))
+			}) {
 				continue
 			}
 

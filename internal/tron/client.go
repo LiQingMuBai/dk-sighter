@@ -29,6 +29,8 @@ const (
 	usdtPrecision             = 1_000_000
 	transferTopic             = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 	defaultMinRequestInterval = 10 * time.Millisecond
+	trc20TransferMethodID     = "a9059cbb"
+	trc20TransferFromMethodID = "23b872dd"
 )
 
 type Client struct {
@@ -64,9 +66,11 @@ type Transaction struct {
 			Type      string `json:"type"`
 			Parameter struct {
 				Value struct {
-					Amount       int64  `json:"amount"`
-					OwnerAddress string `json:"owner_address"`
-					ToAddress    string `json:"to_address"`
+					Amount          int64  `json:"amount"`
+					OwnerAddress    string `json:"owner_address"`
+					ToAddress       string `json:"to_address"`
+					ContractAddress string `json:"contract_address"`
+					Data            string `json:"data"`
 				} `json:"value"`
 			} `json:"parameter"`
 		} `json:"contract"`
@@ -311,6 +315,51 @@ func (c *Client) IsUSDTTransferLog(logItem Log) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimPrefix(logItem.Topics[0], "0x"), transferTopic)
+}
+
+// ShouldInspectUSDTTriggerTx uses the raw TriggerSmartContract input to skip
+// `gettransactioninfobyid` calls for transactions that cannot produce watched
+// USDT transfer records in the current direct transfer flow.
+func (c *Client) ShouldInspectUSDTTriggerTx(tx Transaction, isWatchedHex func(string) bool) bool {
+	if len(tx.RawData.Contract) == 0 {
+		return false
+	}
+	contract := tx.RawData.Contract[0]
+	if contract.Type != "TriggerSmartContract" {
+		return false
+	}
+
+	value := contract.Parameter.Value
+	if NormalizeHexAddress(value.ContractAddress) != c.usdtContract {
+		return false
+	}
+	if isWatchedHex == nil {
+		return true
+	}
+
+	methodID, ok := extractTriggerMethodID(value.Data)
+	if !ok {
+		// Keep malformed or unexpected calldata conservative.
+		return true
+	}
+
+	switch methodID {
+	case trc20TransferMethodID:
+		toHex, ok := decodeTriggerAddressArg(value.Data, 0)
+		if !ok {
+			return true
+		}
+		return isWatchedHex(value.OwnerAddress) || isWatchedHex(toHex)
+	case trc20TransferFromMethodID:
+		fromHex, okFrom := decodeTriggerAddressArg(value.Data, 0)
+		toHex, okTo := decodeTriggerAddressArg(value.Data, 1)
+		if !okFrom || !okTo {
+			return true
+		}
+		return isWatchedHex(fromHex) || isWatchedHex(toHex)
+	default:
+		return false
+	}
 }
 
 func (c *Client) DecodeTransferLog(logItem Log) (fromHex string, toHex string, amount decimal.Decimal, err error) {
@@ -732,4 +781,29 @@ func normalizeContractAddress(input string) string {
 		}
 	}
 	return NormalizeHexAddress(trimmed)
+}
+
+func extractTriggerMethodID(data string) (string, bool) {
+	clean := strings.TrimPrefix(strings.TrimSpace(data), "0x")
+	if len(clean) < 8 {
+		return "", false
+	}
+	return strings.ToLower(clean[:8]), true
+}
+
+func decodeTriggerAddressArg(data string, argIndex int) (string, bool) {
+	if argIndex < 0 {
+		return "", false
+	}
+	clean := strings.TrimPrefix(strings.TrimSpace(data), "0x")
+	start := 8 + argIndex*64
+	end := start + 64
+	if len(clean) < end {
+		return "", false
+	}
+	word := clean[start:end]
+	if len(word) != 64 {
+		return "", false
+	}
+	return NormalizeHexAddress(word[24:]), true
 }

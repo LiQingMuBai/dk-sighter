@@ -313,6 +313,52 @@ func (c *GRPCBackupClient) DecodeTransferContract(contract *gotronCore.Transacti
 	return message, nil
 }
 
+// ShouldInspectUSDTTriggerContract uses raw TriggerSmartContract fields to
+// reduce unnecessary `GetTransactionInfoByID` calls in the grpc backup path.
+func (c *GRPCBackupClient) ShouldInspectUSDTTriggerContract(contract *gotronCore.Transaction_Contract, isWatchedHex func(string) bool) bool {
+	if contract == nil || contract.GetType() != gotronCore.Transaction_Contract_TriggerSmartContract || contract.GetParameter() == nil {
+		return false
+	}
+
+	message := new(gotronCore.TriggerSmartContract)
+	if err := proto.Unmarshal(contract.GetParameter().GetValue(), message); err != nil {
+		// Keep malformed payloads conservative.
+		return true
+	}
+
+	if NormalizeHexAddress(hex.EncodeToString(message.GetContractAddress())) != c.usdtContractHex {
+		return false
+	}
+	if isWatchedHex == nil {
+		return true
+	}
+
+	dataHex := hex.EncodeToString(message.GetData())
+	methodID, ok := extractTriggerMethodID(dataHex)
+	if !ok {
+		return true
+	}
+
+	switch methodID {
+	case trc20TransferMethodID:
+		toHex, ok := decodeTriggerAddressArg(dataHex, 0)
+		if !ok {
+			return true
+		}
+		ownerHex := NormalizeHexAddress(hex.EncodeToString(message.GetOwnerAddress()))
+		return isWatchedHex(ownerHex) || isWatchedHex(toHex)
+	case trc20TransferFromMethodID:
+		fromHex, okFrom := decodeTriggerAddressArg(dataHex, 0)
+		toHex, okTo := decodeTriggerAddressArg(dataHex, 1)
+		if !okFrom || !okTo {
+			return true
+		}
+		return isWatchedHex(fromHex) || isWatchedHex(toHex)
+	default:
+		return false
+	}
+}
+
 func (c *GRPCBackupClient) waitTurn(ctx context.Context) error {
 	c.rateMu.Lock()
 	defer c.rateMu.Unlock()

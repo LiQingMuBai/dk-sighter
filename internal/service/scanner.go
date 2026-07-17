@@ -325,7 +325,7 @@ func (s *Scanner) scanBlock(ctx context.Context, blockNum int64) error {
 
 func (s *Scanner) processTransaction(ctx context.Context, tx tron.Transaction, blockNum, blockTime int64) {
 	s.handleTRXTransfer(ctx, tx, blockNum, blockTime)
-	if s.isSmartContractTx(tx) {
+	if s.shouldInspectUSDTTriggerTx(tx) {
 		s.handleUSDTTransfers(ctx, tx.TxID, blockNum, blockTime)
 	}
 }
@@ -397,6 +397,19 @@ func (s *Scanner) isSmartContractTx(tx tron.Transaction) bool {
 		return false
 	}
 	return tx.RawData.Contract[0].Type == "TriggerSmartContract"
+}
+
+func (s *Scanner) shouldInspectUSDTTriggerTx(tx tron.Transaction) bool {
+	if s == nil || s.tronClient == nil {
+		return false
+	}
+	return s.tronClient.ShouldInspectUSDTTriggerTx(tx, func(hexAddr string) bool {
+		if s.cache == nil {
+			return false
+		}
+		_, ok := s.cache.Base58ByHex(hexAddr)
+		return ok
+	})
 }
 
 func (s *Scanner) handleUSDTTransfers(ctx context.Context, txID string, blockNum, blockTime int64) {

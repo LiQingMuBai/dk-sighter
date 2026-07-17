@@ -427,8 +427,24 @@ func (s *TronGRPCBackupSync) processTransaction(ctx context.Context, txExt *gotr
 		}
 		s.handleTRXTransfer(ctx, txID, transfer, blockNum, blockTime)
 	case gotronCore.Transaction_Contract_TriggerSmartContract:
+		if !s.shouldInspectUSDTTriggerContract(contract) {
+			return
+		}
 		s.handleUSDTTransfers(ctx, txID, blockNum, blockTime)
 	}
+}
+
+func (s *TronGRPCBackupSync) shouldInspectUSDTTriggerContract(contract *gotronCore.Transaction_Contract) bool {
+	if s == nil || s.client == nil {
+		return false
+	}
+	return s.client.ShouldInspectUSDTTriggerContract(contract, func(hexAddr string) bool {
+		if s.cache == nil {
+			return false
+		}
+		_, ok := s.cache.Base58ByHex(hexAddr)
+		return ok
+	})
 }
 
 func (s *TronGRPCBackupSync) handleTRXTransfer(ctx context.Context, txID string, contract *gotronCore.TransferContract, blockNum, blockTime int64) {
