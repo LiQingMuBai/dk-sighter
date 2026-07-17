@@ -1744,6 +1744,19 @@
         return;
       }
 
+      const confirmed = await showConfirm(
+        '激活地址',
+        `确认激活地址 ${address} 吗？确认后会执行真正的后台激活操作。`,
+        '确认激活'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '激活中...';
+
       try {
         const resp = await fetch('/api/tron/activate-address', {
           method: 'POST',
@@ -1764,6 +1777,9 @@
         showToast(data.message || '已点击激活地址');
       } catch (error) {
         showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
     }
 
