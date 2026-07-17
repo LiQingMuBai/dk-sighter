@@ -6,17 +6,19 @@ import (
 )
 
 func TestCatfeeService_Order(t *testing.T) {
+	t.Skip("skip network test")
 
 	catfee, err := NewCatfeeService("72a74f5a-2f63-407b-bfc5-1c5f790334ca", "3b4855a097034cdae525b4d123b2b61a", "https://api.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
 		t.Fatal(err)
 	}
-	catfee.Order("TAPH2hzc29WZPpnsfVjnFVGc1YDJs2Audi")
+	catfee.Order("TAPH2hzc29WZPpnsfVjnFVGc1YDJs2Audi", "65000")
 
 }
 
 func TestCatfeeService_Premium(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("72a74f5a-2f63-407b-bfc5-1c5f790334ca", "3b4855a097034cdae525b4d123b2b61a", "https://api.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -35,6 +37,7 @@ func TestCatfeeService_Premium(t *testing.T) {
 // ;     catfee-apisecret: b24ae29d03f61fbecb5381ee41b412bc
 // ;     catfee-apiurl: https://nile.catfee.io
 func TestCatfeeService_MateOpenBasicAdd(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -49,6 +52,7 @@ func TestCatfeeService_MateOpenBasicAdd(t *testing.T) {
 }
 
 func TestCatfeeService_MateOpenBasicDelete(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -64,6 +68,7 @@ func TestCatfeeService_MateOpenBasicDelete(t *testing.T) {
 	fmt.Println(code)
 }
 func TestCatfeeService_MateOpenBasicGet(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -83,6 +88,7 @@ func TestCatfeeService_MateOpenBasicGet(t *testing.T) {
 
 }
 func TestCatfeeService_MateOpenBasicEnable(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -98,6 +104,7 @@ func TestCatfeeService_MateOpenBasicEnable(t *testing.T) {
 }
 
 func TestCatfeeService_MateOpenBasicDisable(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)
@@ -112,6 +119,7 @@ func TestCatfeeService_MateOpenBasicDisable(t *testing.T) {
 	fmt.Println(status)
 }
 func TestCatfeeService_MateOpenBasicAdd2(t *testing.T) {
+	t.Skip("skip network test")
 	catfee, err := NewCatfeeService("4beb7017-ef60-4bdb-b880-20880af87ed3", "b24ae29d03f61fbecb5381ee41b412bc", "https://nile.catfee.io")
 	if err != nil {
 		fmt.Println("链接dial", err)

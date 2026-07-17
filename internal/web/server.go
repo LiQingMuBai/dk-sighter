@@ -16,55 +16,104 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"tron_watcher/infrastructure"
+	"tron_watcher/internal/bsc"
 	"tron_watcher/internal/config"
 	"tron_watcher/internal/hdwallet"
 	"tron_watcher/internal/repository"
+	"tron_watcher/internal/service"
 	"tron_watcher/internal/tron"
 )
 
 type addressReloader interface {
 	Reload(context.Context) error
+	List() []string
 }
 
 type tronBalanceRefresher interface {
 	RefreshAddresses(context.Context, []string) error
+	RefreshAddressesWithPositiveTRX(context.Context, []string) error
+}
+
+type bscBalanceRefresher interface {
+	RefreshAddresses(context.Context, []string)
+}
+
+type tronAddressActivator interface {
+	Activate(context.Context, string) (string, error)
+	EnqueueBatch([]string) (string, int, error)
+	GetJobStatus(string) (int, int, int, bool, bool)
+}
+
+type scheduledRefreshStatusReader interface {
+	ActiveChains() []string
+}
+
+type manualRefreshStatusTracker interface {
+	ActiveChains() []string
+	Start(string)
+	Finish(string)
 }
 
 type Server struct {
-	repo                  *repository.DB
-	reloader              addressReloader
-	tronBalances          tronBalanceRefresher
-	listen                string
-	templates             *template.Template
-	username              string
-	password              string
-	sessionName           string
-	sessionToken          string
-	apiKey                string
-	energyProviders       map[string]infrastructure.EnergyOrderProvider
-	defaultEnergyProvider string
-	mnemonicStore         *mnemonicStore
-	walletMode            bool
-	walletService         *hdwallet.Service
+	repo                   *repository.DB
+	reloader               addressReloader
+	tronBalances           tronBalanceRefresher
+	tronManualBalances     tronBalanceRefresher
+	bscBalances            bscBalanceRefresher
+	bscManualBalances      bscBalanceRefresher
+	scheduledRefreshStatus scheduledRefreshStatusReader
+	manualRefreshStatus    manualRefreshStatusTracker
+	tronActivator          tronAddressActivator
+	bscClient              *bsc.Client
+	bscGasTopupPrivateKey  string
+	listen                 string
+	templates              *template.Template
+	username               string
+	password               string
+	sessionName            string
+	sessionToken           string
+	apiKey                 string
+	energyProviders        map[string]infrastructure.EnergyOrderProvider
+	defaultEnergyProvider  string
+	mnemonicStore          *mnemonicStore
+	desktopMode            bool
+	walletMode             bool
+	walletService          *hdwallet.Service
+	manualRefreshMu        sync.Mutex
+	tronManualRefresh      manualBalanceRefreshJob
+	bscManualRefresh       manualBalanceRefreshJob
+	bscGasTransferMu       sync.Mutex
+	bscGasBatchMu          sync.RWMutex
+	bscGasBatchRunning     bool
+	bscGasBatchCurrentJob  string
+	bscGasBatchStatus      map[string]bscGasTransferJobStatus
+}
+
+type manualBalanceRefreshJob struct {
+	running     bool
+	lastStarted time.Time
 }
 
 type dashboardPageData struct {
-	GeneratedAt     string
-	Rows            []dashboardRowView
-	TotalCount      int
-	Page            int
-	PageSize        int
-	HasPrev         bool
-	HasNext         bool
-	PrevPage        int
-	NextPage        int
-	TotalPages      int
-	ChartLabelsJSON string
-	ChartValuesJSON string
-	Sort            string
+	GeneratedAt             string
+	Rows                    []dashboardRowView
+	TotalCount              int
+	Page                    int
+	PageSize                int
+	HasPrev                 bool
+	HasNext                 bool
+	PrevPage                int
+	NextPage                int
+	TotalPages              int
+	ChartLabelsJSON         string
+	ChartValuesJSON         string
+	ChartActivateValuesJSON string
+	Sort                    string
+	AddressQuery            string
 }
 
 type apiDocsPageData struct {
@@ -81,6 +130,17 @@ type dashboardRowView struct {
 }
 
 const defaultDashboardPageSize = 20
+const appFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tronSightPlay" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff5951"/>
+      <stop offset="100%" stop-color="#c80f19"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="10" width="52" height="44" rx="15" fill="url(#tronSightPlay)"/>
+  <path d="M28 22L46 32L28 42V22Z" fill="#ffffff"/>
+  <circle cx="18" cy="18" r="3.5" fill="#ffd4d0" fill-opacity="0.95"/>
+</svg>`
 
 type loginPageData struct {
 	Error           string
@@ -100,6 +160,42 @@ type addWatchAddressesResponse struct {
 	Addresses          []string `json:"addresses,omitempty"`
 	DuplicateAddresses []string `json:"duplicate_addresses,omitempty"`
 	InvalidAddresses   []string `json:"invalid_addresses,omitempty"`
+}
+
+type refreshAddressRequest struct {
+	Chain     string   `json:"chain"`
+	Address   string   `json:"address"`
+	Addresses []string `json:"addresses"`
+}
+
+type refreshAddressResponse struct {
+	Success         bool     `json:"success"`
+	Message         string   `json:"message"`
+	Chain           string   `json:"chain,omitempty"`
+	Address         string   `json:"address,omitempty"`
+	Addresses       []string `json:"addresses,omitempty"`
+	TotalCount      int      `json:"total_count,omitempty"`
+	SuccessCount    int      `json:"success_count,omitempty"`
+	FailedCount     int      `json:"failed_count,omitempty"`
+	FailedAddresses []string `json:"failed_addresses,omitempty"`
+}
+
+type manualRefreshResponse struct {
+	Success       bool   `json:"success"`
+	Message       string `json:"message"`
+	Chain         string `json:"chain,omitempty"`
+	TotalCount    int    `json:"total_count,omitempty"`
+	NextAllowedAt string `json:"next_allowed_at,omitempty"`
+}
+
+type manualRefreshStatusResponse struct {
+	Success               bool     `json:"success"`
+	Running               bool     `json:"running"`
+	ActiveChains          []string `json:"active_chains,omitempty"`
+	ManualRunning         bool     `json:"manual_running"`
+	ManualActiveChains    []string `json:"manual_active_chains,omitempty"`
+	ScheduledRunning      bool     `json:"scheduled_running"`
+	ScheduledActiveChains []string `json:"scheduled_active_chains,omitempty"`
 }
 
 type actionPreviewRequest struct {
@@ -136,6 +232,32 @@ type deleteWatchAddressResponse struct {
 	FailedAddresses []string `json:"failed_addresses,omitempty"`
 }
 
+type activateAddressRequest struct {
+	Address   string   `json:"address"`
+	Addresses []string `json:"addresses"`
+}
+
+type activateAddressResponse struct {
+	Success      bool     `json:"success"`
+	Message      string   `json:"message"`
+	Address      string   `json:"address,omitempty"`
+	Addresses    []string `json:"addresses,omitempty"`
+	TotalCount   int      `json:"total_count,omitempty"`
+	SuccessCount int      `json:"success_count,omitempty"`
+	TxID         string   `json:"txid,omitempty"`
+	JobID        string   `json:"job_id,omitempty"`
+}
+
+type activateAddressStatusResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	JobID        string `json:"job_id,omitempty"`
+	TotalCount   int    `json:"total_count,omitempty"`
+	SuccessCount int    `json:"success_count,omitempty"`
+	FailedCount  int    `json:"failed_count,omitempty"`
+	Finished     bool   `json:"finished"`
+}
+
 type cacheMnemonicRequest struct {
 	Mnemonic string `json:"mnemonic"`
 }
@@ -151,6 +273,14 @@ func NewServer(
 	cfg config.WebConfig,
 	reloader addressReloader,
 	tronBalances tronBalanceRefresher,
+	tronManualBalances tronBalanceRefresher,
+	bscBalances bscBalanceRefresher,
+	bscManualBalances bscBalanceRefresher,
+	tronActivator tronAddressActivator,
+	bscClient *bsc.Client,
+	bscGasTopupPrivateKey string,
+	scheduledRefreshStatus scheduledRefreshStatusReader,
+	manualRefreshStatus manualRefreshStatusTracker,
 	energyProviders map[string]infrastructure.EnergyOrderProvider,
 	defaultEnergyProvider string,
 ) (*Server, error) {
@@ -163,19 +293,28 @@ func NewServer(
 	}
 
 	return &Server{
-		repo:                  repo,
-		reloader:              reloader,
-		tronBalances:          tronBalances,
-		listen:                cfg.Listen,
-		templates:             tmpl,
-		username:              cfg.Username,
-		password:              cfg.Password,
-		sessionName:           cfg.SessionName,
-		sessionToken:          buildSessionToken(cfg.Username, cfg.Password),
-		apiKey:                strings.TrimSpace(cfg.APIKey),
-		energyProviders:       energyProviders,
-		defaultEnergyProvider: strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
-		mnemonicStore:         newMnemonicStore(),
+		repo:                   repo,
+		reloader:               reloader,
+		tronBalances:           tronBalances,
+		tronManualBalances:     tronManualBalances,
+		bscBalances:            bscBalances,
+		bscManualBalances:      bscManualBalances,
+		scheduledRefreshStatus: scheduledRefreshStatus,
+		manualRefreshStatus:    manualRefreshStatus,
+		tronActivator:          tronActivator,
+		bscClient:              bscClient,
+		bscGasTopupPrivateKey:  strings.TrimSpace(bscGasTopupPrivateKey),
+		listen:                 cfg.Listen,
+		templates:              tmpl,
+		username:               cfg.Username,
+		password:               cfg.Password,
+		sessionName:            cfg.SessionName,
+		sessionToken:           buildSessionToken(cfg.Username, cfg.Password),
+		apiKey:                 strings.TrimSpace(cfg.APIKey),
+		energyProviders:        energyProviders,
+		defaultEnergyProvider:  strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
+		mnemonicStore:          newMnemonicStore(),
+		bscGasBatchStatus:      make(map[string]bscGasTransferJobStatus),
 	}, nil
 }
 
@@ -204,6 +343,7 @@ func NewHDWalletServer(
 		energyProviders:       energyProviders,
 		defaultEnergyProvider: strings.ToLower(strings.TrimSpace(defaultEnergyProvider)),
 		mnemonicStore:         newMnemonicStore(),
+		desktopMode:           strings.TrimSpace(os.Getenv("TRON_WATCHER_DESKTOP")) == "1",
 		walletMode:            true,
 		walletService:         walletService,
 	}, nil
@@ -229,6 +369,8 @@ func loadTemplates() (*template.Template, error) {
 func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/favicon.svg", s.handleFavicon)
+	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/", s.handleDashboard)
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
@@ -246,17 +388,27 @@ func (s *Server) Run(ctx context.Context) error {
 		mux.HandleFunc("/openapi.json", s.handleOpenAPI)
 		mux.HandleFunc("/api/bsc/watch-addresses", s.handleBSCAddWatchAddresses)
 		mux.HandleFunc("/api/bsc/delete-addresses", s.handleBSCDeleteAddresses)
+		mux.HandleFunc("/api/bsc/refresh-address", s.handleBSCRefreshAddress)
+		mux.HandleFunc("/api/bsc/manual-refresh-all", s.handleBSCManualRefreshAll)
+		mux.HandleFunc("/api/bsc/transfer-gas", s.handleBSCTransferGas)
+		mux.HandleFunc("/api/bsc/transfer-gas-status", s.handleBSCTransferGasStatus)
+		mux.HandleFunc("/api/manual-refresh-status", s.handleManualRefreshStatus)
+		mux.HandleFunc("/api/refresh-addresses", s.handleRefreshAddresses)
 		mux.HandleFunc("/api/bsc/balances", s.handleBSCDashboardBalancesAPI)
 		mux.HandleFunc("/api/bsc/transfers/in", s.handleBSCTransfersInAPI)
 		mux.HandleFunc("/api/bsc/transfers/out", s.handleBSCTransfersOutAPI)
 		mux.HandleFunc("/api/mnemonic/cache", s.handleCacheMnemonic)
 		mux.HandleFunc("/api/watch-addresses", s.handleAddWatchAddresses)
 		mux.HandleFunc("/api/tron/watch-addresses", s.handleAddWatchAddresses)
+		mux.HandleFunc("/api/tron/refresh-address", s.handleRefreshAddress)
+		mux.HandleFunc("/api/tron/manual-refresh-all", s.handleTronManualRefreshAll)
 		mux.HandleFunc("/api/tron/balances", s.handleTronBalancesAPI)
 		mux.HandleFunc("/api/tron/transfers/in", s.handleTronTransfersInAPI)
 		mux.HandleFunc("/api/tron/transfers/out", s.handleTronTransfersOutAPI)
 		mux.HandleFunc("/api/watch-address/delete", s.handleDeleteWatchAddress)
 		mux.HandleFunc("/api/tron/delete-addresses", s.handleDeleteWatchAddress)
+		mux.HandleFunc("/api/tron/activate-address", s.handleActivateAddress)
+		mux.HandleFunc("/api/tron/activate-address-status", s.handleActivateAddressStatus)
 	}
 
 	server := &http.Server{
@@ -289,6 +441,17 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(appFaviconSVG))
 }
 
 func (s *Server) handleAPIDocs(w http.ResponseWriter, r *http.Request) {
@@ -328,9 +491,10 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 
 	page := parsePositiveBSCPage(r.URL.Query().Get("page"))
 	sort := parseBSCDashboardSort(r.URL.Query().Get("sort"))
+	addressQuery := strings.TrimSpace(r.URL.Query().Get("address"))
 	pageSize := 20
 
-	total, err := s.countActiveBSCWatchAddresses(r.Context())
+	total, err := s.countActiveBSCWatchAddresses(r.Context(), addressQuery)
 	if err != nil {
 		http.Error(w, "load bsc total failed", http.StatusInternalServerError)
 		log.Printf("load bsc total failed: %v", err)
@@ -348,7 +512,7 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * pageSize
-	records, err := s.listBSCDashboardRecords(r.Context(), pageSize, offset, sort)
+	records, err := s.listBSCDashboardRecords(r.Context(), pageSize, offset, sort, addressQuery)
 	if err != nil {
 		http.Error(w, "load bsc dashboard failed", http.StatusInternalServerError)
 		log.Printf("load bsc dashboard failed: %v", err)
@@ -363,15 +527,25 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		recordViews = append(recordViews, bscDashboardRecordView{
 			Address:   record.Address,
-			BNB:       record.BNB,
-			USDT:      record.USDT,
+			BNB:       formatBSCDisplayBalance(record.BNB),
+			USDT:      formatBSCDisplayBalance(record.USDT),
 			UpdatedAt: updatedAt,
 		})
 	}
 
+	chartPoints, err := s.repo.ListDailyBSCGasTopupChart(r.Context(), 30)
+	if err != nil {
+		http.Error(w, "load bsc gas topup chart failed", http.StatusInternalServerError)
+		log.Printf("load bsc gas topup chart failed: %v", err)
+		return
+	}
+
 	data := buildBSCDashboardPageData(recordViews, page, pageSize, total)
 	data.GeneratedAt = formatBeijingTime(time.Now())
+	data.ChartLabelsJSON = toJSONString(chartLabels(chartPoints))
+	data.ChartValuesJSON = toJSONString(chartValues(chartPoints))
 	data.Sort = string(sort)
+	data.AddressQuery = addressQuery
 	if err := s.templates.ExecuteTemplate(w, "bsc_dashboard.html", data); err != nil {
 		http.Error(w, "render bsc dashboard failed", http.StatusInternalServerError)
 		log.Printf("render bsc dashboard failed: %v", err)
@@ -765,9 +939,196 @@ func (s *Server) handleCacheMnemonic(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleRefreshAddress(w http.ResponseWriter, r *http.Request) {
+	s.handleRefreshAddressesByChain(w, r, "tron")
+}
+
+func (s *Server) handleTronManualRefreshAll(w http.ResponseWriter, r *http.Request) {
+	s.handleManualRefreshAll(w, r, "tron")
+}
+
+func (s *Server) handleRefreshAddresses(w http.ResponseWriter, r *http.Request) {
+	s.handleRefreshAddressesByChain(w, r, "")
+}
+
+func (s *Server) handleManualRefreshAll(w http.ResponseWriter, r *http.Request, chain string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, manualRefreshResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	log.Printf("manual full refresh request received: chain=%s remote=%s", strings.ToUpper(chain), r.RemoteAddr)
+	totalCount, err := s.startManualRefreshAll(chain)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "20分钟") || strings.Contains(err.Error(), "进行中") || strings.Contains(err.Error(), "正在执行") {
+			status = http.StatusTooManyRequests
+		}
+		log.Printf("manual full refresh request rejected: chain=%s status=%d err=%v next_allowed_at=%s", strings.ToUpper(chain), status, err, s.nextManualRefreshAllowedAt(chain))
+		s.writeJSON(w, status, manualRefreshResponse{
+			Success:       false,
+			Message:       err.Error(),
+			Chain:         chain,
+			NextAllowedAt: s.nextManualRefreshAllowedAt(chain),
+		})
+		return
+	}
+
+	log.Printf("manual full refresh request accepted: chain=%s total=%d", strings.ToUpper(chain), totalCount)
+	s.writeJSON(w, http.StatusOK, manualRefreshResponse{
+		Success:    true,
+		Message:    fmt.Sprintf("已开始手动全量更新 %s 余额，共 %d 个地址", strings.ToUpper(chain), totalCount),
+		Chain:      chain,
+		TotalCount: totalCount,
+	})
+}
+
+func (s *Server) handleManualRefreshStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, manualRefreshStatusResponse{
+			Success: false,
+		})
+		return
+	}
+
+	manualActiveChains := s.activeManualRefreshChains()
+	scheduledActiveChains := s.activeScheduledRefreshChains()
+	s.writeJSON(w, http.StatusOK, manualRefreshStatusResponse{
+		Success:               true,
+		Running:               len(manualActiveChains) > 0 || len(scheduledActiveChains) > 0,
+		ActiveChains:          firstNonEmptyChains(manualActiveChains, scheduledActiveChains),
+		ManualRunning:         len(manualActiveChains) > 0,
+		ManualActiveChains:    manualActiveChains,
+		ScheduledRunning:      len(scheduledActiveChains) > 0,
+		ScheduledActiveChains: scheduledActiveChains,
+	})
+}
+
+func (s *Server) handleRefreshAddressesByChain(w http.ResponseWriter, r *http.Request, defaultChain string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, refreshAddressResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	var req refreshAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	chain := strings.ToLower(strings.TrimSpace(defaultChain))
+	if chain == "" {
+		chain = strings.ToLower(strings.TrimSpace(req.Chain))
+	}
+	if chain != "tron" && chain != "bsc" {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: "chain must be tron or bsc",
+		})
+		return
+	}
+
+	addresses, err := normalizeRefreshAddresses(chain, req.Address, req.Addresses)
+	if err != nil {
+		s.writeJSON(w, http.StatusBadRequest, refreshAddressResponse{
+			Success: false,
+			Message: err.Error(),
+			Chain:   chain,
+		})
+		return
+	}
+
+	if chain == "tron" {
+		if s.tronBalances == nil {
+			s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+				Success: false,
+				Message: "tron balance refresher not configured",
+				Chain:   chain,
+			})
+			return
+		}
+		if err := s.tronBalances.RefreshAddresses(r.Context(), addresses); err != nil {
+			log.Printf("refresh tron address balance failed: addresses=%v err=%v", addresses, err)
+			s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+				Success:         false,
+				Message:         "更新 Tron 余额失败",
+				Chain:           chain,
+				Address:         firstAddress(addresses),
+				Addresses:       addresses,
+				TotalCount:      len(addresses),
+				SuccessCount:    0,
+				FailedCount:     len(addresses),
+				FailedAddresses: addresses,
+			})
+			return
+		}
+		message := "Tron 地址余额更新成功"
+		if len(addresses) > 1 {
+			message = fmt.Sprintf("Tron 地址余额批量更新成功 %d / %d", len(addresses), len(addresses))
+		}
+		s.writeJSON(w, http.StatusOK, refreshAddressResponse{
+			Success:      true,
+			Message:      message,
+			Chain:        chain,
+			Address:      firstAddress(addresses),
+			Addresses:    addresses,
+			TotalCount:   len(addresses),
+			SuccessCount: len(addresses),
+		})
+		return
+	}
+
+	if s.bscBalances == nil {
+		s.writeJSON(w, http.StatusInternalServerError, refreshAddressResponse{
+			Success: false,
+			Message: "bsc balance refresher not configured",
+			Chain:   chain,
+		})
+		return
+	}
+	refreshCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	s.bscBalances.RefreshAddresses(refreshCtx, addresses)
+
+	message := "BSC 地址余额更新成功"
+	if len(addresses) > 1 {
+		message = fmt.Sprintf("BSC 地址余额批量更新成功 %d / %d", len(addresses), len(addresses))
+	}
+	s.writeJSON(w, http.StatusOK, refreshAddressResponse{
+		Success:      true,
+		Message:      message,
+		Chain:        chain,
+		Address:      firstAddress(addresses),
+		Addresses:    addresses,
+		TotalCount:   len(addresses),
+		SuccessCount: len(addresses),
+	})
+}
 func (s *Server) handleDeleteWatchAddress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 		return
 	}
 	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
@@ -842,6 +1203,150 @@ func (s *Server) handleDeleteWatchAddress(w http.ResponseWriter, r *http.Request
 		SuccessCount:    successCount,
 		FailedCount:     failedCount,
 		FailedAddresses: failedAddresses,
+	})
+}
+
+func (s *Server) handleActivateAddress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, activateAddressResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+
+	var req activateAddressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressResponse{
+			Success: false,
+			Message: "invalid json body",
+		})
+		return
+	}
+
+	addresses := normalizeActionAddresses(req.Address, req.Addresses)
+	if len(addresses) == 0 {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressResponse{
+			Success: false,
+			Message: "address or addresses is required",
+		})
+		return
+	}
+
+	if s.tronActivator == nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+			Success:    false,
+			Message:    "tron activator not configured",
+			Address:    firstAddress(addresses),
+			Addresses:  addresses,
+			TotalCount: len(addresses),
+		})
+		return
+	}
+
+	if len(addresses) == 1 {
+		service.TronLogger().Printf("tron activate address requested: address=%s", addresses[0])
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		txID, err := s.tronActivator.Activate(ctx, addresses[0])
+		cancel()
+		if err != nil {
+			s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+				Success:    false,
+				Message:    err.Error(),
+				Address:    addresses[0],
+				TotalCount: 1,
+			})
+			return
+		}
+		s.writeJSON(w, http.StatusOK, activateAddressResponse{
+			Success:      true,
+			Message:      "激活地址已发送",
+			Address:      addresses[0],
+			TotalCount:   1,
+			SuccessCount: 1,
+			TxID:         txID,
+		})
+		return
+	}
+
+	service.TronLogger().Printf("tron batch activate requested: total=%d", len(addresses))
+	jobID, queued, err := s.tronActivator.EnqueueBatch(addresses)
+	if err != nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressResponse{
+			Success:    false,
+			Message:    err.Error(),
+			Address:    firstAddress(addresses),
+			Addresses:  addresses,
+			TotalCount: len(addresses),
+		})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, activateAddressResponse{
+		Success:      true,
+		Message:      fmt.Sprintf("准备批量激活地址 %d 个，后台异步执行", queued),
+		Address:      firstAddress(addresses),
+		Addresses:    addresses,
+		TotalCount:   len(addresses),
+		SuccessCount: 0,
+		JobID:        jobID,
+	})
+}
+
+func (s *Server) handleActivateAddressStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.isAPIAuthorized(r) && !s.isAuthenticated(r) {
+		s.writeJSON(w, http.StatusUnauthorized, activateAddressStatusResponse{
+			Success: false,
+			Message: "unauthorized",
+		})
+		return
+	}
+	if s.tronActivator == nil {
+		s.writeJSON(w, http.StatusInternalServerError, activateAddressStatusResponse{
+			Success: false,
+			Message: "tron activator not configured",
+		})
+		return
+	}
+
+	jobID := strings.TrimSpace(r.URL.Query().Get("job_id"))
+	if jobID == "" {
+		s.writeJSON(w, http.StatusBadRequest, activateAddressStatusResponse{
+			Success: false,
+			Message: "job_id is required",
+		})
+		return
+	}
+
+	totalCount, successCount, failedCount, finished, ok := s.tronActivator.GetJobStatus(jobID)
+	if !ok {
+		s.writeJSON(w, http.StatusNotFound, activateAddressStatusResponse{
+			Success: false,
+			Message: "job not found",
+			JobID:   jobID,
+		})
+		return
+	}
+
+	message := "批量激活地址执行中"
+	if finished {
+		message = fmt.Sprintf("批量激活地址已完成，成功 %d 个，失败 %d 个", successCount, failedCount)
+	}
+	s.writeJSON(w, http.StatusOK, activateAddressStatusResponse{
+		Success:      true,
+		Message:      message,
+		JobID:        jobID,
+		TotalCount:   totalCount,
+		SuccessCount: successCount,
+		FailedCount:  failedCount,
+		Finished:     finished,
 	})
 }
 
@@ -994,11 +1499,296 @@ func normalizeActionAddresses(single string, batch []string) []string {
 	return result
 }
 
+func normalizeRefreshAddresses(chain string, single string, batch []string) ([]string, error) {
+	addresses := normalizeActionAddresses(single, batch)
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("address or addresses is required")
+	}
+	if len(addresses) > 100 {
+		return nil, fmt.Errorf("addresses count cannot exceed 100")
+	}
+
+	result := make([]string, 0, len(addresses))
+	for _, item := range addresses {
+		address := strings.TrimSpace(item)
+		switch chain {
+		case "tron":
+			if _, err := tron.Base58ToHex(address); err != nil {
+				return nil, fmt.Errorf("invalid tron address: %s", address)
+			}
+		case "bsc":
+			address = strings.ToLower(address)
+			if !isValidBSCAddress(address) {
+				return nil, fmt.Errorf("invalid bsc address: %s", strings.TrimSpace(item))
+			}
+		default:
+			return nil, fmt.Errorf("unsupported chain: %s", chain)
+		}
+		result = append(result, address)
+	}
+	return result, nil
+}
+
 func firstAddress(addresses []string) string {
 	if len(addresses) == 0 {
 		return ""
 	}
 	return addresses[0]
+}
+
+const (
+	manualRefreshCooldown      = 20 * time.Minute
+	manualRefreshBatchSize     = 50
+	manualRefreshBatchWait     = 300 * time.Millisecond
+	tronManualRefreshBatchWait = 1 * time.Second
+	bscManualRefreshBatchWait  = 1 * time.Second
+)
+
+func (s *Server) startManualRefreshAll(chain string) (int, error) {
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain != "tron" && chain != "bsc" {
+		return 0, fmt.Errorf("unsupported chain: %s", chain)
+	}
+	if activeChains := s.activeScheduledRefreshChains(); len(activeChains) > 0 {
+		err := fmt.Errorf("当前定时刷新任务正在执行中（%s），请稍后再试手动全量更新", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked: chain=%s reason=scheduled refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
+	}
+	s.manualRefreshMu.Lock()
+	job := s.manualRefreshJob(chain)
+	now := time.Now()
+	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
+		s.manualRefreshMu.Unlock()
+		err := fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked: chain=%s reason=manual refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
+	}
+	s.manualRefreshMu.Unlock()
+
+	switch chain {
+	case "tron":
+		if s.tronManualBalances == nil {
+			err := fmt.Errorf("tron manual balance refresher not configured")
+			log.Printf("manual full refresh blocked: chain=TRON reason=%v", err)
+			return 0, err
+		}
+	case "bsc":
+		if s.bscManualBalances == nil {
+			err := fmt.Errorf("bsc manual balance refresher not configured")
+			log.Printf("manual full refresh blocked: chain=BSC reason=%v", err)
+			return 0, err
+		}
+	}
+
+	log.Printf("manual full refresh loading addresses: chain=%s", strings.ToUpper(chain))
+	addresses, err := s.loadManualRefreshAddresses(context.Background(), chain)
+	if err != nil {
+		log.Printf("manual full refresh load addresses failed: chain=%s err=%v", strings.ToUpper(chain), err)
+		return 0, err
+	}
+	log.Printf("manual full refresh addresses loaded: chain=%s total=%d", strings.ToUpper(chain), len(addresses))
+	if len(addresses) == 0 {
+		err := fmt.Errorf("当前没有可更新的地址")
+		if chain == "bsc" {
+			err = fmt.Errorf("当前没有 BNB > 0 的 BSC 地址可更新")
+			log.Printf("manual full refresh blocked: chain=BSC reason=no addresses available filter=BNB>0")
+		} else {
+			log.Printf("manual full refresh blocked: chain=%s reason=no addresses available", strings.ToUpper(chain))
+		}
+		return 0, err
+	}
+
+	s.manualRefreshMu.Lock()
+	job = s.manualRefreshJob(chain)
+	now = time.Now()
+	if activeChains := s.activeManualRefreshChainsLocked(); len(activeChains) > 0 {
+		s.manualRefreshMu.Unlock()
+		err := fmt.Errorf("当前手动全量更新任务正在执行中（%s），请稍后再试", strings.Join(activeChains, ", "))
+		log.Printf("manual full refresh blocked after loading addresses: chain=%s reason=manual refresh running active=%s", strings.ToUpper(chain), strings.Join(activeChains, ","))
+		return 0, err
+	}
+	if !job.lastStarted.IsZero() && now.Before(job.lastStarted.Add(manualRefreshCooldown)) {
+		nextAllowed := job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
+		s.manualRefreshMu.Unlock()
+		err := fmt.Errorf("%s 手动全量更新 20分钟内不能重复操作，下次可用时间：%s", strings.ToUpper(chain), nextAllowed)
+		log.Printf("manual full refresh blocked: chain=%s reason=cooldown next_allowed_at=%s", strings.ToUpper(chain), nextAllowed)
+		return 0, err
+	}
+	job.running = true
+	job.lastStarted = now
+	if s.manualRefreshStatus != nil {
+		s.manualRefreshStatus.Start(chain)
+	}
+	s.manualRefreshMu.Unlock()
+
+	log.Printf("manual full refresh queued: chain=%s total=%d cooldown=%s", strings.ToUpper(chain), len(addresses), manualRefreshCooldown)
+	go s.runManualRefreshAll(chain, addresses)
+	return len(addresses), nil
+}
+
+func (s *Server) runManualRefreshAll(chain string, addresses []string) {
+	defer s.finishManualRefresh(chain)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+
+	log.Printf("manual full refresh started: chain=%s total=%d batch_size=%d", chain, len(addresses), manualRefreshBatchSize)
+	for start := 0; start < len(addresses); start += manualRefreshBatchSize {
+		end := start + manualRefreshBatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[start:end]
+		page := start/manualRefreshBatchSize + 1
+		totalPages := (len(addresses) + manualRefreshBatchSize - 1) / manualRefreshBatchSize
+		log.Printf("manual full refresh batch: chain=%s page=%d/%d size=%d", chain, page, totalPages, len(batch))
+
+		switch chain {
+		case "tron":
+			if s.tronManualBalances == nil {
+				log.Printf("manual full refresh skipped: chain=tron reason=balance refresher not configured")
+				return
+			}
+			if err := s.tronManualBalances.RefreshAddressesWithPositiveTRX(ctx, batch); err != nil {
+				log.Printf("manual full refresh batch failed: chain=%s page=%d err=%v", chain, page, err)
+			}
+		case "bsc":
+			if s.bscManualBalances == nil {
+				log.Printf("manual full refresh skipped: chain=bsc reason=balance refresher not configured")
+				return
+			}
+			log.Printf("manual full refresh batch dispatch: chain=bsc page=%d/%d size=%d filter=BNB>0", page, totalPages, len(batch))
+			s.bscManualBalances.RefreshAddresses(ctx, batch)
+			log.Printf("manual full refresh batch dispatched: chain=bsc page=%d/%d size=%d", page, totalPages, len(batch))
+		}
+
+		if end < len(addresses) {
+			waitDuration := manualRefreshBatchWait
+			if chain == "tron" {
+				waitDuration = tronManualRefreshBatchWait
+			} else if chain == "bsc" {
+				waitDuration = bscManualRefreshBatchWait
+			}
+			timer := time.NewTimer(waitDuration)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Printf("manual full refresh canceled: chain=%s err=%v", chain, ctx.Err())
+				return
+			case <-timer.C:
+			}
+		}
+	}
+	log.Printf("manual full refresh finished: chain=%s total=%d", chain, len(addresses))
+}
+
+func (s *Server) finishManualRefresh(chain string) {
+	if s.manualRefreshStatus != nil {
+		s.manualRefreshStatus.Finish(chain)
+	}
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	s.manualRefreshJob(chain).running = false
+	log.Printf("manual full refresh state cleared: chain=%s", strings.ToUpper(chain))
+}
+
+func (s *Server) nextManualRefreshAllowedAt(chain string) string {
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	job := s.manualRefreshJob(chain)
+	if job.lastStarted.IsZero() {
+		return ""
+	}
+	return job.lastStarted.Add(manualRefreshCooldown).Format("2006-01-02 15:04:05")
+}
+
+func (s *Server) activeManualRefreshChainsLocked() []string {
+	result := make([]string, 0, 2)
+	if s.tronManualRefresh.running {
+		result = append(result, "TRON")
+	}
+	if s.bscManualRefresh.running {
+		result = append(result, "BSC")
+	}
+	return result
+}
+
+func (s *Server) activeManualRefreshChains() []string {
+	if s == nil {
+		return nil
+	}
+	if s.manualRefreshStatus != nil {
+		active := s.manualRefreshStatus.ActiveChains()
+		if len(active) > 0 {
+			result := make([]string, 0, len(active))
+			for _, chain := range active {
+				chain = strings.ToUpper(strings.TrimSpace(chain))
+				if chain == "" {
+					continue
+				}
+				result = append(result, chain)
+			}
+			return result
+		}
+	}
+
+	s.manualRefreshMu.Lock()
+	defer s.manualRefreshMu.Unlock()
+	return s.activeManualRefreshChainsLocked()
+}
+
+func (s *Server) manualRefreshJob(chain string) *manualBalanceRefreshJob {
+	if strings.EqualFold(strings.TrimSpace(chain), "bsc") {
+		return &s.bscManualRefresh
+	}
+	return &s.tronManualRefresh
+}
+
+func (s *Server) loadManualRefreshAddresses(ctx context.Context, chain string) ([]string, error) {
+	switch chain {
+	case "tron":
+		if s.reloader == nil {
+			return nil, fmt.Errorf("tron address cache not configured")
+		}
+		return s.reloader.List(), nil
+	case "bsc":
+		if s.repo == nil {
+			return nil, fmt.Errorf("bsc repository not configured")
+		}
+		return repository.LoadActiveBSCWatchAddressesWithPositiveBNBBalance(ctx, s.repo)
+	default:
+		return nil, fmt.Errorf("unsupported chain: %s", chain)
+	}
+}
+
+func (s *Server) activeScheduledRefreshChains() []string {
+	if s == nil || s.scheduledRefreshStatus == nil {
+		return nil
+	}
+
+	active := s.scheduledRefreshStatus.ActiveChains()
+	if len(active) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(active))
+	for _, chain := range active {
+		chain = strings.ToUpper(strings.TrimSpace(chain))
+		if chain == "" {
+			continue
+		}
+		result = append(result, chain)
+	}
+	return result
+}
+
+func firstNonEmptyChains(groups ...[]string) []string {
+	for _, group := range groups {
+		if len(group) > 0 {
+			return group
+		}
+	}
+	return nil
 }
 
 func scoreByAction(action string) int {

@@ -214,6 +214,64 @@
           }
         }
       },
+      "RefreshAddressesRequest": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "description": "链类型，仅通用接口需要传入：tron 或 bsc"
+          },
+          "address": {
+            "type": "string",
+            "description": "单个地址"
+          },
+          "addresses": {
+            "type": "array",
+            "description": "批量地址列表，最多 100 个",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RefreshAddressesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "total_count": {
+            "type": "integer"
+          },
+          "success_count": {
+            "type": "integer"
+          },
+          "failed_count": {
+            "type": "integer"
+          },
+          "failed_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "BalanceRecord": {
         "type": "object",
         "properties": {
@@ -574,6 +632,194 @@
           },
           "401": {
             "description": "未登录"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/refresh-addresses": {
+      "post": {
+        "summary": "通用刷新地址余额",
+        "description": "支持 tron / bsc 单地址或批量刷新余额。请求体中的 chain 必填，批量最多 100 个地址。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshAddressesRequest"
+              },
+              "examples": {
+                "single_tron": {
+                  "summary": "单个 Tron 地址",
+                  "value": {
+                    "chain": "tron",
+                    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                  }
+                },
+                "batch_bsc": {
+                  "summary": "批量 BSC 地址",
+                  "value": {
+                    "chain": "bsc",
+                    "addresses": [
+                      "0x1111111111111111111111111111111111111111",
+                      "0x2222222222222222222222222222222222222222"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "刷新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/tron/refresh-address": {
+      "post": {
+        "summary": "刷新 Tron 地址余额",
+        "description": "兼容旧接口。链类型固定为 tron，支持单地址或批量刷新，最多 100 个地址。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshAddressesRequest"
+              },
+              "examples": {
+                "single": {
+                  "summary": "单个地址",
+                  "value": {
+                    "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                  }
+                },
+                "batch": {
+                  "summary": "批量地址",
+                  "value": {
+                    "addresses": [
+                      "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+                      "TYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "刷新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误"
+          },
+          "401": {
+            "description": "未授权"
+          },
+          "500": {
+            "description": "服务端错误"
+          }
+        }
+      }
+    },
+    "/api/bsc/refresh-address": {
+      "post": {
+        "summary": "刷新 BSC 地址余额",
+        "description": "兼容旧接口。链类型固定为 bsc，支持单地址或批量刷新，最多 100 个地址。",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshAddressesRequest"
+              },
+              "examples": {
+                "single": {
+                  "summary": "单个地址",
+                  "value": {
+                    "address": "0x1111111111111111111111111111111111111111"
+                  }
+                },
+                "batch": {
+                  "summary": "批量地址",
+                  "value": {
+                    "addresses": [
+                      "0x1111111111111111111111111111111111111111",
+                      "0x2222222222222222222222222222222222222222"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "刷新成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshAddressesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误"
+          },
+          "401": {
+            "description": "未授权"
           },
           "500": {
             "description": "服务端错误"

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>BSC币安链监控平台</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     :root {
       --bg: #f4f7fb;
@@ -11,10 +12,11 @@
       --line: #e5e7eb;
       --text: #111827;
       --subtext: #6b7280;
-      --brand: #f59e0b;
-      --brand-soft: #fffbeb;
-      --action: #4b5563;
-      --action-soft: #f3f4f6;
+      --brand: #d4af37;
+      --brand-soft: #17130a;
+      --brand-border: #6f5a1c;
+      --action: #111111;
+      --action-soft: #1b1b1b;
       --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
       --radius: 18px;
     }
@@ -89,12 +91,13 @@
 
     .nav a {
       text-decoration: none;
-      border: 1px solid var(--line);
-      background: var(--card);
-      color: var(--text);
+      border: 1px solid var(--brand-border);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
       border-radius: 12px;
       padding: 10px 14px;
       font-size: 14px;
+      box-shadow: inset 0 1px 0 rgba(255, 215, 90, 0.08);
     }
 
     .card {
@@ -103,6 +106,45 @@
       box-shadow: var(--shadow);
       padding: 18px;
       margin-bottom: 14px;
+    }
+
+    .chart-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    .chart-head {
+      margin-bottom: 12px;
+    }
+
+    .chart-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .chart-subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .chart-wrap {
+      overflow-x: auto;
+    }
+
+    .chart-canvas {
+      width: 100%;
+      min-width: 900px;
+      height: auto;
+      display: block;
+      border-radius: 14px;
+      background: #fff;
     }
 
     .add-head {
@@ -157,8 +199,9 @@
     }
 
     .button-brand {
-      background: var(--brand-soft);
       color: var(--brand);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      border-color: var(--brand-border);
     }
 
     .toolbar {
@@ -170,6 +213,14 @@
       margin-bottom: 14px;
     }
 
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
     .toolbar-text {
       color: var(--subtext);
       font-size: 14px;
@@ -179,7 +230,19 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      margin-left: auto;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .toolbar-primary-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      justify-content: flex-end;
+      flex-shrink: 0;
     }
 
     .sort-form {
@@ -187,6 +250,13 @@
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
+    }
+
+    .search-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
     }
 
     .sort-label {
@@ -205,18 +275,38 @@
       font-size: 14px;
     }
 
+    .search-input {
+      min-width: 220px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .search-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+
     .button {
-      border: 0;
+      border: 1px solid var(--brand-border);
       border-radius: 12px;
       padding: 10px 14px;
       font-size: 14px;
       font-weight: 700;
       cursor: pointer;
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
+      box-shadow: inset 0 1px 0 rgba(255, 215, 90, 0.08);
     }
 
     .button-danger {
-      background: var(--action-soft);
-      color: var(--action);
+      background: linear-gradient(180deg, #201a0d, #15110a);
+      color: var(--brand);
     }
 
     .table-wrap {
@@ -241,9 +331,32 @@
       font-weight: 600;
     }
 
+    .action-column {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .row-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      margin-left: auto;
+    }
+
     .mono {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       word-break: break-all;
+    }
+
+    .address-link {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    .address-link:hover {
+      text-decoration: underline;
     }
 
     .delete-link {
@@ -290,14 +403,15 @@
       border-radius: 12px;
       padding: 10px 12px;
       font-size: 14px;
-      border: 1px solid var(--line);
-      background: var(--card);
-      color: var(--text);
+      border: 1px solid var(--brand-border);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
+      box-shadow: inset 0 1px 0 rgba(255, 215, 90, 0.08);
     }
 
     .pager-nav .disabled {
-      color: #9ca3af;
-      background: #f9fafb;
+      color: #8f7a35;
+      background: #141414;
     }
 
     .mobile-list {
@@ -329,18 +443,19 @@
       margin-top: 10px;
       display: flex;
       justify-content: flex-end;
+      gap: 8px;
     }
 
     .balance-link {
       border: 0;
       padding: 0;
       background: transparent;
-      color: var(--brand);
+      color: #caa43b;
       font: inherit;
       font-weight: 700;
       cursor: pointer;
       text-decoration: underline;
-      text-decoration-color: rgba(245, 158, 11, 0.35);
+      text-decoration-color: rgba(212, 175, 55, 0.45);
       text-underline-offset: 3px;
     }
 
@@ -371,12 +486,38 @@
       z-index: 30;
     }
 
+    .dialog-mask.show {
+      display: flex;
+    }
+
     .dialog {
       width: min(420px, 100%);
       background: #fff;
       border-radius: 18px;
       padding: 18px;
       box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+    }
+
+    .dialog-success-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(22, 163, 74, 0.1);
+      color: #15803d;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .dialog-success-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.12);
     }
 
     .dialog-title {
@@ -400,21 +541,23 @@
     }
 
     .dialog-actions button {
-      border: 0;
+      border: 1px solid var(--brand-border);
       border-radius: 12px;
       padding: 10px 14px;
       font-size: 14px;
       cursor: pointer;
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
     }
 
     .dialog-cancel {
-      background: #f3f4f6;
-      color: var(--text);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
     }
 
     .dialog-ok {
-      background: var(--action);
-      color: #fff;
+      background: linear-gradient(180deg, #1f190b, #141008);
+      color: var(--brand);
     }
 
     .transfer-mask {
@@ -467,9 +610,9 @@
     }
 
     .transfer-close {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--text);
+      border: 1px solid var(--brand-border);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
       border-radius: 12px;
       padding: 10px 14px;
       font-size: 14px;
@@ -493,9 +636,9 @@
     }
 
     .transfer-tab {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--text);
+      border: 1px solid var(--brand-border);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
       border-radius: 999px;
       padding: 8px 14px;
       font-size: 14px;
@@ -503,8 +646,8 @@
     }
 
     .transfer-tab.active {
-      background: var(--brand-soft);
-      border-color: var(--brand);
+      background: linear-gradient(180deg, #2a2110, #18120a);
+      border-color: #a8842b;
       color: var(--brand);
     }
 
@@ -582,9 +725,9 @@
     }
 
     .transfer-pager-btn {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--text);
+      border: 1px solid var(--brand-border);
+      background: linear-gradient(180deg, #171717, #0f0f0f);
+      color: var(--brand);
       border-radius: 10px;
       padding: 9px 14px;
       font-size: 14px;
@@ -593,8 +736,8 @@
 
     .transfer-pager-btn:disabled {
       cursor: not-allowed;
-      color: #9ca3af;
-      background: #f3f4f6;
+      color: #8f7a35;
+      background: #141414;
     }
 
     @media (max-width: 900px) {
@@ -636,6 +779,18 @@
       .transfer-close {
         width: 100%;
       }
+
+      .toolbar,
+      .toolbar-left,
+      .toolbar-actions {
+        align-items: stretch;
+      }
+
+      .toolbar-actions {
+        flex-wrap: wrap;
+        margin-left: 0;
+        justify-content: flex-start;
+      }
     }
   </style>
 </head>
@@ -658,28 +813,29 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="add-head">
-        <div>
-          <h2 class="add-title">增加地址</h2>
-          <p class="add-subtitle">支持单个或批量添加，多个地址请每行一个，必须是 0x 开头的 BSC 地址。</p>
-        </div>
+    <div class="chart-card">
+      <div class="chart-head">
+        <h2 class="chart-title">每日Gas充值柱状图</h2>
+        <p class="chart-subtitle">横轴按日期，纵轴按每日 Gas 充值成功次数统计，点击柱子可查看当天数值。</p>
       </div>
-      <div class="add-form">
-        <div>
-          <label class="add-label" for="addressInput">地址列表</label>
-          <textarea id="addressInput" class="add-textarea" placeholder="0x0000000000000000000000000000000000000000&#10;0x1111111111111111111111111111111111111111"></textarea>
-        </div>
-        <button id="addBtn" class="button button-brand" type="button" onclick="handleAddAddresses()">添加地址</button>
+      <div class="chart-wrap">
+        <canvas
+          id="bscGasChart"
+          class="chart-canvas"
+          width="1100"
+          height="280"
+          data-labels='{{ .ChartLabelsJSON }}'
+          data-values='{{ .ChartValuesJSON }}'></canvas>
       </div>
     </div>
 
     <div class="card">
       <div class="toolbar">
-        <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
-        <div class="toolbar-actions">
+        <div class="toolbar-left">
+          <div class="toolbar-text">当前页已选 <span id="selectedCount">0</span> 个地址，共 {{ .Total }} 条记录</div>
           <form class="sort-form" method="get" action="/bsc">
             <input type="hidden" name="page" value="1">
+            <input type="hidden" name="address" value="{{ .AddressQuery }}">
             <label class="sort-label" for="sortSelect">Sort 排序</label>
             <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
               <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
@@ -688,7 +844,21 @@
               <option value="bnb_asc" {{ if eq .Sort "bnb_asc" }}selected{{ end }}>BNB 余额 从小到大</option>
             </select>
           </form>
-          <button class="button button-danger" type="button" onclick="handleBatchDelete()">批量删除地址</button>
+        </div>
+        <div class="toolbar-actions">
+          <form class="search-form" method="get" action="/bsc">
+            <input type="hidden" name="page" value="1">
+            <input type="hidden" name="sort" value="{{ .Sort }}">
+            <input id="addressSearch" class="search-input" type="text" name="address" value="{{ .AddressQuery }}" placeholder="输入 BSC 地址片段快速过滤">
+            <button class="button button-brand" type="submit">检索</button>
+            {{ if .AddressQuery }}
+            <a class="button search-link" href="/bsc?sort={{ .Sort }}">清空</a>
+            {{ end }}
+          </form>
+          <div class="toolbar-primary-actions">
+            <button id="manualFullRefreshBtn" class="button button-brand" type="button" onclick="handleManualFullRefreshBSC()" hidden>手动全量更新</button>
+            <button id="batchTransferGasBtn" class="button button-brand" type="button" onclick="handleBatchTransferBSCGas()">批量转手续费</button>
+          </div>
         </div>
       </div>
 
@@ -696,12 +866,12 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 48px;"><input id="selectAll" type="checkbox"></th>
-              <th>地址</th>
-              <th>BNB</th>
-              <th>USDT</th>
-              <th>更新时间</th>
-              <th>操作</th>
+	              <th style="width: 48px;"><input id="selectAll" type="checkbox"></th>
+	              <th>地址</th>
+	              <th>BNB</th>
+	              <th>USDT</th>
+	              <th>更新时间</th>
+	              <th class="action-column">功能</th>
             </tr>
           </thead>
           <tbody>
@@ -709,16 +879,21 @@
               {{ range .Records }}
                 <tr>
                   <td><input class="address-checkbox" type="checkbox" value="{{ .Address }}"></td>
-                  <td class="mono">{{ .Address }}</td>
+                  <td class="mono"><a class="address-link" href="https://bscscan.com/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'BNB')">{{ .BNB }}</button></td>
                   <td><button class="balance-link" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDT }}</button></td>
-                  <td>{{ .UpdatedAt }}</td>
-                  <td><button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button></td>
+	                  <td>{{ .UpdatedAt }}</td>
+	                  <td class="action-column">
+	                    <div class="row-actions">
+                      <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
+                      <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
+                    </div>
+                  </td>
                 </tr>
               {{ end }}
             {{ else }}
               <tr>
-                <td class="empty" colspan="6">暂无 BSC 监控地址</td>
+                <td class="empty" colspan="6">{{ if .AddressQuery }}未找到匹配的 BSC 地址{{ else }}暂无 BSC 监控地址{{ end }}</td>
               </tr>
             {{ end }}
           </tbody>
@@ -734,7 +909,7 @@
               </div>
               <div class="mobile-row">
                 <div class="mobile-label">地址</div>
-                <div class="mono">{{ .Address }}</div>
+                <div class="mono"><a class="address-link" href="https://bscscan.com/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></div>
               </div>
               <div class="mobile-row">
                 <div class="mobile-label">BNB</div>
@@ -749,7 +924,8 @@
                 <div>{{ .UpdatedAt }}</div>
               </div>
               <div class="mobile-actions">
-                <button class="delete-link" type="button" data-address="{{ .Address }}" onclick="handleSingleDelete(this)">删除地址</button>
+                <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleRefreshBSCAddress(this)">更新余额</button>
+                <button class="button button-brand" type="button" data-address="{{ .Address }}" onclick="handleTransferBSCGas(this)">转手续费</button>
               </div>
             </div>
           {{ end }}
@@ -760,12 +936,12 @@
         <div class="pager-info">第 {{ .Page }} / {{ .TotalPages }} 页，每页 {{ .PageSize }} 条</div>
         <div class="pager-nav">
           {{ if .HasPrev }}
-            <a href="/bsc?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+            <a href="/bsc?page={{ .PrevPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">上一页</a>
           {{ else }}
             <span class="disabled">上一页</span>
           {{ end }}
           {{ if .HasNext }}
-            <a href="/bsc?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+            <a href="/bsc?page={{ .NextPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">下一页</a>
           {{ else }}
             <span class="disabled">下一页</span>
           {{ end }}
@@ -782,7 +958,18 @@
       <p id="confirmText" class="dialog-text"></p>
       <div class="dialog-actions">
         <button id="confirmCancel" class="dialog-cancel" type="button">取消</button>
-        <button id="confirmOk" class="dialog-ok" type="button">确认删除</button>
+        <button id="confirmOk" class="dialog-ok" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="completionMask" class="dialog-mask">
+    <div class="dialog">
+      <div class="dialog-success-badge">任务完成</div>
+      <h3 id="completionTitle" class="dialog-title">操作已完成</h3>
+      <p id="completionText" class="dialog-text"></p>
+      <div class="dialog-actions">
+        <button id="completionOk" class="dialog-ok" type="button">知道了</button>
       </div>
     </div>
   </div>
@@ -844,6 +1031,11 @@
       totalCount: 0,
       requestId: 0
     };
+    let manualRefreshStatusTimer = null;
+    const manualRefreshIdleText = '手动全量更新';
+    const manualRefreshRunningText = '有手动任务执行中';
+    const scheduledRefreshRunningText = '有后台定时任务运行中';
+    let bscTransferGasStatusPollTimer = null;
 
     function showToast(message) {
       const toast = document.getElementById('toast');
@@ -853,6 +1045,64 @@
       showToast.timer = window.setTimeout(() => {
         toast.style.display = 'none';
       }, 2200);
+    }
+
+    function showCompletionNotice(message, title = '操作已完成') {
+      showToast(message);
+      const mask = document.getElementById('completionMask');
+      const titleNode = document.getElementById('completionTitle');
+      const textNode = document.getElementById('completionText');
+      const okBtn = document.getElementById('completionOk');
+      if (!mask || !titleNode || !textNode || !okBtn) {
+        return;
+      }
+      titleNode.textContent = title;
+      textNode.textContent = message;
+      mask.classList.add('show');
+      okBtn.onclick = () => {
+        mask.classList.remove('show');
+      };
+      mask.onclick = (event) => {
+        if (event.target === mask) {
+          mask.classList.remove('show');
+        }
+      };
+    }
+
+    function setManualRefreshButtonState(status) {
+      const button = document.getElementById('manualFullRefreshBtn');
+      if (!button) {
+        return;
+      }
+      const scheduledRunning = Boolean(status && status.scheduled_running);
+      const manualRunning = Boolean(status && status.manual_running);
+      if (scheduledRunning) {
+        button.disabled = true;
+        button.textContent = scheduledRefreshRunningText;
+        return;
+      }
+      if (manualRunning) {
+        button.disabled = true;
+        button.textContent = manualRefreshRunningText;
+        return;
+      }
+      button.disabled = false;
+      button.textContent = manualRefreshIdleText;
+    }
+
+    async function refreshManualRefreshStatus() {
+      try {
+        const resp = await fetch('/api/manual-refresh-status', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          return;
+        }
+        setManualRefreshButtonState(data);
+      } catch (error) {
+      }
     }
 
     function escapeHTML(value) {
@@ -881,7 +1131,7 @@
     }
 
     function openTransferModal(address, asset) {
-      transferState.address = String(address || '').trim();
+      transferState.address = String(address || '').trim().toLowerCase();
       transferState.asset = String(asset || '').trim().toUpperCase();
       transferState.direction = 'in';
       transferState.page = 1;
@@ -998,7 +1248,9 @@
         transferState.totalCount = 0;
         loading.style.display = 'none';
         empty.style.display = 'block';
-        empty.textContent = '记录为空';
+        tableWrap.style.display = 'none';
+        pager.style.display = 'none';
+        empty.textContent = (error && error.message) ? `加载失败：${error.message}` : '加载失败';
       }
     }
 
@@ -1053,6 +1305,323 @@
       }
     }
 
+    function drawBSCGasChart() {
+      const canvas = document.getElementById('bscGasChart');
+      if (!canvas || !canvas.getContext) {
+        return;
+      }
+      const labels = JSON.parse(canvas.dataset.labels || '[]');
+      const values = JSON.parse(canvas.dataset.values || '[]');
+      if (!labels.length || !values.length) {
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 20, right: 16, bottom: 42, left: 42 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      const maxValue = Math.max(...values, 1);
+      const slotWidth = chartWidth / Math.max(values.length, 1);
+      const barWidth = Math.min(28, Math.max(10, slotWidth * 0.58));
+      const barHits = [];
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, padding.top);
+      ctx.lineTo(padding.left, padding.top + chartHeight);
+      ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+      ctx.stroke();
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i <= 4; i++) {
+        const value = Math.round((maxValue / 4) * (4 - i));
+        const y = padding.top + (chartHeight / 4) * i;
+        ctx.strokeStyle = '#f3f4f6';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(padding.left + chartWidth, y);
+        ctx.stroke();
+        ctx.fillText(String(value), padding.left - 8, y);
+      }
+
+      ctx.fillStyle = '#d4af37';
+      values.forEach((value, index) => {
+        const centerX = padding.left + slotWidth * index + slotWidth / 2;
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        const x = centerX - barWidth / 2;
+        const h = Math.max(2, padding.top + chartHeight - y);
+        ctx.fillRect(x, y, barWidth, h);
+        barHits.push({
+          x,
+          y,
+          width: barWidth,
+          height: h,
+          label: labels[index],
+          value,
+        });
+        ctx.fillStyle = '#4b5563';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        if (value > 0) {
+          ctx.fillText(String(value), x + barWidth / 2, y - 3);
+        }
+        ctx.fillStyle = '#d4af37';
+      });
+
+      ctx.fillRect(padding.left + 8, 10, 10, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Gas充值次数', padding.left + 22, 15);
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const tickStep = labels.length > 10 ? Math.ceil(labels.length / 6) : 1;
+      labels.forEach((label, index) => {
+        if (index % tickStep !== 0 && index !== labels.length - 1) {
+          return;
+        }
+        const x = padding.left + slotWidth * index + slotWidth / 2;
+        ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
+      });
+
+      canvas._barHits = barHits;
+      if (!canvas.dataset.barClickBound) {
+        canvas.dataset.barClickBound = '1';
+        canvas.style.cursor = 'pointer';
+        canvas.addEventListener('click', (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (event.clientX - rect.left) * scaleX;
+          const y = (event.clientY - rect.top) * scaleY;
+          const hit = (canvas._barHits || []).find((item) => (
+            x >= item.x &&
+            x <= item.x + item.width &&
+            y >= item.y &&
+            y <= item.y + item.height
+          ));
+          if (!hit) {
+            return;
+          }
+          showToast(`${hit.label} Gas充值次数：${hit.value}`);
+        });
+      }
+    }
+
+    async function handleRefreshBSCAddress(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '更新中...';
+
+      try {
+        const resp = await fetch('/api/bsc/refresh-address', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: address })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '更新余额失败');
+          return;
+        }
+        showToast(data.message || '地址余额更新成功');
+        window.setTimeout(() => window.location.reload(), 500);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    async function handleManualFullRefreshBSC() {
+      const button = document.getElementById('manualFullRefreshBtn');
+      if (button && button.disabled) {
+        return;
+      }
+      const confirmed = await showConfirm('手动全量更新', '确认开始手动全量更新全部 BSC 关注地址余额吗？系统会后台分页执行，20 分钟内不能重复操作。', '确认开始');
+      if (!confirmed) {
+        return;
+      }
+
+      const originalText = button ? button.textContent : '手动全量更新';
+      let started = false;
+      if (button) {
+        button.disabled = true;
+        button.textContent = '启动中...';
+      }
+
+      try {
+        const resp = await fetch('/api/bsc/manual-refresh-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '手动全量更新启动失败');
+          return;
+        }
+        started = true;
+        setManualRefreshButtonState({ manual_running: true, scheduled_running: false });
+        showToast(data.message || '已开始手动全量更新余额');
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (button && !started) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
+    }
+
+    async function handleTransferBSCGas(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const confirmed = await showConfirm('转手续费', `确认给地址 ${address} 转 0.001 BNB 手续费吗？`, '确认转账');
+      if (!confirmed) {
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '转账中...';
+
+      try {
+        const resp = await fetch('/api/bsc/transfer-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: address })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '转手续费失败');
+          return;
+        }
+        showToast(data.tx_hash ? `转手续费成功: ${data.tx_hash.slice(0, 12)}...` : '转手续费成功');
+        window.setTimeout(() => window.location.reload(), 800);
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    async function handleBatchTransferBSCGas() {
+      const addresses = getUniqueSelectedAddresses();
+      if (!addresses.length) {
+        showToast('请先勾选地址');
+        return;
+      }
+
+      const confirmed = await showConfirm('批量转手续费', `确认给当前勾选的 ${addresses.length} 个地址批量转 0.001 BNB 手续费吗？`, '确认批量转账');
+      if (!confirmed) {
+        return;
+      }
+
+      const button = document.getElementById('batchTransferGasBtn');
+      const originalText = button ? button.textContent : '批量转手续费';
+      if (button) {
+        button.disabled = true;
+        button.textContent = '批量转账中...';
+      }
+
+      try {
+        const resp = await fetch('/api/bsc/transfer-gas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addresses })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量转手续费失败');
+          return;
+        }
+        showToast(data.message || '批量转手续费任务已提交');
+        if (data.job_id) {
+          startBSCTransferGasStatusPolling(data.job_id);
+        }
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
+    }
+
+    function stopBSCTransferGasStatusPolling() {
+      if (bscTransferGasStatusPollTimer) {
+        window.clearTimeout(bscTransferGasStatusPollTimer);
+        bscTransferGasStatusPollTimer = null;
+      }
+    }
+
+    async function pollBSCTransferGasStatus(jobId) {
+      try {
+        const resp = await fetch(`/api/bsc/transfer-gas-status?job_id=${encodeURIComponent(jobId)}`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量转手续费状态查询失败');
+          stopBSCTransferGasStatusPolling();
+          return;
+        }
+        if (data.finished) {
+          stopBSCTransferGasStatusPolling();
+          const failedCount = Number(data.failed_count || 0);
+          const successCount = Number(data.success_count || 0);
+          if (failedCount > 0) {
+            showCompletionNotice(`本次共处理 ${successCount + failedCount} 个地址，成功 ${successCount} 个，失败 ${failedCount} 个。`, '批量转手续费已完成');
+          } else {
+            showCompletionNotice(`本次共成功转出 ${successCount} 个地址的手续费。`, '批量转手续费已完成');
+          }
+          window.setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
+        bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 2000);
+      } catch (error) {
+        bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 3000);
+      }
+    }
+
+    function startBSCTransferGasStatusPolling(jobId) {
+      if (!jobId) {
+        return;
+      }
+      stopBSCTransferGasStatusPolling();
+      bscTransferGasStatusPollTimer = window.setTimeout(() => pollBSCTransferGasStatus(jobId), 2000);
+    }
+
     function getUniqueSelectedAddresses() {
       const boxes = Array.from(document.querySelectorAll('.address-checkbox:checked'));
       return Array.from(new Set(boxes.map((box) => box.value).filter(Boolean)));
@@ -1089,7 +1658,7 @@
       selectAll.checked = all.length > 0 && selected.length === all.length;
     }
 
-    async function showConfirm(title, message) {
+    async function showConfirm(title, message, okText = '确认') {
       return new Promise((resolve) => {
         const mask = document.getElementById('confirmMask');
         const titleNode = document.getElementById('confirmTitle');
@@ -1099,6 +1668,7 @@
 
         titleNode.textContent = title;
         textNode.textContent = message;
+        ok.textContent = okText;
         mask.style.display = 'flex';
 
         const cleanup = (result) => {
@@ -1117,57 +1687,6 @@
           }
         };
       });
-    }
-
-    async function deleteAddresses(addresses) {
-      const resp = await fetch('/api/bsc/delete-addresses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: addresses })
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        throw new Error(data.message || '删除失败');
-      }
-      return data;
-    }
-
-    async function handleSingleDelete(button) {
-      const address = button.dataset.address || '';
-      if (!address) {
-        showToast('地址参数缺失');
-        return;
-      }
-      const ok = await showConfirm('删除地址', '删除后该地址将不再参与 BSC 监控，是否继续？');
-      if (!ok) {
-        return;
-      }
-      try {
-        await deleteAddresses([address]);
-        showToast('删除成功');
-        window.setTimeout(() => window.location.reload(), 400);
-      } catch (error) {
-        showToast(error.message || '删除失败');
-      }
-    }
-
-    async function handleBatchDelete() {
-      const addresses = getUniqueSelectedAddresses();
-      if (!addresses.length) {
-        showToast('请先勾选地址');
-        return;
-      }
-      const ok = await showConfirm('批量删除地址', `本次将删除 ${addresses.length} 个 BSC 地址，删除后将不再参与监控。`);
-      if (!ok) {
-        return;
-      }
-      try {
-        await deleteAddresses(addresses);
-        showToast('批量删除成功');
-        window.setTimeout(() => window.location.reload(), 400);
-      } catch (error) {
-        showToast(error.message || '批量删除失败');
-      }
     }
 
     document.querySelectorAll('.address-checkbox').forEach((box) => {
@@ -1196,8 +1715,10 @@
       }
     });
 
+    drawBSCGasChart();
     updateSelectedCount();
     syncSelectAll();
+    refreshManualRefreshStatus();
+    manualRefreshStatusTimer = window.setInterval(refreshManualRefreshStatus, 5000);
   </script>
-</body>
 </html>

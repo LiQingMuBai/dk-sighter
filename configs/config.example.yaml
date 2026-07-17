@@ -1,77 +1,169 @@
+# 应用基础配置
 app:
+  # 应用名称，仅用于标识
   name: tron-watcher
+  # 运行模式：watcher / hd_wallet
   mode: hd_wallet
+  # hd_wallet 模式下预生成的钱包数量
   hd_wallet_count: 10000
+  # 本地模式：true 时暂停主服务扫块任务
+  local: false
+
+# MySQL 数据库配置
 mysql:
+  # MySQL 连接串
   dsn: ""
+  # 最大打开连接数
   max_open_conns: 20
+  # 最大空闲连接数
   max_idle_conns: 10
+  # 连接最大存活时间，单位秒
   conn_max_lifetime_seconds: 300
+  # MySQL 会话时区
   session_time_zone: "+08:00"
 
+# Tron 主服务节点配置
 quicknode:
+  # 主服务同步区块使用的 Tron HTTP RPC
   http_url: ""
+  # 主服务订阅新区块使用的 Tron WebSocket
   wss_url: ""
+  # Tron USDT(TRC20) 合约地址
   usdt_contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+  # 主服务请求最小间隔，单位毫秒
   min_request_interval_ms: 10
+  # 手动全量更新、定时刷新余额专用的 Tron HTTP RPC，必填
+  refresh_http_url: ""
+  # 手动全量更新、定时刷新余额专用的 Tron WebSocket，可选
+  refresh_wss_url: ""
+  # 刷新专用 Tron 节点请求最小间隔，当前默认 30ms
+  refresh_min_request_interval_ms: 30
 
+# Tron 激活地址配置
+tron_activator:
+  # 是否启用激活器
+  enabled: false
+  # 单私钥模式，兼容旧配置
+  private_key: ""
+  # 多私钥模式，优先使用
+  private_keys: []
+  # 激活任务队列大小
+  queue_size: 64
+
+# Web 后台配置
 web:
+  # Web 服务监听地址
   listen: ":8080"
+  # 登录用户名
   username: "admin"
+  # 登录密码
   password: "change_me_123456"
+  # Session 名称
   session_name: "tron_watcher_session"
+  # API 鉴权密钥
   api_key: "change_me_api_key"
 
+# Telegram 通知配置
 telegram:
+  # 是否启用 Telegram 通知
   enabled: false
+  # Bot Token
   bot_token: "change_me_bot_token"
+  # 接收通知的 chat_id
   chat_id: "change_me_chat_id"
+  # Telegram API 地址
   api_base_url: "https://api.telegram.org"
+  # 请求超时，单位秒
   timeout_seconds: 5
+  # 发送队列大小
   queue_size: 256
+  # 触发通知的最小金额
   min_amount: "1"
 
+# 回调通知配置
 callback:
+  # 是否启用回调通知
   enabled: false
+  # 回调地址
   url: "https://your-callback-host/notify"
+  # 请求超时，单位秒
   timeout_seconds: 5
+  # 发送队列大小
   queue_size: 256
+  # 触发回调的最小金额
   min_amount: "1"
 
+# 能量平台选择
 energy:
+  # 默认能量供应商：trxfee / catfee
   provider: "trxfee"
 
+# trxfee 平台配置
 trxfee:
+  # 平台接口地址
   url: "https://your-trxfee-api-host"
+  # API Key
   api_key: "your_trxfee_api_key"
+  # API Secret
   api_secret: "your_trxfee_api_secret"
+  # X-API-Key
   x_api_key: "masion"
 
+# catfee 平台配置
 catfee:
+  # 平台接口地址
   url: "https://your-catfee-api-host"
+  # API Key
   api_key: "your_catfee_api_key"
+  # API Secret
   api_secret: "your_catfee_api_secret"
 
+# Tron 主服务扫块配置
 watcher:
+  # 地址缓存重载间隔，单位秒
   address_reload_interval_seconds: 15
+  # 是否禁用 Tron 定时刷新余额任务；true 时仅暂停 Tron 定时刷新，不影响 BSC 定时刷新和手动全量更新
+  disable_scheduled_balance_sync: false
+  # 扫块轮询间隔，单位秒
   block_poll_interval_seconds: 3
+  # Tron 扫块来源：head / solid
+  tron_block_source: "head"
+  # 预留确认数
   confirmations: 0
+  # 起始块高，0 表示自动处理
   start_block: 0
+  # 单块交易处理 worker 数量
   tx_workers: 8
-  tron_block_source: "solid"
+  # HD 钱包请求链上余额时的最小间隔，单位毫秒
   balance_request_delay_ms: 10
-  scheduled_refresh_delay_ms: 10
+  # 是否禁用 Tron 主服务扫块任务
   disable_block_sync: false
-  disable_scheduled_balance_sync: false
 
+# BSC 配置
 bsc:
+  # 主服务同步区块使用的 BSC HTTP RPC
   rpc_http_url: "https://your-bsc-rpc-host"
+  # 主服务订阅新区块使用的 BSC WebSocket
   rpc_wss_url: ""
+  # BSC USDT(BEP20) 合约地址
   usdt_contract: "0x55d398326f99059fF775485246999027B3197955"
-  start_block: 0
-  block_poll_interval_seconds: 3
-  confirmations: 0
-  min_request_interval_ms: 10
-  scheduled_refresh_delay_ms: 10
-  disable_block_sync: false
+  # BSC 转手续费私钥
+  gas_transfer_private_key: ""
+  # 是否禁用 BSC 定时刷新余额任务；true 时仅暂停 BSC 定时刷新，不影响 Tron 定时刷新和手动全量更新
   disable_scheduled_balance_sync: false
+  # 主服务请求最小间隔，单位毫秒
+  min_request_interval_ms: 10
+  # 手动全量更新、定时刷新余额专用的 BSC HTTP RPC，启用 BSC 时必填
+  refresh_rpc_http_url: ""
+  # 手动全量更新、定时刷新余额专用的 BSC WebSocket，可选
+  refresh_rpc_wss_url: ""
+  # 刷新专用 BSC 节点请求最小间隔，当前默认 30ms
+  refresh_min_request_interval_ms: 30
+  # 起始块高，0 表示自动处理
+  start_block: 0
+  # 扫块轮询间隔，单位秒
+  block_poll_interval_seconds: 3
+  # 预留确认数
+  confirmations: 0
+  # 是否禁用 BSC 主服务扫块任务
+  disable_block_sync: false

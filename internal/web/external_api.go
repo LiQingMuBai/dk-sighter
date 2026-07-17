@@ -1,6 +1,7 @@
 package web
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -309,6 +310,11 @@ func (s *Server) handleBSCTransfersAPI(w http.ResponseWriter, r *http.Request, i
 	assetCode := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("asset_code")))
 	limit := parseAPIInt(r.URL.Query().Get("limit"), 20, 1, 200)
 	offset := parseAPIInt(r.URL.Query().Get("offset"), 0, 0, 1<<30)
+	direction := "out"
+	if inbound {
+		direction = "in"
+	}
+	log.Printf("bsc transfer records api request: direction=%s watch_address=%s asset_code=%s limit=%d offset=%d", direction, watchAddress, assetCode, limit, offset)
 	startTimeMs, err := parseAPITimeMillis(r.URL.Query().Get("start_time"))
 	if err != nil {
 		s.writeJSON(w, http.StatusBadRequest, listTransfersResponse{Success: false, Message: "invalid start_time"})
@@ -332,9 +338,11 @@ func (s *Server) handleBSCTransfersAPI(w http.ResponseWriter, r *http.Request, i
 		result, queryErr = s.repo.ListBSCTransferOutRecords(r.Context(), watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
 	}
 	if queryErr != nil {
+		log.Printf("bsc transfer records api query failed: direction=%s watch_address=%s asset_code=%s err=%v", direction, watchAddress, assetCode, queryErr)
 		s.writeJSON(w, http.StatusInternalServerError, listTransfersResponse{Success: false, Message: "load transfers failed"})
 		return
 	}
+	log.Printf("bsc transfer records api result: direction=%s watch_address=%s asset_code=%s total=%d returned=%d", direction, watchAddress, assetCode, result.TotalCount, len(result.Records))
 
 	records := make([]transferRecordVM, 0, len(result.Records))
 	for _, rec := range result.Records {

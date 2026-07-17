@@ -35,6 +35,19 @@ type DB struct {
 	sql *sql.DB
 }
 
+type SyncGap struct {
+	ID            int64
+	Chain         string
+	SourceSyncKey string
+	FromBlock     int64
+	ToBlock       int64
+	Status        string
+	Attempts      int
+	LastError     sql.NullString
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type DashboardRow struct {
 	AddressBase58 string
 	TRXBalance    decimal.Decimal
@@ -132,6 +145,29 @@ type EnergyActionLog struct {
 	ErrorMessage  string
 }
 
+type TronActivationLog struct {
+	JobID             string
+	AddressBase58     string
+	FromAddressBase58 string
+	AmountSun         int64
+	TxID              string
+	Status            string
+	ErrorMessage      string
+}
+
+type BSCGasTopupLog struct {
+	Address      string
+	FromAddress  string
+	AmountBNB    string
+	CurrentBNB   string
+	CurrentUSDT  string
+	TxHash       string
+	KeySource    string
+	Status       string
+	ResponseBody string
+	ErrorMessage string
+}
+
 type EnergyChartPoint struct {
 	Day   string
 	Count int
@@ -166,7 +202,7 @@ func (d *DB) LoadActiveAddresses(ctx context.Context) ([]WatchAddress, error) {
 	rows, err := d.sql.QueryContext(ctx, `
 		SELECT id, address_base58, status
 		FROM watch_addresses
-		WHERE status = 1
+		WHERE status = 1 
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query watch_addresses: %w", err)
@@ -180,6 +216,36 @@ func (d *DB) LoadActiveAddresses(ctx context.Context) ([]WatchAddress, error) {
 			return nil, fmt.Errorf("scan watch_address: %w", err)
 		}
 		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (d *DB) LoadActiveAddressesWithPositiveTRXBalance(ctx context.Context) ([]string, error) {
+	rows, err := d.sql.QueryContext(ctx, `
+		SELECT DISTINCT w.address_base58
+		FROM watch_addresses w
+		INNER JOIN asset_balances trx
+			ON trx.address_base58 = w.address_base58
+			AND trx.asset_code = 'TRX'
+		WHERE w.status = 1
+		  AND trx.balance > 0
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query watch_addresses with positive trx balance: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]string, 0)
+	for rows.Next() {
+		var address string
+		if err := rows.Scan(&address); err != nil {
+			return nil, fmt.Errorf("scan watch_address with positive trx balance: %w", err)
+		}
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		result = append(result, address)
 	}
 	return result, rows.Err()
 }
@@ -223,6 +289,25 @@ func (d *DB) GetLastBlock(ctx context.Context, syncKey string) (int64, bool, err
 	return lastBlock, true, nil
 }
 
+func (d *DB) GetSyncState(ctx context.Context, syncKey string) (int64, time.Time, bool, error) {
+	var (
+		lastBlock int64
+		updatedAt time.Time
+	)
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT last_block, updated_at
+		FROM sync_state
+		WHERE sync_key = ?
+	`, syncKey).Scan(&lastBlock, &updatedAt)
+	if err == sql.ErrNoRows {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, fmt.Errorf("get sync_state: %w", err)
+	}
+	return lastBlock, updatedAt, true, nil
+}
+
 func (d *DB) SaveLastBlock(ctx context.Context, syncKey string, block int64) error {
 	_, err := d.sql.ExecContext(ctx, `
 		INSERT INTO sync_state (sync_key, last_block)
@@ -240,9 +325,9 @@ func (d *DB) UpsertBalance(ctx context.Context, addressBase58, assetCode string,
 		INSERT INTO asset_balances (address_base58, asset_code, balance, block_number)
 		VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
-			balance = VALUES(balance),
-			block_number = VALUES(block_number),
-			updated_at = CURRENT_TIMESTAMP
+			balance = IF(VALUES(block_number) >= block_number, VALUES(balance), balance),
+			block_number = IF(VALUES(block_number) >= block_number, VALUES(block_number), block_number),
+			updated_at = IF(VALUES(block_number) >= block_number, CURRENT_TIMESTAMP, updated_at)
 	`, addressBase58, assetCode, balance.String(), blockNumber)
 	if err != nil {
 		return fmt.Errorf("upsert balance: %w", err)
@@ -283,6 +368,22 @@ func (d *DB) InsertBSCTransferOut(ctx context.Context, item TransferRecord) erro
 	return d.insertTransferIntoTable(ctx, "bsc_transfer_out_records", item)
 }
 
+func (d *DB) InsertTransferInIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "transfer_in_records", item)
+}
+
+func (d *DB) InsertTransferOutIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "transfer_out_records", item)
+}
+
+func (d *DB) InsertBSCTransferInIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "bsc_transfer_in_records", item)
+}
+
+func (d *DB) InsertBSCTransferOutIfAbsent(ctx context.Context, item TransferRecord) (bool, error) {
+	return d.insertTransferIntoTableIfAbsent(ctx, "bsc_transfer_out_records", item)
+}
+
 func (d *DB) insertTransferIntoTable(ctx context.Context, table string, item TransferRecord) error {
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
@@ -319,6 +420,38 @@ func (d *DB) insertTransferIntoTable(ctx context.Context, table string, item Tra
 		return fmt.Errorf("insert transfer %s: %w", table, err)
 	}
 	return nil
+}
+
+func (d *DB) insertTransferIntoTableIfAbsent(ctx context.Context, table string, item TransferRecord) (bool, error) {
+	query := fmt.Sprintf(`
+		INSERT IGNORE INTO %s (
+			tx_hash, block_number, block_time, asset_code, contract_address,
+			watch_address, from_address, to_address, amount, log_index, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, table)
+
+	result, err := d.sql.ExecContext(ctx, query,
+		item.TxHash,
+		item.BlockNumber,
+		item.BlockTime,
+		item.AssetCode,
+		item.ContractAddress,
+		item.WatchAddress,
+		item.FromAddress,
+		item.ToAddress,
+		item.Amount.String(),
+		item.LogIndex,
+		item.Status,
+	)
+	if err != nil {
+		return false, fmt.Errorf("insert transfer if absent %s: %w", table, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("insert transfer if absent rows affected %s: %w", table, err)
+	}
+	return rowsAffected > 0, nil
 }
 
 func (d *DB) InsertWatchAddresses(ctx context.Context, addresses []string) error {
@@ -434,6 +567,193 @@ func (d *DB) UpsertRuntimeSetting(ctx context.Context, key, value string) error 
 	return nil
 }
 
+func (d *DB) CreateSyncGap(ctx context.Context, chain, sourceSyncKey string, fromBlock, toBlock int64) error {
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return fmt.Errorf("invalid sync gap: chain=%s from=%d to=%d", chain, fromBlock, toBlock)
+	}
+
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO sync_gaps (chain, source_sync_key, from_block, to_block, status, attempts)
+		VALUES (?, ?, ?, ?, 'pending', 0)
+	`, strings.TrimSpace(chain), strings.TrimSpace(sourceSyncKey), fromBlock, toBlock)
+	if err != nil {
+		return fmt.Errorf("create sync gap chain=%s from=%d to=%d: %w", chain, fromBlock, toBlock, err)
+	}
+	return nil
+}
+
+func (d *DB) GetNextOpenSyncGap(ctx context.Context, chain string) (*SyncGap, bool, error) {
+	var item SyncGap
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT id, chain, source_sync_key, from_block, to_block, status, attempts, last_error, created_at, updated_at
+		FROM sync_gaps
+		WHERE chain = ?
+		  AND status IN ('repairing', 'pending')
+		ORDER BY
+		  CASE status WHEN 'repairing' THEN 0 ELSE 1 END,
+		  from_block ASC,
+		  id ASC
+		LIMIT 1
+	`, strings.TrimSpace(chain)).Scan(
+		&item.ID,
+		&item.Chain,
+		&item.SourceSyncKey,
+		&item.FromBlock,
+		&item.ToBlock,
+		&item.Status,
+		&item.Attempts,
+		&item.LastError,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get next open sync gap chain=%s: %w", chain, err)
+	}
+	return &item, true, nil
+}
+
+func (d *DB) MarkSyncGapRepairing(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'repairing',
+		    attempts = attempts + 1,
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark sync gap repairing id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkSyncGapDone(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'done',
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark sync gap done id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkSyncGapPendingWithError(ctx context.Context, id int64, errMsg string) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE sync_gaps
+		SET status = 'pending',
+		    last_error = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, strings.TrimSpace(errMsg), id)
+	if err != nil {
+		return fmt.Errorf("mark sync gap pending id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) CreateTronSyncGap(ctx context.Context, sourceSyncKey string, fromBlock, toBlock int64) error {
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return fmt.Errorf("invalid tron sync gap: from=%d to=%d", fromBlock, toBlock)
+	}
+
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO tron_sync_gaps (source_sync_key, from_block, to_block, status, attempts)
+		VALUES (?, ?, ?, 'pending', 0)
+	`, strings.TrimSpace(sourceSyncKey), fromBlock, toBlock)
+	if err != nil {
+		return fmt.Errorf("create tron sync gap from=%d to=%d: %w", fromBlock, toBlock, err)
+	}
+	return nil
+}
+
+func (d *DB) GetNextOpenTronSyncGap(ctx context.Context) (*SyncGap, bool, error) {
+	var item SyncGap
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT id, source_sync_key, from_block, to_block, status, attempts, last_error, created_at, updated_at
+		FROM tron_sync_gaps
+		WHERE status IN ('repairing', 'pending')
+		ORDER BY
+		  CASE status WHEN 'repairing' THEN 0 ELSE 1 END,
+		  from_block ASC,
+		  id ASC
+		LIMIT 1
+	`).Scan(
+		&item.ID,
+		&item.SourceSyncKey,
+		&item.FromBlock,
+		&item.ToBlock,
+		&item.Status,
+		&item.Attempts,
+		&item.LastError,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get next open tron sync gap: %w", err)
+	}
+	item.Chain = "tron"
+	return &item, true, nil
+}
+
+func (d *DB) MarkTronSyncGapRepairing(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'repairing',
+		    attempts = attempts + 1,
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap repairing id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkTronSyncGapDone(ctx context.Context, id int64) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'done',
+		    last_error = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap done id=%d: %w", id, err)
+	}
+	return nil
+}
+
+func (d *DB) MarkTronSyncGapPendingWithError(ctx context.Context, id int64, errMsg string) error {
+	_, err := d.sql.ExecContext(ctx, `
+		UPDATE tron_sync_gaps
+		SET status = 'pending',
+		    last_error = ?,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, strings.TrimSpace(errMsg), id)
+	if err != nil {
+		return fmt.Errorf("mark tron sync gap pending id=%d: %w", id, err)
+	}
+	return nil
+}
+
 func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) error {
 	_, err := d.sql.ExecContext(ctx, `
 		INSERT INTO energy_action_logs (
@@ -444,6 +764,34 @@ func (d *DB) InsertEnergyActionLog(ctx context.Context, item EnergyActionLog) er
 		item.Status, item.ResponseBody, item.ErrorMessage)
 	if err != nil {
 		return fmt.Errorf("insert energy action log: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) InsertTronActivationLog(ctx context.Context, item TronActivationLog) error {
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO tron_activation_logs (
+			job_id, address_base58, from_address_base58, amount_sun,
+			txid, status, error_message
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, item.JobID, item.AddressBase58, item.FromAddressBase58, item.AmountSun,
+		item.TxID, item.Status, item.ErrorMessage)
+	if err != nil {
+		return fmt.Errorf("insert tron activation log: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) InsertBSCGasTopupLog(ctx context.Context, item BSCGasTopupLog) error {
+	_, err := d.sql.ExecContext(ctx, `
+		INSERT INTO bsc_gas_topup_logs (
+			address, from_address, amount_bnb, current_bnb, current_usdt,
+			tx_hash, key_source, status, response_body, error_message
+		) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?)
+	`, item.Address, item.FromAddress, item.AmountBNB, item.CurrentBNB, item.CurrentUSDT,
+		item.TxHash, item.KeySource, item.Status, item.ResponseBody, item.ErrorMessage)
+	if err != nil {
+		return fmt.Errorf("insert bsc gas topup log: %w", err)
 	}
 	return nil
 }
@@ -491,13 +839,111 @@ func (d *DB) ListDailyEnergyChart(ctx context.Context, days int) ([]EnergyChartP
 	return result, nil
 }
 
+func (d *DB) ListDailyTronActivationChart(ctx context.Context, days int) ([]EnergyChartPoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+
+	rows, err := d.sql.QueryContext(ctx, `
+		SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day_key, COUNT(1) AS total_count
+		FROM tron_activation_logs
+		WHERE status = 'SUCCESS'
+		  AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+		GROUP BY day_key
+		ORDER BY day_key ASC
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("list daily tron activation chart: %w", err)
+	}
+	defer rows.Close()
+
+	pointsByDay := make(map[string]int)
+	for rows.Next() {
+		var point EnergyChartPoint
+		if err := rows.Scan(&point.Day, &point.Count); err != nil {
+			return nil, fmt.Errorf("scan tron activation chart row: %w", err)
+		}
+		pointsByDay[point.Day] = point.Count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	loc := time.FixedZone("CST", 8*3600)
+	today := time.Now().In(loc)
+	result := make([]EnergyChartPoint, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		day := today.AddDate(0, 0, -i).Format("2006-01-02")
+		result = append(result, EnergyChartPoint{
+			Day:   day,
+			Count: pointsByDay[day],
+		})
+	}
+	return result, nil
+}
+
+func (d *DB) ListDailyBSCGasTopupChart(ctx context.Context, days int) ([]EnergyChartPoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+
+	rows, err := d.sql.QueryContext(ctx, `
+		SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day_key, COUNT(1) AS total_count
+		FROM bsc_gas_topup_logs
+		WHERE status = 'SUCCESS'
+		  AND created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? DAY)
+		GROUP BY day_key
+		ORDER BY day_key ASC
+	`, days)
+	if err != nil {
+		return nil, fmt.Errorf("list daily bsc gas topup chart: %w", err)
+	}
+	defer rows.Close()
+
+	pointsByDay := make(map[string]int)
+	for rows.Next() {
+		var point EnergyChartPoint
+		if err := rows.Scan(&point.Day, &point.Count); err != nil {
+			return nil, fmt.Errorf("scan bsc gas topup chart row: %w", err)
+		}
+		pointsByDay[point.Day] = point.Count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	loc := time.FixedZone("CST", 8*3600)
+	today := time.Now().In(loc)
+	result := make([]EnergyChartPoint, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		day := today.AddDate(0, 0, -i).Format("2006-01-02")
+		result = append(result, EnergyChartPoint{
+			Day:   day,
+			Count: pointsByDay[day],
+		})
+	}
+	return result, nil
+}
+
 func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort DashboardSort) (*DashboardListResult, error) {
+	return d.ListDashboardRowsByAddress(ctx, offset, limit, sort, "")
+}
+
+func (d *DB) ListDashboardRowsByAddress(ctx context.Context, offset, limit int, sort DashboardSort, addressQuery string) (*DashboardListResult, error) {
+	where := "WHERE w.status = 1"
+	countWhere := "WHERE status = 1"
+	args := make([]any, 0, 3)
+	if value := strings.ToLower(strings.TrimSpace(addressQuery)); value != "" {
+		where += " AND LOWER(w.address_base58) LIKE ?"
+		countWhere += " AND LOWER(address_base58) LIKE ?"
+		args = append(args, "%"+value+"%")
+	}
+
 	var totalCount int
 	err := d.sql.QueryRowContext(ctx, `
 		SELECT COUNT(1)
 		FROM watch_addresses
-		WHERE status = 1
-	`).Scan(&totalCount)
+		`+countWhere, args...).Scan(&totalCount)
 	if err != nil {
 		return nil, fmt.Errorf("count dashboard rows: %w", err)
 	}
@@ -513,6 +959,10 @@ func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort Dash
 	default:
 		sort = DashboardSortUSDTDesc
 	}
+
+	listArgs := make([]any, 0, len(args)+2)
+	listArgs = append(listArgs, args...)
+	listArgs = append(listArgs, limit, offset)
 
 	rows, err := d.sql.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
@@ -533,10 +983,10 @@ func (d *DB) ListDashboardRows(ctx context.Context, offset, limit int, sort Dash
 		LEFT JOIN asset_balances usdt
 			ON usdt.address_base58 = w.address_base58
 			AND usdt.asset_code = 'USDT'
-		WHERE w.status = 1
+		%s
 		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, orderBy), limit, offset)
+	`, where, orderBy), listArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list dashboard rows: %w", err)
 	}
@@ -594,11 +1044,11 @@ func (d *DB) ListTransferOutRecords(ctx context.Context, watchAddress string, li
 }
 
 func (d *DB) ListBSCTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_in_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	return d.listTransferRecords(ctx, "bsc_transfer_in_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
 }
 
 func (d *DB) ListBSCTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_out_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	return d.listTransferRecords(ctx, "bsc_transfer_out_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
 }
 
 func (d *DB) listTransferRecords(ctx context.Context, table, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {

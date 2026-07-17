@@ -26,19 +26,24 @@ import (
 )
 
 type App struct {
-	cfg        *config.Config
-	db         *sql.DB
-	cache      *service.AddressCache
-	scanner    *service.Scanner
-	balances   *service.BalanceService
-	notifier   service.TransferNotifier
-	tronClient *tron.Client
-	bscClient  *bsc.Client
-	bscCache   *service.BSCAddressCache
-	bscScanner *service.BSCScanner
-	bscEnabled bool
-	webServer  *web.Server
-	wallets    *hdwallet.Service
+	cfg                     *config.Config
+	db                      *sql.DB
+	cache                   *service.AddressCache
+	scanner                 *service.Scanner
+	balances                *service.BalanceService
+	scheduledBalances       *service.BalanceService
+	scheduledRefreshTracker *service.ScheduledRefreshStateTracker
+	manualRefreshTracker    *service.ScheduledRefreshStateTracker
+	notifier                service.TransferNotifier
+	tronClient              *tron.Client
+	bscClient               *bsc.Client
+	bscCache                *service.BSCAddressCache
+	bscScanner              *service.BSCScanner
+	scheduledBSCScanner     *service.BSCScanner
+	bscEnabled              bool
+	webServer               *web.Server
+	wallets                 *hdwallet.Service
+	activator               *service.TronAddressActivator
 }
 
 func New(cfgPath string) (*App, error) {
@@ -53,8 +58,7 @@ func New(cfgPath string) (*App, error) {
 		cfg.App.Mode = mode
 	}
 
-	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT)
-	tronClient.SetMinRequestInterval(cfg.QuickNodeMinRequestInterval())
+	tronClient := tron.NewClient(cfg.QuickNode.HTTPURL, cfg.QuickNode.WSSURL, cfg.QuickNode.USDT, cfg.QuickNodeMinRequestInterval())
 	bscEnabled := isBSCEnabled(cfg.BSC.RPCHTTPURL)
 	var bscClient *bsc.Client
 	if bscEnabled {
@@ -79,7 +83,8 @@ func New(cfgPath string) (*App, error) {
 			service.NewTelegramNotifier(cfg.Telegram),
 			service.NewCallbackNotifier(cfg.Callback),
 		)
-		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.Watcher.TronBlockSource)
+		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
+		scanner.SetSyncGapChain("tron")
 
 		var bscCache *service.BSCAddressCache
 		var bscScanner *service.BSCScanner
@@ -87,10 +92,19 @@ func New(cfgPath string) (*App, error) {
 			bscCache = service.NewBSCAddressCache(repo)
 			bscCache.ConfigureSource(repository.HDWalletSource)
 			bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+			bscScanner.SetDeferBalanceRefreshInCatchUp(true)
+			bscScanner.SetSyncGapChain("bsc")
+			bscScanner.SetDisableUSDTRepair(true)
 		}
 
 		energyProviders := buildEnergyProviders(cfg)
+		activator, err := service.NewTronAddressActivator(tronClient, repo, cfg.TronActivator)
+		if err != nil {
+			return nil, err
+		}
 		walletService.ConfigureEnergyProviders(energyProviders, cfg.Energy.Provider)
+		walletService.ConfigureTronActivator(activator)
+		walletService.ConfigureBSCGasTopupPrivateKey(cfg.BSC.GasTransferPrivateKey)
 		walletService.ConfigureRepository(repo, repository.HDWalletSource)
 		webServer, err := web.NewHDWalletServer(cfg.Web, walletService, energyProviders, cfg.Energy.Provider)
 		if err != nil {
@@ -110,6 +124,7 @@ func New(cfgPath string) (*App, error) {
 			bscEnabled: bscEnabled,
 			webServer:  webServer,
 			wallets:    walletService,
+			activator:  activator,
 		}, nil
 	}
 
@@ -119,41 +134,84 @@ func New(cfgPath string) (*App, error) {
 		return nil, err
 	}
 
+	if strings.TrimSpace(cfg.QuickNodeRefreshHTTPURL()) == "" {
+		return nil, fmt.Errorf("quicknode.refresh_http_url is required for manual/scheduled refresh")
+	}
+	if bscEnabled && strings.TrimSpace(cfg.BSCRefreshHTTPURL()) == "" {
+		return nil, fmt.Errorf("bsc.refresh_rpc_http_url is required for manual/scheduled refresh")
+	}
+
 	repo := repository.New(db)
 	cache := service.NewAddressCache(repo)
 	balanceService := service.NewBalanceService(tronClient, repo, cache)
+	scheduledRefreshTracker := service.NewScheduledRefreshStateTracker()
+	manualRefreshTracker := service.NewScheduledRefreshStateTracker()
+	refreshTronClient := tron.NewClient(cfg.QuickNodeRefreshHTTPURL(), cfg.QuickNodeRefreshWSSURL(), cfg.QuickNode.USDT, cfg.QuickNodeRefreshMinRequestInterval())
+	refreshBalanceService := service.NewBalanceService(refreshTronClient, repo, cache)
 	notifier := service.NewMultiTransferNotifier(
 		service.NewTelegramNotifier(cfg.Telegram),
 		service.NewCallbackNotifier(cfg.Callback),
 	)
-	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.Watcher.TronBlockSource)
+	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
+	scanner.SetSyncGapChain("tron")
 
 	var bscCache *service.BSCAddressCache
 	var bscScanner *service.BSCScanner
+	var refreshBSCScanner *service.BSCScanner
 	if bscEnabled {
 		bscCache = service.NewBSCAddressCache(repo)
 		bscScanner = service.NewBSCScanner(bscClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+		bscScanner.SetDeferBalanceRefreshInCatchUp(true)
+		bscScanner.SetSyncGapChain("bsc")
+		bscScanner.SetDisableUSDTRepair(true)
+		refreshBSCClient := bsc.NewClient(cfg.BSCRefreshHTTPURL(), cfg.BSCRefreshWSSURL(), cfg.BSC.USDTContract)
+		refreshBSCClient.SetMinRequestInterval(cfg.BSCRefreshMinRequestInterval())
+		refreshBSCScanner = service.NewBSCScanner(refreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
 	}
 
 	energyProviders := buildEnergyProviders(cfg)
-	webServer, err := web.NewServer(repo, cfg.Web, cache, balanceService, energyProviders, cfg.Energy.Provider)
+	activator, err := service.NewTronAddressActivator(tronClient, repo, cfg.TronActivator)
+	if err != nil {
+		return nil, err
+	}
+	webServer, err := web.NewServer(
+		repo,
+		cfg.Web,
+		cache,
+		balanceService,
+		refreshBalanceService,
+		bscScanner,
+		refreshBSCScanner,
+		activator,
+		bscClient,
+		cfg.BSC.GasTransferPrivateKey,
+		scheduledRefreshTracker,
+		manualRefreshTracker,
+		energyProviders,
+		cfg.Energy.Provider,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	return &App{
-		cfg:        cfg,
-		db:         db,
-		cache:      cache,
-		scanner:    scanner,
-		balances:   balanceService,
-		notifier:   notifier,
-		tronClient: tronClient,
-		bscClient:  bscClient,
-		bscCache:   bscCache,
-		bscScanner: bscScanner,
-		bscEnabled: bscEnabled,
-		webServer:  webServer,
+		cfg:                     cfg,
+		db:                      db,
+		cache:                   cache,
+		scanner:                 scanner,
+		balances:                balanceService,
+		scheduledBalances:       refreshBalanceService,
+		scheduledRefreshTracker: scheduledRefreshTracker,
+		manualRefreshTracker:    manualRefreshTracker,
+		notifier:                notifier,
+		tronClient:              tronClient,
+		bscClient:               bscClient,
+		bscCache:                bscCache,
+		bscScanner:              bscScanner,
+		scheduledBSCScanner:     refreshBSCScanner,
+		bscEnabled:              bscEnabled,
+		webServer:               webServer,
+		activator:               activator,
 	}, nil
 }
 
@@ -180,15 +238,65 @@ func (a *App) Run(ctx context.Context) error {
 			}
 			return nil
 		}))
+		if a.cfg.App.Local {
+			log.Printf("local mode enabled, block sync tasks paused")
+		} else {
+			group.Go(a.safeGo("scanner", func() error {
+				err := a.scanner.Run(groupCtx, a.cfg.BlockPollInterval())
+				if err != nil && !errors.Is(err, context.Canceled) {
+					return err
+				}
+				return nil
+			}))
+		}
+	} else {
+		log.Printf("tron scanner disabled by config: watcher.disable_block_sync=true")
+	}
 
-		group.Go(a.safeGo("scanner", func() error {
-			err := a.scanner.Run(groupCtx, a.cfg.BlockPollInterval())
+	if a.bscEnabled && a.bscCache != nil && a.bscScanner != nil && isBSCBlockSyncEnabled(a.cfg) {
+		group.Go(a.safeGo("bsc-address-cache", func() error {
+			err := a.bscCache.Run(groupCtx, a.cfg.AddressReloadInterval())
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
 			return nil
 		}))
 
+		if a.cfg.App.Local {
+			log.Printf("local mode enabled, bsc block sync tasks paused")
+		} else {
+			if a.cfg.BSC.RPCWSSURL == "" {
+				log.Printf("bsc websocket disabled, using http polling only")
+			}
+
+			group.Go(a.safeGo("bsc-scanner", func() error {
+				err := a.bscScanner.Run(groupCtx, a.cfg.BSCBlockPollInterval())
+				if err != nil && !errors.Is(err, context.Canceled) {
+					return err
+				}
+				return nil
+			}))
+
+			group.Go(a.safeGo("bsc-new-heads-subscriber", func() error {
+				err := a.bscClient.SubscribeNewHeads(groupCtx, func() {
+					a.bscScanner.Trigger()
+				})
+				if err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("bsc websocket listener stopped, fallback to polling only: %v", err)
+				}
+				<-groupCtx.Done()
+				return nil
+			}))
+		}
+	} else {
+		if !a.bscEnabled || a.bscCache == nil || a.bscScanner == nil {
+			log.Printf("bsc scanner disabled: rpc_http_url not configured")
+		} else {
+			log.Printf("bsc scanner disabled by config: bsc.disable_block_sync=true")
+		}
+	}
+
+	if !a.cfg.App.Local {
 		group.Go(a.safeGo("new-heads-subscriber", func() error {
 			err := a.tronClient.SubscribeNewHeads(groupCtx, func() {
 				a.scanner.Trigger()
@@ -199,47 +307,6 @@ func (a *App) Run(ctx context.Context) error {
 			<-groupCtx.Done()
 			return nil
 		}))
-	} else {
-		log.Printf("tron scanner disabled by config: watcher.disable_block_sync=true")
-	}
-
-	if a.bscEnabled && a.bscCache != nil && a.bscScanner != nil && isBSCBlockSyncEnabled(a.cfg) {
-		if a.cfg.BSC.RPCWSSURL == "" {
-			log.Printf("bsc websocket disabled, using http polling only")
-		}
-
-		group.Go(a.safeGo("bsc-address-cache", func() error {
-			err := a.bscCache.Run(groupCtx, a.cfg.AddressReloadInterval())
-			if err != nil && !errors.Is(err, context.Canceled) {
-				return err
-			}
-			return nil
-		}))
-
-		group.Go(a.safeGo("bsc-scanner", func() error {
-			err := a.bscScanner.Run(groupCtx, a.cfg.BSCBlockPollInterval())
-			if err != nil && !errors.Is(err, context.Canceled) {
-				return err
-			}
-			return nil
-		}))
-
-		group.Go(a.safeGo("bsc-new-heads-subscriber", func() error {
-			err := a.bscClient.SubscribeNewHeads(groupCtx, func() {
-				a.bscScanner.Trigger()
-			})
-			if err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("bsc websocket listener stopped, fallback to polling only: %v", err)
-			}
-			<-groupCtx.Done()
-			return nil
-		}))
-	} else {
-		if !a.bscEnabled || a.bscCache == nil || a.bscScanner == nil {
-			log.Printf("bsc scanner disabled: rpc_http_url not configured")
-		} else {
-			log.Printf("bsc scanner disabled by config: bsc.disable_block_sync=true")
-		}
 	}
 
 	group.Go(a.safeGo("web-server", func() error {
@@ -250,18 +317,14 @@ func (a *App) Run(ctx context.Context) error {
 		return nil
 	}))
 
-	if isHDWalletMode(a.cfg) && a.wallets != nil {
-		if isTronScheduledBalanceSyncEnabled(a.cfg) {
-			group.Go(a.safeGo("hd-wallet-tron-hourly-refresh", func() error {
-				err := a.wallets.RunTronHourlyRefresh(groupCtx)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					return err
-				}
-				return nil
-			}))
-		} else {
-			log.Printf("hd wallet tron hourly refresh disabled by config: watcher.disable_scheduled_balance_sync=true")
-		}
+	if a.activator != nil {
+		group.Go(a.safeGo("tron-activator", func() error {
+			err := a.activator.Run(groupCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
 	}
 
 	if a.notifier != nil {
@@ -274,26 +337,28 @@ func (a *App) Run(ctx context.Context) error {
 		}))
 	}
 
-	if isTronScheduledBalanceSyncEnabled(a.cfg) || isBSCScheduledBalanceSyncEnabled(a.cfg) {
-		tronClient := a.tronClient
-		tronBalances := a.balances
-		bscScanner := a.bscScanner
-		if !isTronScheduledBalanceSyncEnabled(a.cfg) {
-			tronClient = nil
-			tronBalances = nil
+	if isHDWalletMode(a.cfg) {
+		log.Printf("hd wallet mode enabled, scheduled balance refresh disabled")
+	} else {
+		disableTronScheduledBalanceSync := a.cfg.Watcher.DisableScheduledBalanceSync
+		disableBSCScheduledBalanceSync := a.cfg.BSC.DisableScheduledBalanceSync
+		if disableTronScheduledBalanceSync {
+			log.Printf("tron scheduled balance refresh disabled by config: watcher.disable_scheduled_balance_sync=true")
 		}
-		if !isBSCScheduledBalanceSyncEnabled(a.cfg) {
-			bscScanner = nil
+		if disableBSCScheduledBalanceSync {
+			log.Printf("bsc scheduled balance refresh disabled by config: bsc.disable_scheduled_balance_sync=true")
+		}
+		if disableTronScheduledBalanceSync && disableBSCScheduledBalanceSync {
+			log.Printf("all scheduled balance refresh jobs are disabled by config")
+			return group.Wait()
 		}
 		group.Go(a.safeGo("hourly-balance-refresh", func() error {
-			err := service.RunHourlyBalanceRefresh(groupCtx, tronClient, tronBalances, a.cfg.TronScheduledRefreshDelay(), bscScanner, a.cfg.BSCScheduledRefreshDelay())
+			err := service.RunHourlyBalanceRefresh(groupCtx, a.scheduledBalances, a.scheduledBSCScanner, a.cfg.TronBlockSource(), a.scheduledRefreshTracker, a.manualRefreshTracker, disableTronScheduledBalanceSync, disableBSCScheduledBalanceSync)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
 			return nil
 		}))
-	} else {
-		log.Printf("scheduled balance refresh disabled by config: watcher.disable_scheduled_balance_sync=true bsc.disable_scheduled_balance_sync=true")
 	}
 
 	return group.Wait()
@@ -321,14 +386,6 @@ func isTronBlockSyncEnabled(cfg *config.Config) bool {
 
 func isBSCBlockSyncEnabled(cfg *config.Config) bool {
 	return cfg != nil && !cfg.BSC.DisableBlockSync
-}
-
-func isTronScheduledBalanceSyncEnabled(cfg *config.Config) bool {
-	return cfg != nil && !cfg.Watcher.DisableScheduledBalanceSync
-}
-
-func isBSCScheduledBalanceSyncEnabled(cfg *config.Config) bool {
-	return cfg != nil && !cfg.BSC.DisableScheduledBalanceSync
 }
 
 func resolveDataDir() string {

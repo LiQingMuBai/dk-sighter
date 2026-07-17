@@ -3,29 +3,32 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	App       AppConfig       `yaml:"app"`
-	MySQL     MySQLConfig     `yaml:"mysql"`
-	QuickNode QuickNodeConfig `yaml:"quicknode"`
-	Watcher   WatcherConfig   `yaml:"watcher"`
-	Web       WebConfig       `yaml:"web"`
-	Telegram  TelegramConfig  `yaml:"telegram"`
-	Callback  CallbackConfig  `yaml:"callback"`
-	Energy    EnergyConfig    `yaml:"energy"`
-	Trxfee    TrxfeeConfig    `yaml:"trxfee"`
-	Catfee    CatfeeConfig    `yaml:"catfee"`
-	BSC       BSCConfig       `yaml:"bsc"`
+	App           AppConfig           `yaml:"app"`
+	MySQL         MySQLConfig         `yaml:"mysql"`
+	QuickNode     QuickNodeConfig     `yaml:"quicknode"`
+	Watcher       WatcherConfig       `yaml:"watcher"`
+	Web           WebConfig           `yaml:"web"`
+	Telegram      TelegramConfig      `yaml:"telegram"`
+	Callback      CallbackConfig      `yaml:"callback"`
+	Energy        EnergyConfig        `yaml:"energy"`
+	Trxfee        TrxfeeConfig        `yaml:"trxfee"`
+	Catfee        CatfeeConfig        `yaml:"catfee"`
+	BSC           BSCConfig           `yaml:"bsc"`
+	TronActivator TronActivatorConfig `yaml:"tron_activator"`
 }
 
 type AppConfig struct {
 	Name          string `yaml:"name"`
 	Mode          string `yaml:"mode"`
 	HDWalletCount int    `yaml:"hd_wallet_count"`
+	Local         bool   `yaml:"local"`
 }
 
 type MySQLConfig struct {
@@ -41,6 +44,9 @@ type QuickNodeConfig struct {
 	WSSURL               string `yaml:"wss_url"`
 	USDT                 string `yaml:"usdt_contract"`
 	MinRequestIntervalMS int    `yaml:"min_request_interval_ms"`
+	RefreshHTTPURL       string `yaml:"refresh_http_url"`
+	RefreshWSSURL        string `yaml:"refresh_wss_url"`
+	RefreshMinIntervalMS int    `yaml:"refresh_min_request_interval_ms"`
 }
 
 type WebConfig struct {
@@ -88,28 +94,37 @@ type CatfeeConfig struct {
 
 type WatcherConfig struct {
 	AddressReloadIntervalSeconds int    `yaml:"address_reload_interval_seconds"`
+	DisableScheduledBalanceSync  bool   `yaml:"disable_scheduled_balance_sync"`
 	BlockPollIntervalSeconds     int    `yaml:"block_poll_interval_seconds"`
+	TronBlockSource              string `yaml:"tron_block_source"`
 	Confirmations                int    `yaml:"confirmations"`
 	StartBlock                   int64  `yaml:"start_block"`
 	TXWorkers                    int    `yaml:"tx_workers"`
-	TronBlockSource              string `yaml:"tron_block_source"`
 	BalanceRequestDelayMS        int    `yaml:"balance_request_delay_ms"`
-	ScheduledRefreshDelayMS      int    `yaml:"scheduled_refresh_delay_ms"`
 	DisableBlockSync             bool   `yaml:"disable_block_sync"`
-	DisableScheduledBalanceSync  bool   `yaml:"disable_scheduled_balance_sync"`
 }
 
 type BSCConfig struct {
 	RPCHTTPURL                  string `yaml:"rpc_http_url"`
 	RPCWSSURL                   string `yaml:"rpc_wss_url"`
 	USDTContract                string `yaml:"usdt_contract"`
+	GasTransferPrivateKey       string `yaml:"gas_transfer_private_key"`
+	MinRequestIntervalMS        int    `yaml:"min_request_interval_ms"`
+	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
+	RefreshRPCHTTPURL           string `yaml:"refresh_rpc_http_url"`
+	RefreshRPCWSSURL            string `yaml:"refresh_rpc_wss_url"`
+	RefreshMinIntervalMS        int    `yaml:"refresh_min_request_interval_ms"`
 	StartBlock                  int64  `yaml:"start_block"`
 	BlockPollIntervalSeconds    int    `yaml:"block_poll_interval_seconds"`
 	Confirmations               int    `yaml:"confirmations"`
-	MinRequestIntervalMS        int    `yaml:"min_request_interval_ms"`
-	ScheduledRefreshDelayMS     int    `yaml:"scheduled_refresh_delay_ms"`
 	DisableBlockSync            bool   `yaml:"disable_block_sync"`
-	DisableScheduledBalanceSync bool   `yaml:"disable_scheduled_balance_sync"`
+}
+
+type TronActivatorConfig struct {
+	Enabled     bool     `yaml:"enabled"`
+	PrivateKey  string   `yaml:"private_key"`
+	PrivateKeys []string `yaml:"private_keys"`
+	QueueSize   int      `yaml:"queue_size"`
 }
 
 func Load(path string) (*Config, error) {
@@ -155,26 +170,38 @@ func (c *Config) setDefaults() {
 	if c.Watcher.BlockPollIntervalSeconds == 0 {
 		c.Watcher.BlockPollIntervalSeconds = 3
 	}
+	if strings.TrimSpace(c.Watcher.TronBlockSource) == "" {
+		c.Watcher.TronBlockSource = "head"
+	}
 	if c.Watcher.TXWorkers == 0 {
 		c.Watcher.TXWorkers = 8
 	}
-	if c.Watcher.TronBlockSource == "" {
-		c.Watcher.TronBlockSource = "solid"
-	}
-	if c.QuickNode.MinRequestIntervalMS == 0 {
-		c.QuickNode.MinRequestIntervalMS = 10
-	}
 	if c.Watcher.BalanceRequestDelayMS == 0 {
 		c.Watcher.BalanceRequestDelayMS = 10
-	}
-	if c.Watcher.ScheduledRefreshDelayMS == 0 {
-		c.Watcher.ScheduledRefreshDelayMS = 10
 	}
 	if c.Web.Listen == "" {
 		c.Web.Listen = ":8080"
 	}
 	if c.Web.SessionName == "" {
 		c.Web.SessionName = "tron_watcher_session"
+	}
+	if c.QuickNode.MinRequestIntervalMS == 0 {
+		c.QuickNode.MinRequestIntervalMS = 10
+	}
+	if c.QuickNode.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.QuickNode.RefreshHTTPURL) != "" {
+		c.QuickNode.RefreshMinIntervalMS = 30
+	}
+	if c.BSC.MinRequestIntervalMS == 0 {
+		c.BSC.MinRequestIntervalMS = 10
+	}
+	if c.BSC.RefreshMinIntervalMS == 0 && strings.TrimSpace(c.BSC.RefreshRPCHTTPURL) != "" {
+		c.BSC.RefreshMinIntervalMS = 30
+	}
+	if len(c.TronActivator.PrivateKeys) == 0 && strings.TrimSpace(c.TronActivator.PrivateKey) != "" {
+		c.TronActivator.PrivateKeys = []string{strings.TrimSpace(c.TronActivator.PrivateKey)}
+	}
+	if strings.TrimSpace(c.TronActivator.PrivateKey) == "" && len(c.TronActivator.PrivateKeys) == 1 {
+		c.TronActivator.PrivateKey = strings.TrimSpace(c.TronActivator.PrivateKeys[0])
 	}
 	if c.Telegram.APIBaseURL == "" {
 		c.Telegram.APIBaseURL = "https://api.telegram.org"
@@ -203,12 +230,6 @@ func (c *Config) setDefaults() {
 	if c.BSC.BlockPollIntervalSeconds == 0 {
 		c.BSC.BlockPollIntervalSeconds = 3
 	}
-	if c.BSC.MinRequestIntervalMS == 0 {
-		c.BSC.MinRequestIntervalMS = 10
-	}
-	if c.BSC.ScheduledRefreshDelayMS == 0 {
-		c.BSC.ScheduledRefreshDelayMS = 10
-	}
 }
 
 func (c *Config) ConnMaxLifetime() time.Duration {
@@ -227,22 +248,72 @@ func (c *Config) BSCBlockPollInterval() time.Duration {
 	return time.Duration(c.BSC.BlockPollIntervalSeconds) * time.Second
 }
 
-func (c *Config) QuickNodeMinRequestInterval() time.Duration {
-	return time.Duration(c.QuickNode.MinRequestIntervalMS) * time.Millisecond
+func (c *Config) TronBlockSource() string {
+	value := strings.TrimSpace(c.Watcher.TronBlockSource)
+	if strings.EqualFold(value, "solid") {
+		return "solid"
+	}
+	return "head"
 }
 
-func (c *Config) BSCMinRequestInterval() time.Duration {
-	return time.Duration(c.BSC.MinRequestIntervalMS) * time.Millisecond
+func (c *Config) QuickNodeMinRequestInterval() time.Duration {
+	value := c.QuickNode.MinRequestIntervalMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func (c *Config) QuickNodeRefreshHTTPURL() string {
+	return strings.TrimSpace(c.QuickNode.RefreshHTTPURL)
+}
+
+func (c *Config) QuickNodeRefreshWSSURL() string {
+	return strings.TrimSpace(c.QuickNode.RefreshWSSURL)
+}
+
+func (c *Config) QuickNodeRefreshMinRequestInterval() time.Duration {
+	value := c.QuickNode.RefreshMinIntervalMS
+	if value <= 0 {
+		value = c.QuickNode.MinRequestIntervalMS
+	}
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
 }
 
 func (c *Config) HDBalanceRequestDelay() time.Duration {
-	return time.Duration(c.Watcher.BalanceRequestDelayMS) * time.Millisecond
+	value := c.Watcher.BalanceRequestDelayMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
 }
 
-func (c *Config) TronScheduledRefreshDelay() time.Duration {
-	return time.Duration(c.Watcher.ScheduledRefreshDelayMS) * time.Millisecond
+func (c *Config) BSCMinRequestInterval() time.Duration {
+	value := c.BSC.MinRequestIntervalMS
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
 }
 
-func (c *Config) BSCScheduledRefreshDelay() time.Duration {
-	return time.Duration(c.BSC.ScheduledRefreshDelayMS) * time.Millisecond
+func (c *Config) BSCRefreshHTTPURL() string {
+	return strings.TrimSpace(c.BSC.RefreshRPCHTTPURL)
+}
+
+func (c *Config) BSCRefreshWSSURL() string {
+	return strings.TrimSpace(c.BSC.RefreshRPCWSSURL)
+}
+
+func (c *Config) BSCRefreshMinRequestInterval() time.Duration {
+	value := c.BSC.RefreshMinIntervalMS
+	if value <= 0 {
+		value = c.BSC.MinRequestIntervalMS
+	}
+	if value <= 0 {
+		value = 10
+	}
+	return time.Duration(value) * time.Millisecond
 }

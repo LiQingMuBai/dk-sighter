@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,41 +15,57 @@ import (
 	"tron_watcher/internal/tron"
 )
 
-const tronSolidSyncKey = "tron_solid_scanner"
-const tronHeadSyncKey = "tron_head_scanner"
+const syncKeySolid = "tron_solid_scanner"
+const syncKeyHead = "tron_head_scanner"
 const tronStateWorkers = 2
+const tronLatestRefreshIntervalBlocks int64 = 5
 
 type Scanner struct {
-	tronClient  *tron.Client
-	repo        *repository.DB
-	cache       *AddressCache
-	balances    *BalanceService
-	notifier    TransferNotifier
-	startBlock  int64
-	txWorkers   int
-	blockSource string
-	logger      *log.Logger
+	tronClient *tron.Client
+	repo       *repository.DB
+	cache      *AddressCache
+	balances   *BalanceService
+	notifier   TransferNotifier
+	syncKey    string
+	startBlock int64
+	txWorkers  int
+	logger     *log.Logger
+
+	refreshAllBalancesOnTransfer bool
+	skipToLatest                 bool
+	syncGapChain                 string
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
 }
 
-func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, blockSource string) *Scanner {
+func NewScanner(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, tronBlockSource string) *Scanner {
+	return NewScannerWithSyncKey(tronClient, repo, cache, balances, notifier, startBlock, txWorkers, tronBlockSource, "")
+}
+
+func NewScannerWithSyncKey(tronClient *tron.Client, repo *repository.DB, cache *AddressCache, balances *BalanceService, notifier TransferNotifier, startBlock int64, txWorkers int, tronBlockSource string, syncKeyOverride string) *Scanner {
 	if txWorkers <= 0 {
 		txWorkers = 1
 	}
-	source := normalizeTronBlockSource(blockSource)
+	syncKey := syncKeyHead
+	if strings.EqualFold(strings.TrimSpace(tronBlockSource), "solid") {
+		syncKey = syncKeySolid
+	}
+	if value := strings.TrimSpace(syncKeyOverride); value != "" {
+		syncKey = value
+	}
 	return &Scanner{
-		tronClient:  tronClient,
-		repo:        repo,
-		cache:       cache,
-		balances:    balances,
-		notifier:    notifier,
-		startBlock:  startBlock,
-		txWorkers:   txWorkers,
-		blockSource: source,
-		logger:      tronLogger(),
-		triggerCh:   make(chan struct{}, 1),
+		tronClient:   tronClient,
+		repo:         repo,
+		cache:        cache,
+		balances:     balances,
+		notifier:     notifier,
+		syncKey:      syncKey,
+		startBlock:   startBlock,
+		txWorkers:    txWorkers,
+		logger:       tronLogger(),
+		skipToLatest: true,
+		triggerCh:    make(chan struct{}, 1),
 	}
 }
 
@@ -57,6 +74,27 @@ func (s *Scanner) Trigger() {
 	case s.triggerCh <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Scanner) EnableFullBalanceRefreshOnTransfer(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.refreshAllBalancesOnTransfer = enabled
+}
+
+func (s *Scanner) SetSkipToLatestOnLag(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.skipToLatest = enabled
+}
+
+func (s *Scanner) SetSyncGapChain(chain string) {
+	if s == nil {
+		return
+	}
+	s.syncGapChain = strings.TrimSpace(chain)
 }
 
 func (s *Scanner) Run(ctx context.Context, interval time.Duration) error {
@@ -85,6 +123,7 @@ func (s *Scanner) scan(ctx context.Context) error {
 
 	var headBlock int64
 	var latestSolid int64
+	var source string
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		value, err := s.tronClient.GetHeadBlockNumber(groupCtx)
@@ -106,10 +145,14 @@ func (s *Scanner) scan(ctx context.Context) error {
 		return err
 	}
 
-	targetBlock := s.selectTargetBlock(headBlock, latestSolid)
-	targetLabel := s.targetBlockLabel()
-	syncKey := s.syncKey()
-	lastBlock, exists, err := s.repo.GetLastBlock(ctx, syncKey)
+	source = "head"
+	latestBlock := headBlock
+	if s.syncKey == syncKeySolid {
+		source = "solid"
+		latestBlock = latestSolid
+	}
+
+	lastBlock, exists, err := s.repo.GetLastBlock(ctx, s.syncKey)
 	if err != nil {
 		return err
 	}
@@ -119,58 +162,65 @@ func (s *Scanner) scan(ctx context.Context) error {
 		solidLag = 0
 	}
 	if exists {
-		scanLag := targetBlock - lastBlock
+		scanLag := latestBlock - lastBlock
 		if scanLag < 0 {
 			scanLag = 0
 		}
-		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d target=%d db_last=%d scan_lag=%d", s.blockSource, headBlock, latestSolid, solidLag, targetBlock, lastBlock, scanLag)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=%d scan_lag=%d", source, headBlock, latestSolid, solidLag, lastBlock, scanLag)
 	} else {
-		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d target=%d db_last=<none>", s.blockSource, headBlock, latestSolid, solidLag, targetBlock)
+		s.logger.Printf("scanner state: source=%s head=%d solid=%d solid_lag=%d db_last=<none>", source, headBlock, latestSolid, solidLag)
 	}
 	if !exists {
-		initialBlock := targetBlock
+		initialBlock := latestBlock
 		if s.startBlock > 0 {
 			initialBlock = s.startBlock
-			if initialBlock > targetBlock {
-				initialBlock = targetBlock
+			if initialBlock > latestBlock {
+				initialBlock = latestBlock
 			}
 		}
-		if err := s.repo.SaveLastBlock(ctx, syncKey, initialBlock); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, initialBlock); err != nil {
 			return err
 		}
-		s.logger.Printf("scanner initialized: source=%s start_block=%d latest_%s=%d", s.blockSource, initialBlock, targetLabel, targetBlock)
+		s.logger.Printf("scanner initialized: source=%s start_block=%d latest=%d", source, initialBlock, latestBlock)
 		return nil
 	}
-	if shouldSkipToLatestBlock(lastBlock, targetBlock) {
-		s.logger.Printf("scanner lag too large, skip to latest %s block: source=%s db_last=%d latest_%s=%d lag=%d threshold=%d", targetLabel, s.blockSource, lastBlock, targetLabel, targetBlock, targetBlock-lastBlock, maxAllowedSyncLagBlocks)
-		if err := s.repo.SaveLastBlock(ctx, syncKey, targetBlock); err != nil {
+	if s.skipToLatest && shouldSkipToLatestBlock(lastBlock, latestBlock) {
+		if err := s.recordSkippedGap(ctx, lastBlock+1, latestBlock); err != nil {
+			return err
+		}
+		s.logger.Printf("scanner lag too large, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, lastBlock, latestBlock, latestBlock-lastBlock, maxAllowedSyncLagBlocks)
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 			return err
 		}
 		return nil
 	}
-	if lastBlock < targetBlock {
-		s.logger.Printf("scanner catching up: source=%s from=%d to=%d", s.blockSource, lastBlock+1, targetBlock)
+	if lastBlock < latestBlock {
+		s.logger.Printf("scanner catching up: from=%d to=%d", lastBlock+1, latestBlock)
 	}
 
 	currentBlock := lastBlock
-	for currentBlock < targetBlock {
+	blocksSinceLatestRefresh := int64(0)
+	for currentBlock < latestBlock {
 		latestDBBlock, changed, err := resolveSyncCursor(ctx, currentBlock, func(runCtx context.Context) (int64, bool, error) {
-			return s.repo.GetLastBlock(runCtx, syncKey)
+			return s.repo.GetLastBlock(runCtx, s.syncKey)
 		})
 		if err != nil {
 			return err
 		}
 		if changed {
-			s.logger.Printf("scanner sync cursor updated from mysql: source=%s old=%d new=%d", s.blockSource, currentBlock, latestDBBlock)
+			s.logger.Printf("scanner sync cursor updated from mysql: old=%d new=%d", currentBlock, latestDBBlock)
 			currentBlock = latestDBBlock
-			if shouldSkipToLatestBlock(currentBlock, targetBlock) {
-				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest %s block: source=%s db_last=%d latest_%s=%d lag=%d threshold=%d", targetLabel, s.blockSource, currentBlock, targetLabel, targetBlock, targetBlock-currentBlock, maxAllowedSyncLagBlocks)
-				if err := s.repo.SaveLastBlock(ctx, syncKey, targetBlock); err != nil {
+			if s.skipToLatest && shouldSkipToLatestBlock(currentBlock, latestBlock) {
+				if err := s.recordSkippedGap(ctx, currentBlock+1, latestBlock); err != nil {
+					return err
+				}
+				s.logger.Printf("scanner lag too large after mysql cursor update, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
 					return err
 				}
 				break
 			}
-			if currentBlock >= targetBlock {
+			if currentBlock >= latestBlock {
 				break
 			}
 		}
@@ -179,43 +229,43 @@ func (s *Scanner) scan(ctx context.Context) error {
 		if err := s.scanBlock(ctx, blockNum); err != nil {
 			return err
 		}
-		if err := s.repo.SaveLastBlock(ctx, syncKey, blockNum); err != nil {
+		if err := s.repo.SaveLastBlock(ctx, s.syncKey, blockNum); err != nil {
 			return err
 		}
 		s.balances.Flush(ctx, blockNum)
 		currentBlock = blockNum
+		blocksSinceLatestRefresh++
+
+		if s.skipToLatest && blocksSinceLatestRefresh >= tronLatestRefreshIntervalBlocks {
+			refreshedLatestBlock, err := s.loadLatestBlockForSource(ctx)
+			if err != nil {
+				return err
+			}
+			blocksSinceLatestRefresh = 0
+			if refreshedLatestBlock != latestBlock {
+				s.logger.Printf("scanner progress refresh: source=%s db_last=%d old_latest=%d new_latest=%d", source, currentBlock, latestBlock, refreshedLatestBlock)
+			}
+			latestBlock = refreshedLatestBlock
+			if shouldSkipToLatestBlock(currentBlock, latestBlock) {
+				if err := s.recordSkippedGap(ctx, currentBlock+1, latestBlock); err != nil {
+					return err
+				}
+				s.logger.Printf("scanner lag too large after progress refresh, skip to latest block: source=%s db_last=%d latest=%d lag=%d threshold=%d", source, currentBlock, latestBlock, latestBlock-currentBlock, maxAllowedSyncLagBlocks)
+				if err := s.repo.SaveLastBlock(ctx, s.syncKey, latestBlock); err != nil {
+					return err
+				}
+				break
+			}
+		}
 	}
 	return nil
 }
 
-func normalizeTronBlockSource(value string) string {
-	switch value {
-	case "head":
-		return "head"
-	default:
-		return "solid"
+func (s *Scanner) loadLatestBlockForSource(ctx context.Context) (int64, error) {
+	if s.syncKey == syncKeySolid {
+		return s.tronClient.GetSolidBlockNumber(ctx)
 	}
-}
-
-func (s *Scanner) syncKey() string {
-	if s != nil && s.blockSource == "head" {
-		return tronHeadSyncKey
-	}
-	return tronSolidSyncKey
-}
-
-func (s *Scanner) targetBlockLabel() string {
-	if s != nil && s.blockSource == "head" {
-		return "head"
-	}
-	return "solid"
-}
-
-func (s *Scanner) selectTargetBlock(headBlock, latestSolid int64) int64 {
-	if s != nil && s.blockSource == "head" {
-		return headBlock
-	}
-	return latestSolid
+	return s.tronClient.GetHeadBlockNumber(ctx)
 }
 
 func (s *Scanner) scanBlock(ctx context.Context, blockNum int64) error {
@@ -275,7 +325,7 @@ func (s *Scanner) scanBlock(ctx context.Context, blockNum int64) error {
 
 func (s *Scanner) processTransaction(ctx context.Context, tx tron.Transaction, blockNum, blockTime int64) {
 	s.handleTRXTransfer(ctx, tx, blockNum, blockTime)
-	if s.isSmartContractTx(tx) {
+	if s.shouldInspectUSDTTriggerTx(tx) {
 		s.handleUSDTTransfers(ctx, tx.TxID, blockNum, blockTime)
 	}
 }
@@ -335,10 +385,10 @@ func (s *Scanner) handleTRXTransfer(ctx context.Context, tx tron.Transaction, bl
 		tx.TxID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 	if okFrom {
-		s.markAllBalances(fromBase58)
+		s.markBalance(fromBase58, "TRX", tx.TxID, blockNum, "OUT")
 	}
 	if okTo {
-		s.markAllBalances(toBase58)
+		s.markBalance(toBase58, "TRX", tx.TxID, blockNum, "IN")
 	}
 }
 
@@ -347,6 +397,19 @@ func (s *Scanner) isSmartContractTx(tx tron.Transaction) bool {
 		return false
 	}
 	return tx.RawData.Contract[0].Type == "TriggerSmartContract"
+}
+
+func (s *Scanner) shouldInspectUSDTTriggerTx(tx tron.Transaction) bool {
+	if s == nil || s.tronClient == nil {
+		return false
+	}
+	return s.tronClient.ShouldInspectUSDTTriggerTx(tx, func(hexAddr string) bool {
+		if s.cache == nil {
+			return false
+		}
+		_, ok := s.cache.Base58ByHex(hexAddr)
+		return ok
+	})
 }
 
 func (s *Scanner) handleUSDTTransfers(ctx context.Context, txID string, blockNum, blockTime int64) {
@@ -415,17 +478,31 @@ func (s *Scanner) handleUSDTTransfers(ctx context.Context, txID string, blockNum
 			txID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 		if okFrom {
-			s.markAllBalances(fromBase58)
+			s.markBalance(fromBase58, "USDT", txID, blockNum, "OUT")
 		}
 		if okTo {
-			s.markAllBalances(toBase58)
+			s.markBalance(toBase58, "USDT", txID, blockNum, "IN")
 		}
 	}
 }
 
-func (s *Scanner) markAllBalances(addressBase58 string) {
-	s.balances.Mark(addressBase58, "TRX")
-	s.balances.Mark(addressBase58, "USDT")
+func (s *Scanner) markBalance(addressBase58 string, asset string, txID string, blockNum int64, direction string) {
+	if s == nil || s.balances == nil {
+		return
+	}
+	if addressBase58 == "" {
+		return
+	}
+	if s.refreshAllBalancesOnTransfer {
+		s.logger.Printf("transfer matched -> refresh balances: address=%s trigger_asset=%s direction=%s tx=%s block=%d refresh_assets=TRX,USDT source=onchain",
+			addressBase58, asset, direction, txID, blockNum)
+		s.balances.Mark(addressBase58, "TRX")
+		s.balances.Mark(addressBase58, "USDT")
+		s.balances.TriggerImmediateRefresh(addressBase58, []string{"TRX", "USDT"}, txID, blockNum, asset, direction)
+		return
+	}
+	s.balances.Mark(addressBase58, asset)
+	s.balances.TriggerImmediateRefresh(addressBase58, []string{asset}, txID, blockNum, asset, direction)
 }
 
 func direction(hitFrom, hitTo bool) string {
@@ -448,4 +525,24 @@ func fallbackBase58(hexAddr, base58 string) string {
 		return tron.NormalizeHexAddress(hexAddr)
 	}
 	return converted
+}
+
+func (s *Scanner) recordSkippedGap(ctx context.Context, fromBlock, toBlock int64) error {
+	if s == nil || s.repo == nil || strings.TrimSpace(s.syncGapChain) == "" {
+		return nil
+	}
+	if toBlock < fromBlock {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(s.syncGapChain), "tron") {
+		if err := s.repo.CreateTronSyncGap(ctx, s.syncKey, fromBlock, toBlock); err != nil {
+			return err
+		}
+	} else {
+		if err := s.repo.CreateSyncGap(ctx, s.syncGapChain, s.syncKey, fromBlock, toBlock); err != nil {
+			return err
+		}
+	}
+	s.logger.Printf("scanner skip gap recorded: sync_key=%s chain=%s from=%d to=%d", s.syncKey, s.syncGapChain, fromBlock, toBlock)
+	return nil
 }

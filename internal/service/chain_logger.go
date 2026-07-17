@@ -24,11 +24,19 @@ func tronLogger() *log.Logger {
 	return tronLoggerInst
 }
 
+func TronLogger() *log.Logger {
+	return tronLogger()
+}
+
 func bscLogger() *log.Logger {
 	bscLoggerOnce.Do(func() {
 		bscLoggerInst = buildChainLogger("bsc")
 	})
 	return bscLoggerInst
+}
+
+func BSCLogger() *log.Logger {
+	return bscLogger()
 }
 
 func buildChainLogger(chain string) *log.Logger {

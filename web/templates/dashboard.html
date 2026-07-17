@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Tron 监控后台</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     :root {
       color-scheme: light;
@@ -291,6 +292,15 @@
       word-break: break-all;
     }
 
+    .address-link {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    .address-link:hover {
+      text-decoration: underline;
+    }
+
     .num {
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
@@ -344,6 +354,13 @@
       flex-wrap: wrap;
     }
 
+    .search-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
     .sort-label {
       color: var(--subtext);
       font-size: 14px;
@@ -358,6 +375,24 @@
       border-radius: 10px;
       padding: 10px 12px;
       font-size: 14px;
+    }
+
+    .search-input {
+      min-width: 260px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .search-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      text-decoration: none;
     }
 
     .check-cell {
@@ -740,6 +775,74 @@
       color: #fff;
     }
 
+    .completion-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1250;
+    }
+
+    .completion-mask.show {
+      display: flex;
+    }
+
+    .completion-dialog {
+      width: 100%;
+      max-width: 400px;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+      padding: 18px;
+    }
+
+    .completion-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.1);
+      color: #2563eb;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .completion-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+    }
+
+    .completion-title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .completion-text {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+
+    .completion-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
     .mnemonic-mask {
       position: fixed;
       inset: 0;
@@ -976,25 +1079,11 @@
       </div>
     </div>
 
-    <div class="add-card">
-      <div class="add-head">
-        <h2 class="add-title">增加地址</h2>
-        <p class="add-subtitle">支持单个或批量添加，多个地址请每行一个，必须是 T 开头的 Tron 地址。</p>
-      </div>
-      <div class="add-form">
-        <div>
-          <label class="add-label" for="addressInput">地址列表</label>
-          <textarea id="addressInput" class="add-textarea" placeholder="Txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&#10;Tyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"></textarea>
-        </div>
-        <button class="add-submit" type="button" onclick="handleAddAddresses()">添加地址</button>
-      </div>
-    </div>
-
     <div class="chart-card">
       <div class="chart-head">
         <div>
-          <h2 class="chart-title">每日发能折线图</h2>
-          <p class="chart-subtitle">横轴按日期，纵轴按发能次数累计。发能一次记 1，发能两次记 2。</p>
+          <h2 class="chart-title">每日发能和激活柱状图</h2>
+          <p class="chart-subtitle">横轴按日期，纵轴按次数累计。蓝色为发能次数，橙色为激活次数，点击柱子可查看当天数值。</p>
         </div>
       </div>
       <div class="chart-wrap">
@@ -1004,7 +1093,8 @@
           width="1100"
           height="280"
           data-labels='{{ .ChartLabelsJSON }}'
-          data-values='{{ .ChartValuesJSON }}'></canvas>
+          data-values='{{ .ChartValuesJSON }}'
+          data-activate-values='{{ .ChartActivateValuesJSON }}'></canvas>
       </div>
     </div>
 
@@ -1015,6 +1105,7 @@
       <div class="batch-actions">
         <form class="sort-form" method="get" action="/">
           <input type="hidden" name="page" value="1">
+          <input type="hidden" name="address" value="{{ .AddressQuery }}">
           <label class="sort-label" for="sortSelect">Sort 排序</label>
           <select id="sortSelect" class="sort-select" name="sort" onchange="this.form.submit()">
             <option value="usdt_desc" {{ if eq .Sort "usdt_desc" }}selected{{ end }}>USDT 余额 从大到小</option>
@@ -1023,9 +1114,18 @@
             <option value="trx_asc" {{ if eq .Sort "trx_asc" }}selected{{ end }}>TRX 余额 从小到大</option>
           </select>
         </form>
-        <button class="btn" type="button" onclick="handleBatchAction('发能一次')">批量发能一次</button>
-        <button class="btn" type="button" onclick="handleBatchAction('发能两次')">批量发能两次</button>
-        <button class="btn" type="button" onclick="handleBatchDelete()">批量删除地址</button>
+        <form class="search-form" method="get" action="/">
+          <input type="hidden" name="page" value="1">
+          <input type="hidden" name="sort" value="{{ .Sort }}">
+          <label class="sort-label" for="addressSearch">地址检索</label>
+          <input id="addressSearch" class="search-input" type="text" name="address" value="{{ .AddressQuery }}" placeholder="输入 Tron 地址片段快速过滤">
+          <button class="btn" type="submit">检索</button>
+          {{ if .AddressQuery }}
+          <a class="btn search-link" href="/?sort={{ .Sort }}">清空</a>
+          {{ end }}
+        </form>
+        <button id="manualFullRefreshBtn" class="btn" type="button" onclick="handleManualFullRefreshTron()" hidden>手动全量更新</button>
+        <button class="btn" type="button" onclick="handleBatchActivateAddress()">批量激活地址</button>
       </div>
     </div>
 
@@ -1049,16 +1149,14 @@
               <td class="check-cell">
                 <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
               </td>
-              <td class="address">{{ .Address }}</td>
+              <td class="address"><a class="address-link" href="https://tronscan.org/#/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></td>
               <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'TRX')">{{ .TRXBalance }}</button></td>
               <td class="num"><button class="balance-link num" type="button" onclick="openTransferModal('{{ .Address }}', 'USDT')">{{ .USDTBalance }}</button></td>
               <td class="num">{{ .LastUpdatedAt }}</td>
               <td>
                 <div class="actions">
-                  <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
-                  <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
-                  <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
-                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
+                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleRefreshTronAddress(this)">更新余额</button>
+                  <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
                 </div>
               </td>
             </tr>
@@ -1074,7 +1172,7 @@
         <div class="wallet-head">
           <div class="wallet-head-left">
             <input class="check-input address-checkbox" type="checkbox" value="{{ .Address }}" onchange="handleAddressCheckboxChange(this)">
-            <div class="wallet-address">{{ .Address }}</div>
+            <div class="wallet-address"><a class="address-link" href="https://tronscan.org/#/address/{{ .Address }}" target="_blank" rel="noopener noreferrer">{{ .Address }}</a></div>
           </div>
           <div class="tag">监控中</div>
         </div>
@@ -1093,16 +1191,14 @@
           </div>
         </div>
         <div class="mobile-actions">
-          <button class="btn" type="button" data-action="一键归集" data-address="{{ .Address }}" onclick="handleActionClick(this)">一键归集</button>
-          <button class="btn" type="button" data-action="发能一次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能一次</button>
-          <button class="btn" type="button" data-action="发能两次" data-address="{{ .Address }}" onclick="handleActionClick(this)">发能两次</button>
-          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleDeleteAddress(this)">删除地址</button>
+          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleRefreshTronAddress(this)">更新余额</button>
+          <button class="btn" type="button" data-address="{{ .Address }}" onclick="handleActivateAddress(this)">激活地址</button>
         </div>
       </div>
       {{ end }}
     </div>
     {{ else }}
-    <div class="empty">暂无监控地址</div>
+    <div class="empty">{{ if .AddressQuery }}未找到匹配的 Tron 地址{{ else }}暂无监控地址{{ end }}</div>
     {{ end }}
 
     {{ if gt .TotalPages 0 }}
@@ -1112,13 +1208,13 @@
       </div>
       <div class="pager-actions">
         {{ if .HasPrev }}
-        <a class="pager-btn" href="/?page={{ .PrevPage }}&sort={{ .Sort }}">上一页</a>
+        <a class="pager-btn" href="/?page={{ .PrevPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">上一页</a>
         {{ else }}
         <span class="pager-btn disabled">上一页</span>
         {{ end }}
 
         {{ if .HasNext }}
-        <a class="pager-btn" href="/?page={{ .NextPage }}&sort={{ .Sort }}">下一页</a>
+        <a class="pager-btn" href="/?page={{ .NextPage }}&sort={{ .Sort }}{{ if .AddressQuery }}&address={{ .AddressQuery | urlquery }}{{ end }}">下一页</a>
         {{ else }}
         <span class="pager-btn disabled">下一页</span>
         {{ end }}
@@ -1134,6 +1230,16 @@
       <div class="confirm-actions">
         <button id="confirmCancelBtn" class="confirm-btn" type="button">取消</button>
         <button id="confirmOkBtn" class="confirm-btn danger" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+  <div id="completionMask" class="completion-mask">
+    <div class="completion-dialog">
+      <div class="completion-badge">任务完成</div>
+      <h3 id="completionTitle" class="completion-title">操作已完成</h3>
+      <p id="completionText" class="completion-text"></p>
+      <div class="completion-actions">
+        <button id="completionOkBtn" class="confirm-btn danger" type="button">知道了</button>
       </div>
     </div>
   </div>
@@ -1198,6 +1304,11 @@
     let toastTimer = null;
     let confirmResolver = null;
     let mnemonicResolver = null;
+    let manualRefreshStatusTimer = null;
+    let activateStatusPollTimer = null;
+    const manualRefreshIdleText = '手动全量更新';
+    const manualRefreshRunningText = '有手动任务执行中';
+    const scheduledRefreshRunningText = '有后台定时任务运行中';
     const transferState = {
       chain: 'tron',
       address: '',
@@ -1219,6 +1330,28 @@
       toastTimer = setTimeout(() => {
         toast.classList.remove('show');
       }, 2200);
+    }
+
+    function showCompletionNotice(message, title = '操作已完成') {
+      showToast(message);
+      const mask = document.getElementById('completionMask');
+      const titleNode = document.getElementById('completionTitle');
+      const textNode = document.getElementById('completionText');
+      const okBtn = document.getElementById('completionOkBtn');
+      if (!mask || !titleNode || !textNode || !okBtn) {
+        return;
+      }
+      titleNode.textContent = title;
+      textNode.textContent = message;
+      mask.classList.add('show');
+      okBtn.onclick = () => {
+        mask.classList.remove('show');
+      };
+      mask.onclick = (event) => {
+        if (event.target === mask) {
+          mask.classList.remove('show');
+        }
+      };
     }
 
     function showConfirm(title, message, okText = '确认') {
@@ -1495,6 +1628,44 @@
       syncSelectionState();
     }
 
+    function setManualRefreshButtonState(status) {
+      const button = document.getElementById('manualFullRefreshBtn');
+      if (!button) {
+        return;
+      }
+      const scheduledRunning = Boolean(status && status.scheduled_running);
+      const manualRunning = Boolean(status && status.manual_running);
+      if (scheduledRunning) {
+        button.disabled = true;
+        button.textContent = scheduledRefreshRunningText;
+        return;
+      }
+      if (manualRunning) {
+        button.disabled = true;
+        button.textContent = manualRefreshRunningText;
+        return;
+      }
+      button.disabled = false;
+      button.textContent = manualRefreshIdleText;
+    }
+
+    async function refreshManualRefreshStatus() {
+      try {
+        const resp = await fetch('/api/manual-refresh-status', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          return;
+        }
+        setManualRefreshButtonState(data);
+      } catch (error) {
+      }
+    }
+
     async function handleActionClick(button) {
       const action = button.dataset.action || '';
       const address = button.dataset.address || '';
@@ -1566,23 +1737,28 @@
       }
     }
 
-    async function handleDeleteAddress(button) {
+    async function handleActivateAddress(button) {
       const address = button.dataset.address || '';
       if (!address) {
         showToast('地址缺失');
         return;
       }
+
       const confirmed = await showConfirm(
-        '删除地址',
-        `确认删除地址 ${address} 吗？删除后该地址将不再参与监控。`,
-        '确认删除'
+        '激活地址',
+        `确认激活地址 ${address} 吗？确认后会执行真正的后台激活操作。`,
+        '确认激活'
       );
       if (!confirmed) {
         return;
       }
 
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '激活中...';
+
       try {
-        const resp = await fetch('/api/watch-address/delete', {
+        const resp = await fetch('/api/tron/activate-address', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1594,36 +1770,125 @@
 
         const data = await resp.json();
         if (!resp.ok || !data.success) {
-          showToast(data.message || '删除地址失败');
+          showToast(data.message || '激活地址失败');
           return;
         }
 
-        showToast(data.message || '删除地址成功');
+        showToast(data.message || '已点击激活地址');
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    async function handleRefreshTronAddress(button) {
+      const address = button.dataset.address || '';
+      if (!address) {
+        showToast('地址缺失');
+        return;
+      }
+
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = '更新中...';
+
+      try {
+        const resp = await fetch('/api/tron/refresh-address', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            address: address
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '更新余额失败');
+          return;
+        }
+
+        showToast(data.message || '地址余额更新成功');
         setTimeout(() => {
           window.location.reload();
         }, 500);
       } catch (error) {
         showToast('请求失败，请稍后重试');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
     }
 
-    async function handleBatchDelete() {
+    async function handleManualFullRefreshTron() {
+      const button = document.getElementById('manualFullRefreshBtn');
+      if (button && button.disabled) {
+        return;
+      }
+      const confirmed = await showConfirm(
+        '手动全量更新',
+        '确认开始手动全量更新全部 Tron 关注地址余额吗？系统会后台分页执行，20 分钟内不能重复操作。',
+        '开始更新'
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const originalText = button ? button.textContent : '手动全量更新';
+      let started = false;
+      if (button) {
+        button.disabled = true;
+        button.textContent = '启动中...';
+      }
+
+      try {
+        const resp = await fetch('/api/tron/manual-refresh-all', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast(data.message || '手动全量更新启动失败');
+          return;
+        }
+
+        started = true;
+        setManualRefreshButtonState({ manual_running: true, scheduled_running: false });
+        showToast(data.message || '已开始手动全量更新余额');
+      } catch (error) {
+        showToast('请求失败，请稍后重试');
+      } finally {
+        if (button && !started) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
+    }
+
+    async function handleBatchActivateAddress() {
       const addresses = getSelectedAddresses();
       if (!addresses.length) {
         showToast('请先勾选地址');
         return;
       }
+
       const confirmed = await showConfirm(
-        '批量删除地址',
-        `确认批量删除当前勾选的 ${addresses.length} 个地址吗？删除后这些地址将不再参与监控。`,
-        '确认批量删除'
+        '批量激活地址',
+        `确认批量激活当前勾选的 ${addresses.length} 个地址吗？`,
+        '确认激活'
       );
       if (!confirmed) {
         return;
       }
 
       try {
-        const resp = await fetch('/api/watch-address/delete', {
+        const resp = await fetch('/api/tron/activate-address', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1635,17 +1900,58 @@
 
         const data = await resp.json();
         if (!resp.ok || !data.success) {
-          showToast(data.message || '批量删除失败');
+          showToast(data.message || '批量激活地址失败');
           return;
         }
-
-        showToast(data.message || '批量删除成功');
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
+        showToast(data.message || '批量激活地址已提交');
+        if (data.job_id) {
+          startActivateStatusPolling(data.job_id);
+        }
       } catch (error) {
         showToast('请求失败，请稍后重试');
       }
+    }
+
+    function stopActivateStatusPolling() {
+      if (activateStatusPollTimer) {
+        window.clearTimeout(activateStatusPollTimer);
+        activateStatusPollTimer = null;
+      }
+    }
+
+    async function pollActivateStatus(jobId) {
+      try {
+        const resp = await fetch(`/api/tron/activate-address-status?job_id=${encodeURIComponent(jobId)}`, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          showToast((data && data.message) ? data.message : '批量激活状态查询失败');
+          stopActivateStatusPolling();
+          return;
+        }
+        if (data.finished) {
+          stopActivateStatusPolling();
+          const successCount = Number(data.success_count || 0);
+          const failedCount = Number(data.failed_count || 0);
+          showCompletionNotice(`本次共处理 ${successCount + failedCount} 个地址，成功 ${successCount} 个，失败 ${failedCount} 个。`, '批量激活地址已完成');
+          window.setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
+        activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 2000);
+      } catch (error) {
+        activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 3000);
+      }
+    }
+
+    function startActivateStatusPolling(jobId) {
+      if (!jobId) {
+        return;
+      }
+      stopActivateStatusPolling();
+      activateStatusPollTimer = window.setTimeout(() => pollActivateStatus(jobId), 2000);
     }
 
     async function handleAddAddresses() {
@@ -1702,18 +2008,34 @@
         return;
       }
       const energyChartLabels = JSON.parse(canvas.dataset.labels || '[]');
-      const energyChartValues = JSON.parse(canvas.dataset.values || '[]');
-      if (!energyChartLabels.length || !energyChartValues.length) {
+      const energyRawValues = JSON.parse(canvas.dataset.values || '[]');
+      let activateRawValues = JSON.parse(canvas.dataset.activateValues || '[]');
+      if (!Array.isArray(energyChartLabels) || !Array.isArray(energyRawValues) || !energyChartLabels.length || !energyRawValues.length) {
         return;
       }
+      if (!Array.isArray(activateRawValues) || activateRawValues.length !== energyRawValues.length) {
+        activateRawValues = new Array(energyRawValues.length).fill(0);
+      }
+      const energyChartValues = energyRawValues.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      });
+      const activateChartValues = activateRawValues.map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      });
       const ctx = canvas.getContext('2d');
       const width = canvas.width;
       const height = canvas.height;
       const padding = { top: 20, right: 16, bottom: 42, left: 42 };
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
-      const maxValue = Math.max(...energyChartValues, 1);
-      const stepX = energyChartValues.length > 1 ? chartWidth / (energyChartValues.length - 1) : chartWidth;
+      const maxValue = Math.max(...energyChartValues, ...activateChartValues, 1);
+      const slotWidth = chartWidth / Math.max(energyChartValues.length, 1);
+      const groupWidth = Math.min(44, Math.max(18, slotWidth * 0.72));
+      const barGap = 4;
+      const barWidth = Math.max(6, Math.floor((groupWidth - barGap) / 2));
+      const barHits = [];
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = '#ffffff';
@@ -1742,27 +2064,64 @@
         ctx.fillText(String(value), padding.left - 8, y);
       }
 
-      ctx.strokeStyle = '#2563eb';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      energyChartValues.forEach((value, index) => {
-        const x = padding.left + stepX * index;
-        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
+      const series = [
+        { name: '发能次数', color: '#2563eb', values: energyChartValues },
+        { name: '激活次数', color: '#f97316', values: activateChartValues }
+      ];
 
-      ctx.fillStyle = '#2563eb';
-      energyChartValues.forEach((value, index) => {
-        const x = padding.left + stepX * index;
-        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
+      series.forEach((item, seriesIndex) => {
+        item.values.forEach((value, index) => {
+          const safeValue = Math.max(0, value);
+          const y = padding.top + chartHeight - (safeValue / maxValue) * chartHeight;
+          const groupCenterX = padding.left + slotWidth * index + slotWidth / 2;
+          const groupLeftX = groupCenterX - (barWidth * 2 + barGap) / 2;
+          const x = groupLeftX + seriesIndex * (barWidth + barGap);
+          const h = safeValue <= 0 ? 0 : Math.max(4, padding.top + chartHeight - y);
+          if (h <= 0) {
+            return;
+          }
+          ctx.fillStyle = item.color;
+          ctx.fillRect(x, y, barWidth, h);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, y, barWidth, h);
+          barHits.push({
+            x,
+            y,
+            width: barWidth,
+            height: h,
+            label: energyChartLabels[index],
+            value,
+            name: item.name,
+          });
+
+          ctx.fillStyle = '#4b5563';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(String(value), x + barWidth / 2, y - 3);
+        });
+      });
+
+      if (!barHits.length) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('最近 30 天暂无发能或激活数据', padding.left + chartWidth / 2, padding.top + chartHeight / 2);
+      }
+
+      const legendY = 10;
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      let legendX = padding.left + 8;
+      series.forEach((item) => {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(legendX, legendY, 10, 10);
+        ctx.fillStyle = '#374151';
+        ctx.fillText(item.name, legendX + 14, legendY + 5);
+        legendX += ctx.measureText(item.name).width + 36;
       });
 
       ctx.fillStyle = '#6b7280';
@@ -1774,9 +2133,32 @@
         if (index % tickStep !== 0 && index !== energyChartLabels.length - 1) {
           return;
         }
-        const x = padding.left + stepX * index;
+        const x = padding.left + slotWidth * index + slotWidth / 2;
         ctx.fillText(label.slice(5), x, padding.top + chartHeight + 10);
       });
+
+      canvas._barHits = barHits;
+      if (!canvas.dataset.barClickBound) {
+        canvas.dataset.barClickBound = '1';
+        canvas.style.cursor = 'pointer';
+        canvas.addEventListener('click', (event) => {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const x = (event.clientX - rect.left) * scaleX;
+          const y = (event.clientY - rect.top) * scaleY;
+          const hit = (canvas._barHits || []).find((item) => (
+            x >= item.x &&
+            x <= item.x + item.width &&
+            y >= item.y &&
+            y <= item.y + item.height
+          ));
+          if (!hit) {
+            return;
+          }
+          showToast(`${hit.label} ${hit.name}：${hit.value}`);
+        });
+      }
     }
 
     document.getElementById('transferMask').addEventListener('click', (event) => {
@@ -1787,6 +2169,8 @@
 
     drawEnergyChart();
     syncSelectionState();
+    refreshManualRefreshStatus();
+    manualRefreshStatusTimer = window.setInterval(refreshManualRefreshStatus, 5000);
   </script>
 </body>
 </html>

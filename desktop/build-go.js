@@ -16,6 +16,13 @@ function binaryName() {
   return process.platform === "win32" ? "tron-watcher.exe" : "tron-watcher"
 }
 
+function git(args) {
+  const r = spawnSync("git", args, { cwd: repoRoot(), encoding: "utf8" })
+  if (r.error) return ""
+  if (typeof r.status === "number" && r.status !== 0) return ""
+  return String(r.stdout || "").trim()
+}
+
 function run() {
   const outDir = path.join(__dirname, "bin", platformDir())
   fs.mkdirSync(outDir, { recursive: true })
@@ -23,7 +30,11 @@ function run() {
   const outPath = path.join(outDir, binaryName())
   const env = { ...process.env, CGO_ENABLED: process.env.CGO_ENABLED || "0" }
 
-  const r = spawnSync("go", ["build", "-o", outPath, "./cmd/tron-watcher"], {
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || "unknown"
+  const commit = git(["rev-parse", "--short", "HEAD"]) || "unknown"
+  const ldflags = `-X main.buildBranch=${branch} -X main.buildCommit=${commit}`
+
+  const r = spawnSync("go", ["build", "-ldflags", ldflags, "-o", outPath, "./cmd/tron-watcher"], {
     cwd: repoRoot(),
     env,
     stdio: "inherit"
@@ -33,4 +44,3 @@ function run() {
 }
 
 run()
-
