@@ -197,6 +197,59 @@ func TestShouldInspectUSDTTriggerTx(t *testing.T) {
 	}
 }
 
+func TestGetTransactionInfoByIDPrefersHead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/wallet/gettransactioninfobyid":
+			_, _ = w.Write([]byte(`{"id":"head-tx","blockNumber":123,"log":[{"address":"41abc","topics":["topic"],"data":"0x01"}]}`))
+		case "/walletsolidity/gettransactioninfobyid":
+			t.Fatalf("solidity fallback should not be called when head returns usable data")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", "", 10*time.Millisecond)
+	info, err := client.GetTransactionInfoByID(context.Background(), "txid")
+	if err != nil {
+		t.Fatalf("GetTransactionInfoByID() error = %v", err)
+	}
+	if info == nil || info.ID != "head-tx" {
+		t.Fatalf("expected head tx info, got %#v", info)
+	}
+}
+
+func TestGetTransactionInfoByIDFallsBackToSolidityWhenHeadEmpty(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/wallet/gettransactioninfobyid":
+			_, _ = w.Write([]byte(`{}`))
+		case "/walletsolidity/gettransactioninfobyid":
+			_, _ = w.Write([]byte(`{"id":"solid-tx","blockNumber":124,"log":[{"address":"41def","topics":["topic"],"data":"0x02"}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", "", 10*time.Millisecond)
+	info, err := client.GetTransactionInfoByID(context.Background(), "txid")
+	if err != nil {
+		t.Fatalf("GetTransactionInfoByID() error = %v", err)
+	}
+	if info == nil || info.ID != "solid-tx" {
+		t.Fatalf("expected solidity tx info fallback, got %#v", info)
+	}
+	if len(paths) != 2 || paths[0] != "/wallet/gettransactioninfobyid" || paths[1] != "/walletsolidity/gettransactioninfobyid" {
+		t.Fatalf("unexpected call order: %#v", paths)
+	}
+}
+
 func newTriggerSmartContractTx(contractAddress, ownerAddress, data string) Transaction {
 	payload := fmt.Sprintf(`{
 		"txID":"txid",

@@ -191,11 +191,53 @@ func (c *Client) GetBlockByNum(ctx context.Context, blockNum int64) (*Block, err
 }
 
 func (c *Client) GetTransactionInfoByID(ctx context.Context, txID string) (*TransactionInfo, error) {
+	info, err := c.getTransactionInfoByIDHead(ctx, txID)
+	if err == nil && !isEmptyTransactionInfo(info) {
+		return info, nil
+	}
+
+	solidityInfo, solidityErr := c.getTransactionInfoByIDSolidity(ctx, txID)
+	if solidityErr == nil && !isEmptyTransactionInfo(solidityInfo) {
+		return solidityInfo, nil
+	}
+
+	if err == nil && isEmptyTransactionInfo(info) {
+		if solidityErr != nil {
+			return nil, fmt.Errorf("head tx info empty and solidity lookup failed: %w", solidityErr)
+		}
+		return info, nil
+	}
+	if err != nil && solidityErr == nil {
+		return solidityInfo, nil
+	}
+	if err != nil && solidityErr != nil {
+		return nil, fmt.Errorf("get tx info by id failed: head=%v solidity=%w", err, solidityErr)
+	}
+
+	return solidityInfo, nil
+}
+
+func (c *Client) getTransactionInfoByIDHead(ctx context.Context, txID string) (*TransactionInfo, error) {
+	var info TransactionInfo
+	if err := c.post(ctx, "/wallet/gettransactioninfobyid", map[string]any{"value": txID}, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+func (c *Client) getTransactionInfoByIDSolidity(ctx context.Context, txID string) (*TransactionInfo, error) {
 	var info TransactionInfo
 	if err := c.post(ctx, "/walletsolidity/gettransactioninfobyid", map[string]any{"value": txID}, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
+}
+
+func isEmptyTransactionInfo(info *TransactionInfo) bool {
+	if info == nil {
+		return true
+	}
+	return strings.TrimSpace(info.ID) == "" && info.BlockNo == 0 && len(info.Log) == 0
 }
 
 func (c *Client) GetAccountTRXBalance(ctx context.Context, addressHex string) (decimal.Decimal, error) {
