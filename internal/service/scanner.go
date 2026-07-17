@@ -498,9 +498,11 @@ func (s *Scanner) markBalance(addressBase58 string, asset string, txID string, b
 			addressBase58, asset, direction, txID, blockNum)
 		s.balances.Mark(addressBase58, "TRX")
 		s.balances.Mark(addressBase58, "USDT")
+		s.balances.TriggerImmediateRefresh(addressBase58, []string{"TRX", "USDT"}, txID, blockNum, asset, direction)
 		return
 	}
 	s.balances.Mark(addressBase58, asset)
+	s.balances.TriggerImmediateRefresh(addressBase58, []string{asset}, txID, blockNum, asset, direction)
 }
 
 func direction(hitFrom, hitTo bool) string {

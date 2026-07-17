@@ -28,6 +28,7 @@ type TronGRPCBackupSync struct {
 	client            *tron.GRPCBackupClient
 	repo              *repository.DB
 	cache             *AddressCache
+	balances          *BalanceService
 	mainSyncKey       string
 	syncKey           string
 	startBlock        int64
@@ -41,7 +42,7 @@ type TronGRPCBackupSync struct {
 	runMu     sync.Mutex
 }
 
-func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, cache *AddressCache, mainSyncKey string, startBlock int64, txWorkers int, blockSource, syncKey string, mainStaleDuration time.Duration) *TronGRPCBackupSync {
+func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, cache *AddressCache, balances *BalanceService, mainSyncKey string, startBlock int64, txWorkers int, blockSource, syncKey string, mainStaleDuration time.Duration) *TronGRPCBackupSync {
 	if txWorkers <= 0 {
 		txWorkers = 1
 	}
@@ -55,6 +56,7 @@ func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, c
 		client:            client,
 		repo:              repo,
 		cache:             cache,
+		balances:          balances,
 		mainSyncKey:       strings.TrimSpace(mainSyncKey),
 		syncKey:           syncKey,
 		startBlock:        startBlock,
@@ -492,10 +494,10 @@ func (s *TronGRPCBackupSync) handleTRXTransfer(ctx context.Context, txID string,
 		txID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 	if okFrom {
-		s.refreshAddressBalances(ctx, fromBase58, txID, blockNum, "TRX", "OUT")
+		s.triggerImmediateBalanceRefresh(fromBase58, txID, blockNum, "TRX", "OUT")
 	}
 	if okTo {
-		s.refreshAddressBalances(ctx, toBase58, txID, blockNum, "TRX", "IN")
+		s.triggerImmediateBalanceRefresh(toBase58, txID, blockNum, "TRX", "IN")
 	}
 }
 
@@ -558,41 +560,19 @@ func (s *TronGRPCBackupSync) handleUSDTTransfers(ctx context.Context, txID strin
 			txID, blockNum, record.FromAddress, record.ToAddress, record.Amount.String(), okFrom, okTo)
 
 		if okFrom {
-			s.refreshAddressBalances(ctx, fromBase58, txID, blockNum, "USDT", "OUT")
+			s.triggerImmediateBalanceRefresh(fromBase58, txID, blockNum, "USDT", "OUT")
 		}
 		if okTo {
-			s.refreshAddressBalances(ctx, toBase58, txID, blockNum, "USDT", "IN")
+			s.triggerImmediateBalanceRefresh(toBase58, txID, blockNum, "USDT", "IN")
 		}
 	}
 }
 
-func (s *TronGRPCBackupSync) refreshAddressBalances(ctx context.Context, addressBase58, txID string, blockNum int64, triggerAsset, direction string) {
-	if strings.TrimSpace(addressBase58) == "" {
+func (s *TronGRPCBackupSync) triggerImmediateBalanceRefresh(addressBase58, txID string, blockNum int64, triggerAsset, direction string) {
+	if s == nil || s.balances == nil {
 		return
 	}
-
-	s.logger.Printf("transfer matched -> refresh balances: address=%s trigger_asset=%s direction=%s tx=%s block=%d refresh_assets=TRX,USDT source=onchain",
-		addressBase58, triggerAsset, direction, txID, blockNum)
-
-	active, trxBalance, err := s.client.GetAccountState(ctx, addressBase58)
-	if err != nil {
-		s.logger.Printf("grpc refresh trx balance failed: address=%s tx=%s err=%v", addressBase58, txID, err)
-	} else if err := s.repo.UpsertBalance(ctx, addressBase58, "TRX", trxBalance, blockNum); err != nil {
-		s.logger.Printf("grpc save trx balance failed: address=%s tx=%s err=%v", addressBase58, txID, err)
-	} else {
-		s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d inactive=%t source=onchain", addressBase58, trxBalance.String(), blockNum, !active)
-	}
-
-	usdtBalance, err := s.client.GetUSDTBalance(ctx, addressBase58)
-	if err != nil {
-		s.logger.Printf("grpc refresh usdt balance failed: address=%s tx=%s err=%v", addressBase58, txID, err)
-		return
-	}
-	if err := s.repo.UpsertBalance(ctx, addressBase58, "USDT", usdtBalance, blockNum); err != nil {
-		s.logger.Printf("grpc save usdt balance failed: address=%s tx=%s err=%v", addressBase58, txID, err)
-		return
-	}
-	s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d source=onchain", addressBase58, usdtBalance.String(), blockNum)
+	s.balances.TriggerImmediateRefresh(addressBase58, []string{triggerAsset}, txID, blockNum, triggerAsset, direction)
 }
 
 func fallbackBase58FromBytes(addressBytes []byte, fallback string) string {

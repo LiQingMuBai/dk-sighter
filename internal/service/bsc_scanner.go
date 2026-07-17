@@ -19,8 +19,17 @@ const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 10
 const bscProgressLogInterval int64 = 10
 const bscUSDTLogBatchBlocks uint64 = 20
+const bscImmediateBalanceRefreshTimeout = 12 * time.Second
 
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
+
+type bscImmediateBalanceRequest struct {
+	address      string
+	blockNumber  uint64
+	triggerAsset string
+	direction    string
+	txHash       string
+}
 
 type BSCScanner struct {
 	client                     *bsc.Client
@@ -42,6 +51,10 @@ type BSCScanner struct {
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
+
+	immediateMu         sync.Mutex
+	immediatePending    map[string]bscImmediateBalanceRequest
+	immediateRefreshing map[string]struct{}
 }
 
 func NewBSCScanner(client *bsc.Client, repo *repository.DB, cache *BSCAddressCache, notifier TransferNotifier, startBlock int64, confirmations int) *BSCScanner {
@@ -57,17 +70,19 @@ func NewBSCScannerWithSyncKey(client *bsc.Client, repo *repository.DB, cache *BS
 		syncKey = value
 	}
 	return &BSCScanner{
-		client:         client,
-		repo:           repo,
-		cache:          cache,
-		notifier:       notifier,
-		syncKey:        syncKey,
-		startBlock:     startBlock,
-		confirmations:  confirmations,
-		insertIfAbsent: insertIfAbsent,
-		logger:         bscLogger(),
-		skipToLatest:   true,
-		triggerCh:      make(chan struct{}, 1),
+		client:              client,
+		repo:                repo,
+		cache:               cache,
+		notifier:            notifier,
+		syncKey:             syncKey,
+		startBlock:          startBlock,
+		confirmations:       confirmations,
+		insertIfAbsent:      insertIfAbsent,
+		logger:              bscLogger(),
+		skipToLatest:        true,
+		triggerCh:           make(chan struct{}, 1),
+		immediatePending:    make(map[string]bscImmediateBalanceRequest),
+		immediateRefreshing: make(map[string]struct{}),
 	}
 }
 
@@ -486,12 +501,16 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfe
 		if hitFrom {
 			record := baseRecord
 			record.WatchAddress = from
-			s.insertTransferOut(ctx, record)
+			if s.insertTransferOut(ctx, record) {
+				s.triggerImmediateBalanceRefresh(from, blockNum, "BNB", "OUT", tx.Hash)
+			}
 		}
 		if hitTo {
 			record := baseRecord
 			record.WatchAddress = to
-			s.insertTransferIn(ctx, record)
+			if s.insertTransferIn(ctx, record) {
+				s.triggerImmediateBalanceRefresh(to, blockNum, "BNB", "IN", tx.Hash)
+			}
 		}
 
 		if hitFrom {
@@ -531,12 +550,16 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfe
 		if hitFrom {
 			record := baseRecord
 			record.WatchAddress = from
-			s.insertTransferOut(ctx, record)
+			if s.insertTransferOut(ctx, record) {
+				s.triggerImmediateBalanceRefresh(from, blockNum, "USDT", "OUT", transfer.TxHash)
+			}
 		}
 		if hitTo {
 			record := baseRecord
 			record.WatchAddress = to
-			s.insertTransferIn(ctx, record)
+			if s.insertTransferIn(ctx, record) {
+				s.triggerImmediateBalanceRefresh(to, blockNum, "USDT", "IN", transfer.TxHash)
+			}
 		}
 
 		if hitFrom {
@@ -563,54 +586,114 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfe
 	return addrs, nil
 }
 
-func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.TransferRecord) {
+func (s *BSCScanner) triggerImmediateBalanceRefresh(address string, blockNum uint64, triggerAsset, direction, txHash string) {
+	if s == nil || s.client == nil || s.repo == nil {
+		return
+	}
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return
+	}
+
+	req := bscImmediateBalanceRequest{
+		address:      address,
+		blockNumber:  blockNum,
+		triggerAsset: strings.ToUpper(strings.TrimSpace(triggerAsset)),
+		direction:    strings.ToUpper(strings.TrimSpace(direction)),
+		txHash:       strings.TrimSpace(txHash),
+	}
+
+	s.immediateMu.Lock()
+	s.immediatePending[address] = req
+	if _, running := s.immediateRefreshing[address]; running {
+		s.immediateMu.Unlock()
+		return
+	}
+	s.immediateRefreshing[address] = struct{}{}
+	s.immediateMu.Unlock()
+
+	go s.runImmediateBalanceRefreshLoop(address)
+}
+
+func (s *BSCScanner) runImmediateBalanceRefreshLoop(address string) {
+	for {
+		req, ok := s.takeImmediateBalanceRefresh(address)
+		if !ok {
+			return
+		}
+
+		s.logger.Printf("transfer matched -> immediate balance refresh: address=%s trigger_asset=%s direction=%s tx=%s block=%d refresh_assets=BNB,USDT source=onchain",
+			req.address, req.triggerAsset, req.direction, req.txHash, req.blockNumber)
+
+		refreshCtx, cancel := context.WithTimeout(context.Background(), bscImmediateBalanceRefreshTimeout)
+		s.refreshAddressBalances(refreshCtx, req.address, false)
+		cancel()
+	}
+}
+
+func (s *BSCScanner) takeImmediateBalanceRefresh(address string) (bscImmediateBalanceRequest, bool) {
+	s.immediateMu.Lock()
+	defer s.immediateMu.Unlock()
+
+	req, ok := s.immediatePending[address]
+	if !ok {
+		delete(s.immediateRefreshing, address)
+		return bscImmediateBalanceRequest{}, false
+	}
+	delete(s.immediatePending, address)
+	return req, true
+}
+
+func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.TransferRecord) bool {
 	if s.insertIfAbsent {
 		inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
 		if err != nil {
 			s.logger.Printf("insert transfer in failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
-			return
+			return false
 		}
 		if !inserted {
 			s.logger.Printf("duplicate transfer in skipped: tx=%s asset=%s watch_address=%s log_index=%d", record.TxHash, record.AssetCode, record.WatchAddress, record.LogIndex)
-			return
+			return false
 		}
 		if s.notifier != nil {
 			s.notifier.NotifyTransfer(ctx, "bsc", "IN", record)
 		}
-		return
+		return true
 	}
 	if err := s.repo.InsertBSCTransferIn(ctx, record); err != nil {
 		s.logger.Printf("insert transfer in failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
-		return
+		return false
 	}
 	if s.notifier != nil {
 		s.notifier.NotifyTransfer(ctx, "bsc", "IN", record)
 	}
+	return true
 }
 
-func (s *BSCScanner) insertTransferOut(ctx context.Context, record repository.TransferRecord) {
+func (s *BSCScanner) insertTransferOut(ctx context.Context, record repository.TransferRecord) bool {
 	if s.insertIfAbsent {
 		inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
 		if err != nil {
 			s.logger.Printf("insert transfer out failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
-			return
+			return false
 		}
 		if !inserted {
 			s.logger.Printf("duplicate transfer out skipped: tx=%s asset=%s watch_address=%s log_index=%d", record.TxHash, record.AssetCode, record.WatchAddress, record.LogIndex)
-			return
+			return false
 		}
 		if s.notifier != nil {
 			s.notifier.NotifyTransfer(ctx, "bsc", "OUT", record)
 		}
-		return
+		return true
 	}
 	if err := s.repo.InsertBSCTransferOut(ctx, record); err != nil {
 		s.logger.Printf("insert transfer out failed: tx=%s asset=%s err=%v", record.TxHash, record.AssetCode, err)
-		return
+		return false
 	}
 	if s.notifier != nil {
 		s.notifier.NotifyTransfer(ctx, "bsc", "OUT", record)
 	}
+	return true
 }
 
 func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, includeZero bool) {

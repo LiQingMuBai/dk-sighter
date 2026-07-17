@@ -325,9 +325,9 @@ func (d *DB) UpsertBalance(ctx context.Context, addressBase58, assetCode string,
 		INSERT INTO asset_balances (address_base58, asset_code, balance, block_number)
 		VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
-			balance = VALUES(balance),
-			block_number = VALUES(block_number),
-			updated_at = CURRENT_TIMESTAMP
+			balance = IF(VALUES(block_number) >= block_number, VALUES(balance), balance),
+			block_number = IF(VALUES(block_number) >= block_number, VALUES(block_number), block_number),
+			updated_at = IF(VALUES(block_number) >= block_number, CURRENT_TIMESTAMP, updated_at)
 	`, addressBase58, assetCode, balance.String(), blockNumber)
 	if err != nil {
 		return fmt.Errorf("upsert balance: %w", err)

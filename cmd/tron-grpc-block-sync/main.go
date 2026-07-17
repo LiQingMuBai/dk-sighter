@@ -62,13 +62,21 @@ func main() {
 	}
 
 	cache := service.NewAddressCache(repo)
+	refreshHTTPURL := strings.TrimSpace(cfg.QuickNodeRefreshHTTPURL())
+	refreshMinInterval := cfg.QuickNodeRefreshMinRequestInterval()
+	if refreshHTTPURL == "" {
+		refreshHTTPURL = strings.TrimSpace(cfg.QuickNode.HTTPURL)
+		refreshMinInterval = cfg.QuickNodeMinRequestInterval()
+	}
+	refreshClient := tron.NewClient(refreshHTTPURL, cfg.QuickNodeRefreshWSSURL(), cfg.QuickNode.USDT, refreshMinInterval)
+	balanceService := service.NewBalanceService(refreshClient, repo, cache)
 	client := tron.NewGRPCBackupClient(opts.Address, opts.USDTContract, opts.TokenHeader, opts.Token, opts.UseTLS, opts.Timeout, opts.MinRequestInterval)
 	if err := client.Start(); err != nil {
 		log.Fatalf("start tron grpc client failed: %v", err)
 	}
 	defer client.Close()
 
-	scanner := service.NewTronGRPCBackupSync(client, repo, cache, opts.MainSyncKey, opts.StartBlock, opts.TXWorkers, opts.BlockSource, opts.SyncKey, opts.MainStaleDuration)
+	scanner := service.NewTronGRPCBackupSync(client, repo, cache, balanceService, opts.MainSyncKey, opts.StartBlock, opts.TXWorkers, opts.BlockSource, opts.SyncKey, opts.MainStaleDuration)
 	scanner.SetSkipToLatestOnLag(false)
 
 	log.Printf("starting tron grpc backup block sync: sync_key=%s source=%s grpc=%s start_block=%d tx_workers=%d",

@@ -18,6 +18,7 @@ import (
 const tronBalanceWorkers = 4
 const tronUSDTRepairTimeout = 30 * time.Second
 const tronUSDTRepairLookback = 5 * time.Minute
+const tronImmediateBalanceRefreshTimeout = 12 * time.Second
 
 var usdtTransferRepairThreshold = decimal.NewFromInt(1)
 
@@ -27,25 +28,39 @@ type tronBalanceTask struct {
 	asset         string
 }
 
+type tronImmediateBalanceRequest struct {
+	addressBase58 string
+	addressHex    string
+	asset         string
+	blockNumber   int64
+	triggerAsset  string
+	direction     string
+	txID          string
+}
+
 type BalanceService struct {
 	tronClient *tron.Client
 	repo       *repository.DB
 	cache      *AddressCache
 	logger     *log.Logger
 
-	mu            sync.Mutex
-	dirty         map[string]map[string]struct{}
-	usdtRepairing map[string]struct{}
+	mu                  sync.Mutex
+	dirty               map[string]map[string]struct{}
+	usdtRepairing       map[string]struct{}
+	immediatePending    map[string]map[string]tronImmediateBalanceRequest
+	immediateRefreshing map[string]map[string]struct{}
 }
 
 func NewBalanceService(tronClient *tron.Client, repo *repository.DB, cache *AddressCache) *BalanceService {
 	return &BalanceService{
-		tronClient:    tronClient,
-		repo:          repo,
-		cache:         cache,
-		logger:        tronLogger(),
-		dirty:         make(map[string]map[string]struct{}),
-		usdtRepairing: make(map[string]struct{}),
+		tronClient:          tronClient,
+		repo:                repo,
+		cache:               cache,
+		logger:              tronLogger(),
+		dirty:               make(map[string]map[string]struct{}),
+		usdtRepairing:       make(map[string]struct{}),
+		immediatePending:    make(map[string]map[string]tronImmediateBalanceRequest),
+		immediateRefreshing: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -60,6 +75,124 @@ func (s *BalanceService) Mark(addressBase58, asset string) {
 		s.dirty[addressBase58] = make(map[string]struct{})
 	}
 	s.dirty[addressBase58][asset] = struct{}{}
+}
+
+func (s *BalanceService) TriggerImmediateRefresh(addressBase58 string, assets []string, txID string, blockNumber int64, triggerAsset, direction string) {
+	if s == nil || s.tronClient == nil || s.repo == nil {
+		return
+	}
+	addressBase58 = strings.TrimSpace(addressBase58)
+	if addressBase58 == "" {
+		return
+	}
+
+	addressHex, err := tron.Base58ToHex(addressBase58)
+	if err != nil {
+		s.logger.Printf("convert address to hex failed for immediate refresh: %s err=%v", addressBase58, err)
+		return
+	}
+
+	normalizedAssets := make([]string, 0, len(assets))
+	seenAssets := make(map[string]struct{}, len(assets))
+	for _, asset := range assets {
+		asset = strings.ToUpper(strings.TrimSpace(asset))
+		if asset == "" {
+			continue
+		}
+		if _, exists := seenAssets[asset]; exists {
+			continue
+		}
+		seenAssets[asset] = struct{}{}
+		normalizedAssets = append(normalizedAssets, asset)
+	}
+	if len(normalizedAssets) == 0 {
+		return
+	}
+
+	for _, asset := range normalizedAssets {
+		req := tronImmediateBalanceRequest{
+			addressBase58: addressBase58,
+			addressHex:    addressHex,
+			asset:         asset,
+			blockNumber:   blockNumber,
+			triggerAsset:  strings.ToUpper(strings.TrimSpace(triggerAsset)),
+			direction:     strings.ToUpper(strings.TrimSpace(direction)),
+			txID:          strings.TrimSpace(txID),
+		}
+		s.enqueueImmediateRefresh(req)
+	}
+}
+
+func (s *BalanceService) enqueueImmediateRefresh(req tronImmediateBalanceRequest) {
+	s.mu.Lock()
+	if _, ok := s.immediatePending[req.addressBase58]; !ok {
+		s.immediatePending[req.addressBase58] = make(map[string]tronImmediateBalanceRequest)
+	}
+	s.immediatePending[req.addressBase58][req.asset] = req
+	if _, ok := s.immediateRefreshing[req.addressBase58]; ok {
+		if _, running := s.immediateRefreshing[req.addressBase58][req.asset]; running {
+			s.mu.Unlock()
+			return
+		}
+	} else {
+		s.immediateRefreshing[req.addressBase58] = make(map[string]struct{})
+	}
+	s.immediateRefreshing[req.addressBase58][req.asset] = struct{}{}
+	s.mu.Unlock()
+
+	go s.runImmediateRefreshLoop(req.addressBase58, req.asset)
+}
+
+func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
+	for {
+		req, ok := s.takeImmediateRefreshRequest(addressBase58, asset)
+		if !ok {
+			return
+		}
+
+		s.logger.Printf("transfer matched -> immediate balance refresh: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d source=onchain",
+			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber)
+
+		refreshCtx, cancel := context.WithTimeout(context.Background(), tronImmediateBalanceRefreshTimeout)
+		s.refreshBalance(refreshCtx, tronBalanceTask{
+			addressBase58: req.addressBase58,
+			addressHex:    req.addressHex,
+			asset:         req.asset,
+		}, req.blockNumber)
+		cancel()
+	}
+}
+
+func (s *BalanceService) takeImmediateRefreshRequest(addressBase58, asset string) (tronImmediateBalanceRequest, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reqsByAddress, ok := s.immediatePending[addressBase58]
+	if !ok {
+		s.finishImmediateRefreshLocked(addressBase58, asset)
+		return tronImmediateBalanceRequest{}, false
+	}
+	req, ok := reqsByAddress[asset]
+	if !ok {
+		s.finishImmediateRefreshLocked(addressBase58, asset)
+		return tronImmediateBalanceRequest{}, false
+	}
+	delete(reqsByAddress, asset)
+	if len(reqsByAddress) == 0 {
+		delete(s.immediatePending, addressBase58)
+	}
+	return req, true
+}
+
+func (s *BalanceService) finishImmediateRefreshLocked(addressBase58, asset string) {
+	refreshingByAddress, ok := s.immediateRefreshing[addressBase58]
+	if !ok {
+		return
+	}
+	delete(refreshingByAddress, asset)
+	if len(refreshingByAddress) == 0 {
+		delete(s.immediateRefreshing, addressBase58)
+	}
 }
 
 func (s *BalanceService) Flush(ctx context.Context, blockNumber int64) {
