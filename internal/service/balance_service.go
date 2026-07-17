@@ -1,9 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +22,7 @@ import (
 const tronBalanceWorkers = 4
 const tronUSDTRepairTimeout = 30 * time.Second
 const tronUSDTRepairLookback = 5 * time.Minute
+const tronImmediateBalanceRefreshDelay = 30 * time.Second
 const tronImmediateBalanceRefreshTimeout = 12 * time.Second
 
 var usdtTransferRepairThreshold = decimal.NewFromInt(1)
@@ -130,8 +135,26 @@ func (s *BalanceService) enqueueImmediateRefresh(req tronImmediateBalanceRequest
 		s.immediatePending[req.addressBase58] = make(map[string]tronImmediateBalanceRequest)
 	}
 	s.immediatePending[req.addressBase58][req.asset] = req
+	// #region debug-point A:immediate-refresh-enqueue
+	balanceDebugReport("A", "balance.immediate.enqueue", map[string]any{
+		"address":       req.addressBase58,
+		"asset":         req.asset,
+		"block":         req.blockNumber,
+		"trigger_asset": req.triggerAsset,
+		"direction":     req.direction,
+		"tx":            req.txID,
+	})
+	// #endregion
 	if _, ok := s.immediateRefreshing[req.addressBase58]; ok {
 		if _, running := s.immediateRefreshing[req.addressBase58][req.asset]; running {
+			// #region debug-point A:immediate-refresh-deduped
+			balanceDebugReport("A", "balance.immediate.deduped", map[string]any{
+				"address": req.addressBase58,
+				"asset":   req.asset,
+				"block":   req.blockNumber,
+				"tx":      req.txID,
+			})
+			// #endregion
 			s.mu.Unlock()
 			return
 		}
@@ -151,8 +174,38 @@ func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
 			return
 		}
 
-		s.logger.Printf("transfer matched -> immediate balance refresh: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d source=onchain",
-			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber)
+		// #region debug-point A:immediate-refresh-scheduled
+		balanceDebugReport("A", "balance.immediate.scheduled", map[string]any{
+			"address":       req.addressBase58,
+			"asset":         req.asset,
+			"block":         req.blockNumber,
+			"trigger_asset": req.triggerAsset,
+			"direction":     req.direction,
+			"tx":            req.txID,
+			"delay_ms":      tronImmediateBalanceRefreshDelay.Milliseconds(),
+		})
+		// #endregion
+		s.logger.Printf("transfer matched -> delayed balance refresh scheduled: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s source=onchain",
+			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay)
+
+		timer := time.NewTimer(tronImmediateBalanceRefreshDelay)
+		<-timer.C
+
+		req = s.takeLatestImmediateRefreshRequest(req.addressBase58, req.asset, req)
+
+		// #region debug-point A:immediate-refresh-start
+		balanceDebugReport("A", "balance.immediate.start", map[string]any{
+			"address":       req.addressBase58,
+			"asset":         req.asset,
+			"block":         req.blockNumber,
+			"trigger_asset": req.triggerAsset,
+			"direction":     req.direction,
+			"tx":            req.txID,
+			"delay_ms":      tronImmediateBalanceRefreshDelay.Milliseconds(),
+		})
+		// #endregion
+		s.logger.Printf("transfer matched -> delayed balance refresh started: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s source=onchain",
+			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay)
 
 		refreshCtx, cancel := context.WithTimeout(context.Background(), tronImmediateBalanceRefreshTimeout)
 		s.refreshBalance(refreshCtx, tronBalanceTask{
@@ -163,6 +216,25 @@ func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
 		}, req.blockNumber)
 		cancel()
 	}
+}
+
+func (s *BalanceService) takeLatestImmediateRefreshRequest(addressBase58, asset string, fallback tronImmediateBalanceRequest) tronImmediateBalanceRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reqsByAddress, ok := s.immediatePending[addressBase58]
+	if !ok {
+		return fallback
+	}
+	req, ok := reqsByAddress[asset]
+	if !ok {
+		return fallback
+	}
+	delete(reqsByAddress, asset)
+	if len(reqsByAddress) == 0 {
+		delete(s.immediatePending, addressBase58)
+	}
+	return req
 }
 
 func (s *BalanceService) takeImmediateRefreshRequest(addressBase58, asset string) (tronImmediateBalanceRequest, bool) {
@@ -434,16 +506,52 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 }
 
 func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTask, blockNumber int64) {
+	// #region debug-point C:refresh-balance-start
+	balanceDebugReport("C", "balance.refresh.start", map[string]any{
+		"address":     task.addressBase58,
+		"asset":       task.asset,
+		"block":       blockNumber,
+		"prefer_head": task.preferHead,
+	})
+	// #endregion
 	switch task.asset {
 	case "TRX":
 		active, balance, err := s.loadTRXBalance(ctx, task)
 		if err != nil {
+			// #region debug-point C:refresh-trx-failed
+			balanceDebugReport("C", "balance.refresh.trx.failed", map[string]any{
+				"address":     task.addressBase58,
+				"block":       blockNumber,
+				"prefer_head": task.preferHead,
+				"err":         err.Error(),
+			})
+			// #endregion
 			s.logger.Printf("refresh trx balance failed: %s err=%v", task.addressBase58, err)
 			return
 		}
 		if err := s.repo.UpsertBalance(ctx, task.addressBase58, "TRX", balance, blockNumber); err != nil {
+			// #region debug-point D:refresh-trx-save-failed
+			balanceDebugReport("D", "balance.refresh.trx.save_failed", map[string]any{
+				"address": task.addressBase58,
+				"block":   blockNumber,
+				"balance": balance.String(),
+				"err":     err.Error(),
+			})
+			// #endregion
 			s.logger.Printf("save trx balance failed: %s err=%v", task.addressBase58, err)
 			return
+		}
+		if row, ok, rowErr := s.repo.GetDashboardRowByAddress(ctx, task.addressBase58); rowErr == nil && ok && row != nil {
+			// #region debug-point D:refresh-trx-saved
+			balanceDebugReport("D", "balance.refresh.trx.saved", map[string]any{
+				"address":       task.addressBase58,
+				"block":         blockNumber,
+				"active":        active,
+				"queried":       balance.String(),
+				"persisted_trx": row.TRXBalance.String(),
+				"persisted_usdt": row.USDTBalance.String(),
+			})
+			// #endregion
 		}
 		if !active {
 			s.logger.Printf("balance updated: address=%s asset=TRX balance=%s block=%d inactive=true source=onchain", task.addressBase58, balance.String(), blockNumber)
@@ -453,6 +561,13 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 	case "USDT":
 		balance, err := s.tronClient.GetUSDTBalance(ctx, task.addressHex)
 		if err != nil {
+			// #region debug-point C:refresh-usdt-failed
+			balanceDebugReport("C", "balance.refresh.usdt.failed", map[string]any{
+				"address": task.addressBase58,
+				"block":   blockNumber,
+				"err":     err.Error(),
+			})
+			// #endregion
 			s.logger.Printf("refresh usdt balance failed: %s err=%v", task.addressBase58, err)
 			return
 		}
@@ -461,8 +576,27 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 			s.logger.Printf("load current usdt balance failed: %s err=%v", task.addressBase58, balanceErr)
 		}
 		if err := s.repo.UpsertBalance(ctx, task.addressBase58, "USDT", balance, blockNumber); err != nil {
+			// #region debug-point D:refresh-usdt-save-failed
+			balanceDebugReport("D", "balance.refresh.usdt.save_failed", map[string]any{
+				"address": task.addressBase58,
+				"block":   blockNumber,
+				"balance": balance.String(),
+				"err":     err.Error(),
+			})
+			// #endregion
 			s.logger.Printf("save usdt balance failed: %s err=%v", task.addressBase58, err)
 			return
+		}
+		if row, ok, rowErr := s.repo.GetDashboardRowByAddress(ctx, task.addressBase58); rowErr == nil && ok && row != nil {
+			// #region debug-point D:refresh-usdt-saved
+			balanceDebugReport("D", "balance.refresh.usdt.saved", map[string]any{
+				"address":        task.addressBase58,
+				"block":          blockNumber,
+				"queried":        balance.String(),
+				"persisted_trx":  row.TRXBalance.String(),
+				"persisted_usdt": row.USDTBalance.String(),
+			})
+			// #endregion
 		}
 		s.logger.Printf("balance updated: address=%s asset=USDT balance=%s block=%d source=onchain", task.addressBase58, balance.String(), blockNumber)
 		if balanceErr == nil {
@@ -473,10 +607,75 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 
 func (s *BalanceService) loadTRXBalance(ctx context.Context, task tronBalanceTask) (bool, decimal.Decimal, error) {
 	if task.preferHead {
-		return s.tronClient.GetAccountStateHead(ctx, task.addressHex)
+		active, balance, err := s.tronClient.GetAccountStateHead(ctx, task.addressHex)
+		if err == nil {
+			// #region debug-point B:trx-head-read
+			balanceDebugReport("B", "balance.trx.head.read", map[string]any{
+				"address": task.addressBase58,
+				"active":  active,
+				"balance": balance.String(),
+			})
+			// #endregion
+		}
+		return active, balance, err
 	}
-	return s.tronClient.GetAccountState(ctx, task.addressHex)
+	active, balance, err := s.tronClient.GetAccountState(ctx, task.addressHex)
+	if err == nil {
+		// #region debug-point B:trx-solidity-read
+		balanceDebugReport("B", "balance.trx.solidity.read", map[string]any{
+			"address": task.addressBase58,
+			"active":  active,
+			"balance": balance.String(),
+		})
+		// #endregion
+	}
+	return active, balance, err
 }
+
+// #region debug-point A:balance-debug-report
+func balanceDebugReport(hypothesisID string, msg string, data map[string]any) {
+	go func() {
+		envPath := ".dbg/tron-head-balance-lag.env"
+		url := "http://127.0.0.1:7777/event"
+		sessionID := "tron-head-balance-lag"
+		if b, err := os.ReadFile(envPath); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(line, "DEBUG_SERVER_URL=") {
+					url = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SERVER_URL="))
+				}
+				if strings.HasPrefix(line, "DEBUG_SESSION_ID=") {
+					sessionID = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SESSION_ID="))
+				}
+			}
+		}
+		payload := map[string]any{
+			"sessionId":    sessionID,
+			"runId":        "pre",
+			"hypothesisId": hypothesisID,
+			"location":     "balance_service.go",
+			"msg":          "[DEBUG] " + msg,
+			"data":         data,
+			"ts":           time.Now().UnixMilli(),
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 800 * time.Millisecond}
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	}()
+}
+
+// #endregion
 
 func (s *BalanceService) getCurrentUSDTBalance(ctx context.Context, addressBase58 string) (decimal.Decimal, error) {
 	row, ok, err := s.repo.GetDashboardRowByAddress(ctx, addressBase58)
