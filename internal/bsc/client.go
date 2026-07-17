@@ -130,19 +130,28 @@ func (c *Client) GetBlockByNumber(ctx context.Context, blockNumber uint64) (*Blo
 }
 
 type ERC20Transfer struct {
-	TxHash   string
-	From     string
-	To       string
-	Value    *big.Int
-	LogIndex uint64
+	BlockNumber uint64
+	TxHash      string
+	From        string
+	To          string
+	Value       *big.Int
+	LogIndex    uint64
 }
 
 func (c *Client) GetUSDTTransfersByBlock(ctx context.Context, blockNumber uint64) ([]ERC20Transfer, error) {
+	return c.GetUSDTTransfersByRange(ctx, blockNumber, blockNumber)
+}
+
+func (c *Client) GetUSDTTransfersByRange(ctx context.Context, fromBlock, toBlock uint64) ([]ERC20Transfer, error) {
 	if c.usdtContract == "" {
+		return []ERC20Transfer{}, nil
+	}
+	if toBlock < fromBlock {
 		return []ERC20Transfer{}, nil
 	}
 
 	var resp []struct {
+		BlockNumber     string   `json:"blockNumber"`
 		TransactionHash string   `json:"transactionHash"`
 		LogIndex        string   `json:"logIndex"`
 		Topics          []string `json:"topics"`
@@ -150,8 +159,8 @@ func (c *Client) GetUSDTTransfersByBlock(ctx context.Context, blockNumber uint64
 	}
 
 	filter := map[string]any{
-		"fromBlock": fmt.Sprintf("0x%x", blockNumber),
-		"toBlock":   fmt.Sprintf("0x%x", blockNumber),
+		"fromBlock": fmt.Sprintf("0x%x", fromBlock),
+		"toBlock":   fmt.Sprintf("0x%x", toBlock),
 		"address":   c.usdtContract,
 		"topics":    []any{"0x" + transferTopic},
 	}
@@ -172,17 +181,22 @@ func (c *Client) GetUSDTTransfersByBlock(ctx context.Context, blockNumber uint64
 		if err != nil {
 			return nil, err
 		}
+		blockNumber, err := parseHexUint64(logItem.BlockNumber)
+		if err != nil {
+			return nil, err
+		}
 		logIndex, err := parseHexUint64(logItem.LogIndex)
 		if err != nil {
 			return nil, err
 		}
 
 		transfers = append(transfers, ERC20Transfer{
-			TxHash:   strings.ToLower(strings.TrimSpace(logItem.TransactionHash)),
-			From:     from,
-			To:       to,
-			Value:    value,
-			LogIndex: logIndex,
+			BlockNumber: blockNumber,
+			TxHash:      strings.ToLower(strings.TrimSpace(logItem.TransactionHash)),
+			From:        from,
+			To:          to,
+			Value:       value,
+			LogIndex:    logIndex,
 		})
 	}
 	return transfers, nil

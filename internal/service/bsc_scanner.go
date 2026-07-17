@@ -18,6 +18,7 @@ import (
 const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 10
 const bscProgressLogInterval int64 = 10
+const bscUSDTLogBatchBlocks uint64 = 20
 
 type maxScanBlockResolver func(context.Context, int64) (int64, bool, error)
 
@@ -355,6 +356,9 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 	progressBaseBlock := lastBlock
 	deferBalanceRefresh := s.deferBalanceRefreshInCatch && scanTarget > lastBlock
 	deferredRefresh := make(map[string]struct{})
+	cachedUSDTTransfers := make(map[uint64][]bsc.ERC20Transfer)
+	var cachedFromBlock uint64
+	var cachedToBlock uint64
 	if deferBalanceRefresh {
 		s.logger.Printf("scanner deferred balance refresh enabled: from=%d to=%d", lastBlock+1, scanTarget)
 	}
@@ -385,7 +389,20 @@ func (s *BSCScanner) scan(ctx context.Context) error {
 		}
 
 		blockNum := currentBlock + 1
-		hitAddresses, err := s.scanBlock(ctx, uint64(blockNum), !deferBalanceRefresh)
+		if cachedUSDTTransfers == nil || uint64(blockNum) < cachedFromBlock || uint64(blockNum) > cachedToBlock {
+			batchTo := uint64(scanTarget)
+			if uint64(blockNum)+bscUSDTLogBatchBlocks-1 < batchTo {
+				batchTo = uint64(blockNum) + bscUSDTLogBatchBlocks - 1
+			}
+			batchTransfers, err := s.client.GetUSDTTransfersByRange(ctx, uint64(blockNum), batchTo)
+			if err != nil {
+				return err
+			}
+			cachedUSDTTransfers = groupBSCTransfersByBlock(batchTransfers)
+			cachedFromBlock = uint64(blockNum)
+			cachedToBlock = batchTo
+		}
+		hitAddresses, err := s.scanBlock(ctx, uint64(blockNum), cachedUSDTTransfers[uint64(blockNum)], !deferBalanceRefresh)
 		if err != nil {
 			return err
 		}
@@ -433,29 +450,9 @@ func (s *BSCScanner) recordSkippedGap(ctx context.Context, fromBlock, toBlock in
 	return nil
 }
 
-func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, refreshBalances bool) ([]string, error) {
-	var (
-		block         *bsc.Block
-		usdtTransfers []bsc.ERC20Transfer
-	)
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		value, err := s.client.GetBlockByNumber(groupCtx, blockNum)
-		if err != nil {
-			return err
-		}
-		block = value
-		return nil
-	})
-	group.Go(func() error {
-		value, err := s.client.GetUSDTTransfersByBlock(groupCtx, blockNum)
-		if err != nil {
-			return err
-		}
-		usdtTransfers = value
-		return nil
-	})
-	if err := group.Wait(); err != nil {
+func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfers []bsc.ERC20Transfer, refreshBalances bool) ([]string, error) {
+	block, err := s.client.GetBlockByNumber(ctx, blockNum)
+	if err != nil {
 		return nil, err
 	}
 
@@ -769,73 +766,97 @@ func (s *BSCScanner) syncRecentBSCUSDTTransfers(ctx context.Context, watchAddres
 	}
 
 	watchAddress = strings.ToLower(strings.TrimSpace(watchAddress))
-	sinceUnix := uint64(since.Unix())
 	insertedIn := 0
 	insertedOut := 0
-	for blockNum := headBlock; blockNum > 0; blockNum-- {
-		select {
-		case <-ctx.Done():
-			return insertedIn, insertedOut, ctx.Err()
-		default:
+	fromBlock, blockTimes, err := s.findRecentBSCBlockWindow(ctx, headBlock, since)
+	if err != nil {
+		return insertedIn, insertedOut, err
+	}
+	transfers, err := s.client.GetUSDTTransfersByRange(ctx, fromBlock, headBlock)
+	if err != nil {
+		return insertedIn, insertedOut, err
+	}
+	for _, transfer := range transfers {
+		blockTimestamp, ok := blockTimes[transfer.BlockNumber]
+		if !ok || blockTimestamp.Before(since) {
+			continue
 		}
 
-		block, err := s.client.GetBlockByNumber(ctx, blockNum)
-		if err != nil {
-			return insertedIn, insertedOut, err
-		}
-		if block.Timestamp < sinceUnix {
-			break
+		matchFrom := strings.EqualFold(strings.TrimSpace(transfer.From), watchAddress)
+		matchTo := strings.EqualFold(strings.TrimSpace(transfer.To), watchAddress)
+		if !matchFrom && !matchTo {
+			continue
 		}
 
-		transfers, err := s.client.GetUSDTTransfersByBlock(ctx, blockNum)
-		if err != nil {
-			return insertedIn, insertedOut, err
+		amount := decimal.NewFromBigInt(transfer.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+		record := repository.TransferRecord{
+			TxHash:      transfer.TxHash,
+			BlockNumber: int64(transfer.BlockNumber),
+			BlockTime:   blockTimestamp.UnixMilli(),
+			AssetCode:   "USDT",
+			ContractAddress: sql.NullString{
+				String: s.client.USDTContract(),
+				Valid:  s.client.USDTContract() != "",
+			},
+			WatchAddress: watchAddress,
+			FromAddress:  strings.ToLower(strings.TrimSpace(transfer.From)),
+			ToAddress:    strings.ToLower(strings.TrimSpace(transfer.To)),
+			Amount:       amount,
+			LogIndex:     int(transfer.LogIndex),
+			Status:       "CONFIRMED",
 		}
-		for _, transfer := range transfers {
-			matchFrom := strings.EqualFold(strings.TrimSpace(transfer.From), watchAddress)
-			matchTo := strings.EqualFold(strings.TrimSpace(transfer.To), watchAddress)
-			if !matchFrom && !matchTo {
-				continue
+
+		if matchFrom {
+			inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
+			if err != nil {
+				s.logger.Printf("insert bsc transfer out failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
+			} else if inserted {
+				insertedOut++
 			}
-
-			amount := decimal.NewFromBigInt(transfer.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
-			record := repository.TransferRecord{
-				TxHash:      transfer.TxHash,
-				BlockNumber: int64(blockNum),
-				BlockTime:   int64(block.Timestamp) * 1000,
-				AssetCode:   "USDT",
-				ContractAddress: sql.NullString{
-					String: s.client.USDTContract(),
-					Valid:  s.client.USDTContract() != "",
-				},
-				WatchAddress: watchAddress,
-				FromAddress:  strings.ToLower(strings.TrimSpace(transfer.From)),
-				ToAddress:    strings.ToLower(strings.TrimSpace(transfer.To)),
-				Amount:       amount,
-				LogIndex:     int(transfer.LogIndex),
-				Status:       "CONFIRMED",
-			}
-
-			if matchFrom {
-				inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
-				if err != nil {
-					s.logger.Printf("insert bsc transfer out failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
-				} else if inserted {
-					insertedOut++
-				}
-			}
-			if matchTo {
-				inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
-				if err != nil {
-					s.logger.Printf("insert bsc transfer in failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
-				} else if inserted {
-					insertedIn++
-				}
+		}
+		if matchTo {
+			inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
+			if err != nil {
+				s.logger.Printf("insert bsc transfer in failed during repair sync: address=%s tx=%s err=%v", watchAddress, transfer.TxHash, err)
+			} else if inserted {
+				insertedIn++
 			}
 		}
 	}
 
 	return insertedIn, insertedOut, nil
+}
+
+func (s *BSCScanner) findRecentBSCBlockWindow(ctx context.Context, headBlock uint64, since time.Time) (uint64, map[uint64]time.Time, error) {
+	blockTimes := make(map[uint64]time.Time)
+	fromBlock := headBlock
+	for blockNum := headBlock; ; blockNum-- {
+		select {
+		case <-ctx.Done():
+			return 0, nil, ctx.Err()
+		default:
+		}
+
+		block, err := s.client.GetBlockByNumber(ctx, blockNum)
+		if err != nil {
+			return 0, nil, err
+		}
+		blockTime := time.Unix(int64(block.Timestamp), 0)
+		blockTimes[blockNum] = blockTime
+		fromBlock = blockNum
+		if blockTime.Before(since) || blockNum == 0 {
+			break
+		}
+	}
+	return fromBlock, blockTimes, nil
+}
+
+func groupBSCTransfersByBlock(transfers []bsc.ERC20Transfer) map[uint64][]bsc.ERC20Transfer {
+	grouped := make(map[uint64][]bsc.ERC20Transfer)
+	for _, transfer := range transfers {
+		grouped[transfer.BlockNumber] = append(grouped[transfer.BlockNumber], transfer)
+	}
+	return grouped
 }
 
 func normalizeDecimal(v decimal.Decimal) string {
