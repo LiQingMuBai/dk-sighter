@@ -209,6 +209,19 @@ func (c *Client) GetAccountTRXBalance(ctx context.Context, addressHex string) (d
 	return decimal.NewFromInt(account.Balance).Div(decimal.NewFromInt(trxPrecision)), nil
 }
 
+func (c *Client) GetAccountStateHead(ctx context.Context, addressHex string) (bool, decimal.Decimal, error) {
+	var account Account
+	if err := c.post(ctx, "/wallet/getaccount", map[string]any{
+		"address": NormalizeHexAddress(addressHex),
+		"visible": false,
+	}, &account); err != nil {
+		return false, decimal.Zero, err
+	}
+	active := strings.TrimSpace(account.Address) != ""
+	balance := decimal.NewFromInt(account.Balance).Div(decimal.NewFromInt(trxPrecision))
+	return active, balance, nil
+}
+
 func (c *Client) GetAccountState(ctx context.Context, addressHex string) (bool, decimal.Decimal, error) {
 	var account Account
 	if err := c.post(ctx, "/walletsolidity/getaccount", map[string]any{

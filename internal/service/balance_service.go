@@ -26,6 +26,7 @@ type tronBalanceTask struct {
 	addressBase58 string
 	addressHex    string
 	asset         string
+	preferHead    bool
 }
 
 type tronImmediateBalanceRequest struct {
@@ -158,6 +159,7 @@ func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
 			addressBase58: req.addressBase58,
 			addressHex:    req.addressHex,
 			asset:         req.asset,
+			preferHead:    req.asset == "TRX",
 		}, req.blockNumber)
 		cancel()
 	}
@@ -434,7 +436,7 @@ func (s *BalanceService) RefreshAllThrottled(ctx context.Context, blockNumber in
 func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTask, blockNumber int64) {
 	switch task.asset {
 	case "TRX":
-		active, balance, err := s.tronClient.GetAccountState(ctx, task.addressHex)
+		active, balance, err := s.loadTRXBalance(ctx, task)
 		if err != nil {
 			s.logger.Printf("refresh trx balance failed: %s err=%v", task.addressBase58, err)
 			return
@@ -467,6 +469,13 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 			s.syncRecentUSDTTransfersIfNeeded(ctx, task.addressBase58, task.addressHex, currentDBBalance, balance)
 		}
 	}
+}
+
+func (s *BalanceService) loadTRXBalance(ctx context.Context, task tronBalanceTask) (bool, decimal.Decimal, error) {
+	if task.preferHead {
+		return s.tronClient.GetAccountStateHead(ctx, task.addressHex)
+	}
+	return s.tronClient.GetAccountState(ctx, task.addressHex)
 }
 
 func (s *BalanceService) getCurrentUSDTBalance(ctx context.Context, addressBase58 string) (decimal.Decimal, error) {
