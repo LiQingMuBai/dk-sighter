@@ -26,6 +26,7 @@ const tronImmediateBalanceRefreshDelay = 30 * time.Second
 const tronImmediateBalanceRefreshTimeout = 12 * time.Second
 
 var usdtTransferRepairThreshold = decimal.NewFromInt(1)
+var tronImmediateRefreshDelayBalanceDiffThreshold = decimal.NewFromInt(1)
 
 type tronBalanceTask struct {
 	addressBase58 string
@@ -174,38 +175,56 @@ func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
 			return
 		}
 
-		// #region debug-point A:immediate-refresh-scheduled
-		balanceDebugReport("A", "balance.immediate.scheduled", map[string]any{
-			"address":       req.addressBase58,
-			"asset":         req.asset,
-			"block":         req.blockNumber,
-			"trigger_asset": req.triggerAsset,
-			"direction":     req.direction,
-			"tx":            req.txID,
-			"delay_ms":      tronImmediateBalanceRefreshDelay.Milliseconds(),
-		})
-		// #endregion
-		s.logger.Printf("transfer matched -> delayed balance refresh scheduled: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s source=onchain",
-			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay)
+		shouldDelay, persistedBalance, latestBalance, err := s.shouldDelayImmediateRefresh(req)
+		if err != nil {
+			s.logger.Printf("precheck immediate balance refresh failed, keep delayed mode: address=%s asset=%s tx=%s err=%v",
+				req.addressBase58, req.asset, req.txID, err)
+			shouldDelay = true
+		}
+		if shouldDelay {
+			// #region debug-point A:immediate-refresh-scheduled
+			balanceDebugReport("A", "balance.immediate.scheduled", map[string]any{
+				"address":           req.addressBase58,
+				"asset":             req.asset,
+				"block":             req.blockNumber,
+				"trigger_asset":     req.triggerAsset,
+				"direction":         req.direction,
+				"tx":                req.txID,
+				"delay_ms":          tronImmediateBalanceRefreshDelay.Milliseconds(),
+				"persisted_balance": persistedBalance.String(),
+				"queried_balance":   latestBalance.String(),
+			})
+			// #endregion
+			s.logger.Printf("transfer matched -> delayed balance refresh scheduled: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s persisted_balance=%s queried_balance=%s source=onchain",
+				req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay, persistedBalance.String(), latestBalance.String())
 
-		timer := time.NewTimer(tronImmediateBalanceRefreshDelay)
-		<-timer.C
+			timer := time.NewTimer(tronImmediateBalanceRefreshDelay)
+			<-timer.C
 
-		req = s.takeLatestImmediateRefreshRequest(req.addressBase58, req.asset, req)
+			req = s.takeLatestImmediateRefreshRequest(req.addressBase58, req.asset, req)
+		} else {
+			s.logger.Printf("transfer matched -> immediate balance refresh: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d persisted_balance=%s queried_balance=%s threshold=%s source=onchain",
+				req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, persistedBalance.String(), latestBalance.String(), tronImmediateRefreshDelayBalanceDiffThreshold.String())
+		}
 
 		// #region debug-point A:immediate-refresh-start
 		balanceDebugReport("A", "balance.immediate.start", map[string]any{
-			"address":       req.addressBase58,
-			"asset":         req.asset,
-			"block":         req.blockNumber,
-			"trigger_asset": req.triggerAsset,
-			"direction":     req.direction,
-			"tx":            req.txID,
-			"delay_ms":      tronImmediateBalanceRefreshDelay.Milliseconds(),
+			"address":           req.addressBase58,
+			"asset":             req.asset,
+			"block":             req.blockNumber,
+			"trigger_asset":     req.triggerAsset,
+			"direction":         req.direction,
+			"tx":                req.txID,
+			"delay_ms":          tronImmediateBalanceRefreshDelay.Milliseconds(),
+			"persisted_balance": persistedBalance.String(),
+			"queried_balance":   latestBalance.String(),
+			"delayed":           shouldDelay,
 		})
 		// #endregion
-		s.logger.Printf("transfer matched -> delayed balance refresh started: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s source=onchain",
-			req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay)
+		if shouldDelay {
+			s.logger.Printf("transfer matched -> delayed balance refresh started: address=%s trigger_asset=%s refresh_asset=%s direction=%s tx=%s block=%d delay=%s source=onchain",
+				req.addressBase58, req.triggerAsset, req.asset, req.direction, req.txID, req.blockNumber, tronImmediateBalanceRefreshDelay)
+		}
 
 		refreshCtx, cancel := context.WithTimeout(context.Background(), tronImmediateBalanceRefreshTimeout)
 		s.refreshBalance(refreshCtx, tronBalanceTask{
@@ -215,6 +234,45 @@ func (s *BalanceService) runImmediateRefreshLoop(addressBase58, asset string) {
 			preferHead:    req.asset == "TRX",
 		}, req.blockNumber)
 		cancel()
+	}
+}
+
+func (s *BalanceService) shouldDelayImmediateRefresh(req tronImmediateBalanceRequest) (bool, decimal.Decimal, decimal.Decimal, error) {
+	if s == nil || s.repo == nil || s.tronClient == nil {
+		return true, decimal.Zero, decimal.Zero, nil
+	}
+
+	checkCtx, cancel := context.WithTimeout(context.Background(), tronImmediateBalanceRefreshTimeout)
+	defer cancel()
+
+	switch req.asset {
+	case "TRX":
+		persistedBalance, err := s.getCurrentTRXBalance(checkCtx, req.addressBase58)
+		if err != nil {
+			return true, decimal.Zero, decimal.Zero, err
+		}
+		_, latestBalance, err := s.loadTRXBalance(checkCtx, tronBalanceTask{
+			addressBase58: req.addressBase58,
+			addressHex:    req.addressHex,
+			asset:         req.asset,
+			preferHead:    true,
+		})
+		if err != nil {
+			return true, persistedBalance, decimal.Zero, err
+		}
+		return latestBalance.Sub(persistedBalance).Abs().GreaterThan(tronImmediateRefreshDelayBalanceDiffThreshold), persistedBalance, latestBalance, nil
+	case "USDT":
+		persistedBalance, err := s.getCurrentUSDTBalance(checkCtx, req.addressBase58)
+		if err != nil {
+			return true, decimal.Zero, decimal.Zero, err
+		}
+		latestBalance, err := s.tronClient.GetUSDTBalance(checkCtx, req.addressHex)
+		if err != nil {
+			return true, persistedBalance, decimal.Zero, err
+		}
+		return latestBalance.Sub(persistedBalance).Abs().GreaterThan(tronImmediateRefreshDelayBalanceDiffThreshold), persistedBalance, latestBalance, nil
+	default:
+		return true, decimal.Zero, decimal.Zero, nil
 	}
 }
 
@@ -615,11 +673,11 @@ func (s *BalanceService) refreshBalance(ctx context.Context, task tronBalanceTas
 		if row, ok, rowErr := s.repo.GetDashboardRowByAddress(ctx, task.addressBase58); rowErr == nil && ok && row != nil {
 			// #region debug-point D:refresh-trx-saved
 			balanceDebugReport("D", "balance.refresh.trx.saved", map[string]any{
-				"address":       task.addressBase58,
-				"block":         blockNumber,
-				"active":        active,
-				"queried":       balance.String(),
-				"persisted_trx": row.TRXBalance.String(),
+				"address":        task.addressBase58,
+				"block":          blockNumber,
+				"active":         active,
+				"queried":        balance.String(),
+				"persisted_trx":  row.TRXBalance.String(),
 				"persisted_usdt": row.USDTBalance.String(),
 			})
 			// #endregion
@@ -755,6 +813,17 @@ func (s *BalanceService) getCurrentUSDTBalance(ctx context.Context, addressBase5
 	}
 	if ok && row != nil {
 		return row.USDTBalance, nil
+	}
+	return decimal.Zero, nil
+}
+
+func (s *BalanceService) getCurrentTRXBalance(ctx context.Context, addressBase58 string) (decimal.Decimal, error) {
+	row, ok, err := s.repo.GetDashboardRowByAddress(ctx, addressBase58)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if ok && row != nil {
+		return row.TRXBalance, nil
 	}
 	return decimal.Zero, nil
 }

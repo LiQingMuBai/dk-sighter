@@ -190,6 +190,22 @@ func (c *Client) GetBlockByNum(ctx context.Context, blockNum int64) (*Block, err
 	return &block, nil
 }
 
+func (c *Client) GetBlockByNumWithSource(ctx context.Context, blockNum int64, source string) (*Block, error) {
+	var (
+		block Block
+		path  = "/wallet/getblockbynum"
+		label = "head"
+	)
+	if strings.EqualFold(strings.TrimSpace(source), "solid") {
+		path = "/walletsolidity/getblockbynum"
+		label = "solid"
+	}
+	if err := c.post(ctx, path, map[string]any{"num": blockNum}, &block); err != nil {
+		return nil, fmt.Errorf("get %s block by num %d: %w", label, blockNum, err)
+	}
+	return &block, nil
+}
+
 func (c *Client) GetTransactionInfoByID(ctx context.Context, txID string) (*TransactionInfo, error) {
 	info, err := c.getTransactionInfoByIDHead(ctx, txID)
 	if err == nil && !isEmptyTransactionInfo(info) {
@@ -215,6 +231,26 @@ func (c *Client) GetTransactionInfoByID(ctx context.Context, txID string) (*Tran
 	}
 
 	return solidityInfo, nil
+}
+
+func (c *Client) GetTransactionInfoByIDWithSource(ctx context.Context, txID string, source string) (*TransactionInfo, error) {
+	if strings.EqualFold(strings.TrimSpace(source), "solid") {
+		info, err := c.getTransactionInfoByIDSolidity(ctx, txID)
+		if err != nil {
+			fallbackInfo, fallbackErr := c.getTransactionInfoByIDHead(ctx, txID)
+			if fallbackErr != nil {
+				return nil, fmt.Errorf("get solid tx info %s: %w; fallback get head tx info: %v", txID, err, fallbackErr)
+			}
+			return fallbackInfo, nil
+		}
+		return info, nil
+	}
+
+	info, err := c.getTransactionInfoByIDHead(ctx, txID)
+	if err != nil {
+		return nil, fmt.Errorf("get head tx info %s: %w", txID, err)
+	}
+	return info, nil
 }
 
 func (c *Client) getTransactionInfoByIDHead(ctx context.Context, txID string) (*TransactionInfo, error) {
