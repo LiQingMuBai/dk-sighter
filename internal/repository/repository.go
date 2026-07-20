@@ -60,6 +60,13 @@ type DashboardListResult struct {
 	TotalCount int
 }
 
+type DashboardSummary struct {
+	TotalCount  int
+	TRXTotal    decimal.Decimal
+	USDTTotal   decimal.Decimal
+	LastUpdated sql.NullTime
+}
+
 func (d *DB) GetDashboardRowByAddress(ctx context.Context, addressBase58 string) (*DashboardRow, bool, error) {
 	var (
 		row         DashboardRow
@@ -112,6 +119,49 @@ func (d *DB) GetDashboardRowByAddress(ctx context.Context, addressBase58 string)
 	row.USDTBalance = value
 
 	return &row, true, nil
+}
+
+func (d *DB) GetDashboardSummary(ctx context.Context) (DashboardSummary, error) {
+	var summary DashboardSummary
+	var trxTotal string
+	var usdtTotal string
+
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT
+			COUNT(1) AS total_count,
+			COALESCE(SUM(CAST(COALESCE(trx.balance, 0) AS DECIMAL(36, 6))), 0) AS trx_total,
+			COALESCE(SUM(CAST(COALESCE(usdt.balance, 0) AS DECIMAL(36, 6))), 0) AS usdt_total,
+			MAX(
+				CASE
+					WHEN trx.updated_at IS NULL AND usdt.updated_at IS NULL THEN w.updated_at
+					WHEN trx.updated_at IS NULL THEN usdt.updated_at
+					WHEN usdt.updated_at IS NULL THEN trx.updated_at
+					WHEN trx.updated_at >= usdt.updated_at THEN trx.updated_at
+					ELSE usdt.updated_at
+				END
+			) AS last_updated_at
+		FROM watch_addresses w
+		LEFT JOIN asset_balances trx
+			ON trx.address_base58 = w.address_base58
+			AND trx.asset_code = 'TRX'
+		LEFT JOIN asset_balances usdt
+			ON usdt.address_base58 = w.address_base58
+			AND usdt.asset_code = 'USDT'
+		WHERE w.status = 1
+	`).Scan(&summary.TotalCount, &trxTotal, &usdtTotal, &summary.LastUpdated)
+	if err != nil {
+		return DashboardSummary{}, fmt.Errorf("get dashboard summary: %w", err)
+	}
+
+	summary.TRXTotal, err = decimal.NewFromString(trxTotal)
+	if err != nil {
+		return DashboardSummary{}, fmt.Errorf("parse dashboard trx total: %w", err)
+	}
+	summary.USDTTotal, err = decimal.NewFromString(usdtTotal)
+	if err != nil {
+		return DashboardSummary{}, fmt.Errorf("parse dashboard usdt total: %w", err)
+	}
+	return summary, nil
 }
 
 type TransferListRecord struct {

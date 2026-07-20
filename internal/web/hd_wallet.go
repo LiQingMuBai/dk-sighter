@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"tron_watcher/internal/repository"
 )
 
 type walletDashboardPageData struct {
@@ -233,6 +235,18 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("load dashboard failed: %v", err)
 		return
 	}
+	tronSummary, err := s.repo.GetDashboardSummary(r.Context())
+	if err != nil {
+		http.Error(w, "load dashboard summary failed", http.StatusInternalServerError)
+		log.Printf("load tron dashboard summary failed: %v", err)
+		return
+	}
+	bscSummary, err := repository.GetBSCDashboardSummary(r.Context(), s.repo)
+	if err != nil {
+		http.Error(w, "load bsc dashboard summary failed", http.StatusInternalServerError)
+		log.Printf("load bsc dashboard summary failed: %v", err)
+		return
+	}
 	chartPoints, err := s.repo.ListDailyEnergyChart(r.Context(), 30)
 	if err != nil {
 		http.Error(w, "load dashboard failed", http.StatusInternalServerError)
@@ -294,6 +308,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		GeneratedAt:             formatBeijingTime(time.Now()),
 		Rows:                    viewRows,
 		TotalCount:              result.TotalCount,
+		TronUSDTTotal:           tronSummary.USDTTotal.StringFixed(6),
+		BSCUSDTTotal:            bscSummary.USDTTotal.StringFixed(6),
 		Page:                    page,
 		PageSize:                pageSize,
 		HasPrev:                 page > 1,

@@ -108,6 +108,32 @@
       margin-bottom: 14px;
     }
 
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .summary-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .summary-label {
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .summary-value {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
     .chart-card {
       background: var(--card);
       border-radius: var(--radius);
@@ -810,6 +836,21 @@
       <div class="nav">
         <a href="/">返回Tron后台</a>
         <a href="/docs">API文档</a>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="summary-card">
+        <div class="summary-label">监控地址数</div>
+        <div class="summary-value">{{ .Total }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Tron 链 USDT 总金额</div>
+        <div class="summary-value">{{ .TronUSDTTotal }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">BSC 链 USDT 总金额</div>
+        <div class="summary-value">{{ .BSCUSDTTotal }}</div>
       </div>
     </div>
 

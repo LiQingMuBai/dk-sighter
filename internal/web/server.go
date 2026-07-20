@@ -102,6 +102,8 @@ type dashboardPageData struct {
 	GeneratedAt             string
 	Rows                    []dashboardRowView
 	TotalCount              int
+	TronUSDTTotal           string
+	BSCUSDTTotal            string
 	Page                    int
 	PageSize                int
 	HasPrev                 bool
@@ -539,9 +541,23 @@ func (s *Server) handleBSCDashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("load bsc gas topup chart failed: %v", err)
 		return
 	}
+	tronSummary, err := s.repo.GetDashboardSummary(r.Context())
+	if err != nil {
+		http.Error(w, "load tron dashboard summary failed", http.StatusInternalServerError)
+		log.Printf("load tron dashboard summary failed: %v", err)
+		return
+	}
+	bscSummary, err := repository.GetBSCDashboardSummary(r.Context(), s.repo)
+	if err != nil {
+		http.Error(w, "load bsc dashboard summary failed", http.StatusInternalServerError)
+		log.Printf("load bsc dashboard summary failed: %v", err)
+		return
+	}
 
 	data := buildBSCDashboardPageData(recordViews, page, pageSize, total)
 	data.GeneratedAt = formatBeijingTime(time.Now())
+	data.TronUSDTTotal = tronSummary.USDTTotal.StringFixed(6)
+	data.BSCUSDTTotal = bscSummary.USDTTotal.StringFixed(6)
 	data.ChartLabelsJSON = toJSONString(chartLabels(chartPoints))
 	data.ChartValuesJSON = toJSONString(chartValues(chartPoints))
 	data.Sort = string(sort)

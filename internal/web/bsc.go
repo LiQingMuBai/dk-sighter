@@ -28,6 +28,8 @@ var manualBSCGasTransferAmount = decimal.RequireFromString("0.001")
 type bscDashboardPageData struct {
 	GeneratedAt     string
 	Records         []bscDashboardRecordView
+	TronUSDTTotal   string
+	BSCUSDTTotal    string
 	Page            int
 	PageSize        int
 	Total           int

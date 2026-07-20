@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/shopspring/decimal"
 )
 
 type bscSQLExecutor interface {
@@ -22,6 +23,13 @@ type BSCDashboardRecord struct {
 	BNB       string
 	USDT      string
 	UpdatedAt time.Time
+}
+
+type BSCDashboardSummary struct {
+	TotalCount  int
+	BNBTotal    decimal.Decimal
+	USDTTotal   decimal.Decimal
+	LastUpdated mysqlDriver.NullTime
 }
 
 type BSCDashboardSort string
@@ -59,6 +67,57 @@ WHERE status = 1
 		return 0, err
 	}
 	return total, nil
+}
+
+func GetBSCDashboardSummary(ctx context.Context, repo any) (BSCDashboardSummary, error) {
+	executor, err := resolveBSCExecutor(repo)
+	if err != nil {
+		return BSCDashboardSummary{}, err
+	}
+
+	var summary BSCDashboardSummary
+	var bnbTotal string
+	var usdtTotal string
+	err = executor.QueryRowContext(ctx, `
+SELECT
+	COUNT(1) AS total_count,
+	COALESCE(SUM(CAST(COALESCE(bnb.balance, 0) AS DECIMAL(36, 6))), 0) AS bnb_total,
+	COALESCE(SUM(CAST(COALESCE(usdt.balance, 0) AS DECIMAL(36, 6))), 0) AS usdt_total,
+	MAX(
+		CASE
+			WHEN bal.updated_at IS NOT NULL THEN bal.updated_at
+			ELSE w.updated_at
+		END
+	) AS last_updated_at
+FROM (
+	SELECT id, address, updated_at
+	FROM bsc_watch_addresses
+	WHERE status = 1
+) w
+LEFT JOIN (
+	SELECT LOWER(address) AS address, MAX(updated_at) AS updated_at
+	FROM bsc_asset_balances
+	GROUP BY LOWER(address)
+) bal
+	ON bal.address = LOWER(w.address)
+LEFT JOIN bsc_asset_balances bnb
+	ON LOWER(bnb.address) = LOWER(w.address) AND bnb.asset_code = 'BNB'
+LEFT JOIN bsc_asset_balances usdt
+	ON LOWER(usdt.address) = LOWER(w.address) AND usdt.asset_code = 'USDT'
+`).Scan(&summary.TotalCount, &bnbTotal, &usdtTotal, &summary.LastUpdated)
+	if err != nil {
+		return BSCDashboardSummary{}, err
+	}
+
+	summary.BNBTotal, err = decimal.NewFromString(bnbTotal)
+	if err != nil {
+		return BSCDashboardSummary{}, fmt.Errorf("parse bsc dashboard bnb total: %w", err)
+	}
+	summary.USDTTotal, err = decimal.NewFromString(usdtTotal)
+	if err != nil {
+		return BSCDashboardSummary{}, fmt.Errorf("parse bsc dashboard usdt total: %w", err)
+	}
+	return summary, nil
 }
 
 func GetBSCDashboardRecordByAddress(ctx context.Context, repo any, address string) (*BSCDashboardRecord, bool, error) {
