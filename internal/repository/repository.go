@@ -1109,16 +1109,22 @@ func (d *DB) ListTransferOutRecords(ctx context.Context, watchAddress string, li
 
 func (d *DB) ListBSCTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
 	minAmount := ""
-	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+	switch strings.ToUpper(strings.TrimSpace(assetCode)) {
+	case "USDT":
 		minAmount = "1"
+	case "BNB":
+		minAmount = "0.000001"
 	}
 	return d.listTransferRecords(ctx, "bsc_transfer_in_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
 func (d *DB) ListBSCTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
 	minAmount := ""
-	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+	switch strings.ToUpper(strings.TrimSpace(assetCode)) {
+	case "USDT":
 		minAmount = "1"
+	case "BNB":
+		minAmount = "0.000001"
 	}
 	return d.listTransferRecords(ctx, "bsc_transfer_out_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
