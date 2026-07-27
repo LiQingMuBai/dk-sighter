@@ -1086,22 +1086,38 @@ func normalizeNullTime(input sql.NullTime) sql.NullTime {
 }
 
 func (d *DB) ListTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "transfer_in_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	minAmount := ""
+	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+		minAmount = "1"
+	}
+	return d.listTransferRecords(ctx, "transfer_in_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
 func (d *DB) ListTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "transfer_out_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs)
+	minAmount := ""
+	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+		minAmount = "1"
+	}
+	return d.listTransferRecords(ctx, "transfer_out_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
 func (d *DB) ListBSCTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_in_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
+	minAmount := ""
+	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+		minAmount = "1"
+	}
+	return d.listTransferRecords(ctx, "bsc_transfer_in_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
 func (d *DB) ListBSCTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
-	return d.listTransferRecords(ctx, "bsc_transfer_out_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs)
+	minAmount := ""
+	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+		minAmount = "1"
+	}
+	return d.listTransferRecords(ctx, "bsc_transfer_out_records", strings.ToLower(strings.TrimSpace(watchAddress)), limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
-func (d *DB) listTransferRecords(ctx context.Context, table, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
+func (d *DB) listTransferRecords(ctx context.Context, table, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64, minAmount string) (*TransferListResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -1125,6 +1141,10 @@ func (d *DB) listTransferRecords(ctx context.Context, table, watchAddress string
 	if endTimeMs > 0 {
 		where += " AND block_time <= ?"
 		args = append(args, endTimeMs)
+	}
+	if strings.TrimSpace(minAmount) != "" {
+		where += " AND CAST(amount AS DECIMAL(36, 18)) >= CAST(? AS DECIMAL(36, 18))"
+		args = append(args, strings.TrimSpace(minAmount))
 	}
 
 	var totalCount int
