@@ -1087,16 +1087,22 @@ func normalizeNullTime(input sql.NullTime) sql.NullTime {
 
 func (d *DB) ListTransferInRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
 	minAmount := ""
-	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+	switch strings.ToUpper(strings.TrimSpace(assetCode)) {
+	case "USDT":
 		minAmount = "1"
+	case "TRX":
+		minAmount = "0.1"
 	}
 	return d.listTransferRecords(ctx, "transfer_in_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
 
 func (d *DB) ListTransferOutRecords(ctx context.Context, watchAddress string, limit, offset int, assetCode string, startTimeMs, endTimeMs int64) (*TransferListResult, error) {
 	minAmount := ""
-	if strings.EqualFold(strings.TrimSpace(assetCode), "USDT") {
+	switch strings.ToUpper(strings.TrimSpace(assetCode)) {
+	case "USDT":
 		minAmount = "1"
+	case "TRX":
+		minAmount = "0.1"
 	}
 	return d.listTransferRecords(ctx, "transfer_out_records", watchAddress, limit, offset, assetCode, startTimeMs, endTimeMs, minAmount)
 }
