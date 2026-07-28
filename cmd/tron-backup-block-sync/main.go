@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -57,6 +58,23 @@ func main() {
 	defer db.Close()
 
 	repo := repository.New(db)
+	lockName := repository.BuildProcessLockName("tron:http:backup:", opts.SyncKey)
+	processLock, err := repo.AcquireNamedLock(ctx, lockName)
+	if err != nil {
+		if errors.Is(err, repository.ErrNamedLockBusy) {
+			log.Fatalf("another tron backup block sync is already running: sync_key=%s lock=%s", opts.SyncKey, lockName)
+		}
+		log.Fatalf("acquire tron backup process lock failed: sync_key=%s lock=%s err=%v", opts.SyncKey, lockName, err)
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := processLock.Release(releaseCtx); err != nil {
+			log.Printf("release tron backup process lock failed: sync_key=%s lock=%s err=%v", opts.SyncKey, lockName, err)
+		}
+	}()
+	log.Printf("tron backup process lock acquired: sync_key=%s lock=%s", opts.SyncKey, lockName)
+
 	if err := alignBackupSyncCursor(ctx, repo, opts.MainSyncKey, opts.SyncKey, opts.StartBlock); err != nil {
 		log.Fatalf("align backup sync cursor failed: %v", err)
 	}
