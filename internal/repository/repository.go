@@ -42,6 +42,7 @@ type SyncGap struct {
 	FromBlock     int64
 	ToBlock       int64
 	Status        string
+	RepairOwner   string
 	Attempts      int
 	LastError     sql.NullString
 	CreatedAt     time.Time
@@ -638,7 +639,7 @@ func (d *DB) CreateSyncGap(ctx context.Context, chain, sourceSyncKey string, fro
 func (d *DB) GetNextOpenSyncGap(ctx context.Context, chain string) (*SyncGap, bool, error) {
 	var item SyncGap
 	err := d.sql.QueryRowContext(ctx, `
-		SELECT id, chain, source_sync_key, from_block, to_block, status, attempts, last_error, created_at, updated_at
+		SELECT id, chain, source_sync_key, from_block, to_block, status, repair_owner, attempts, last_error, created_at, updated_at
 		FROM sync_gaps
 		WHERE chain = ?
 		  AND status IN ('repairing', 'pending')
@@ -654,6 +655,7 @@ func (d *DB) GetNextOpenSyncGap(ctx context.Context, chain string) (*SyncGap, bo
 		&item.FromBlock,
 		&item.ToBlock,
 		&item.Status,
+		&item.RepairOwner,
 		&item.Attempts,
 		&item.LastError,
 		&item.CreatedAt,
@@ -672,6 +674,7 @@ func (d *DB) MarkSyncGapRepairing(ctx context.Context, id int64) error {
 	_, err := d.sql.ExecContext(ctx, `
 		UPDATE sync_gaps
 		SET status = 'repairing',
+		    repair_owner = '',
 		    attempts = attempts + 1,
 		    last_error = NULL,
 		    updated_at = CURRENT_TIMESTAMP
@@ -687,6 +690,7 @@ func (d *DB) MarkSyncGapDone(ctx context.Context, id int64) error {
 	_, err := d.sql.ExecContext(ctx, `
 		UPDATE sync_gaps
 		SET status = 'done',
+		    repair_owner = '',
 		    last_error = NULL,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
@@ -701,6 +705,7 @@ func (d *DB) MarkSyncGapPendingWithError(ctx context.Context, id int64, errMsg s
 	_, err := d.sql.ExecContext(ctx, `
 		UPDATE sync_gaps
 		SET status = 'pending',
+		    repair_owner = '',
 		    last_error = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
@@ -709,6 +714,126 @@ func (d *DB) MarkSyncGapPendingWithError(ctx context.Context, id int64, errMsg s
 		return fmt.Errorf("mark sync gap pending id=%d: %w", id, err)
 	}
 	return nil
+}
+
+func (d *DB) GetRepairingSyncGapByOwner(ctx context.Context, chain, owner string) (*SyncGap, bool, error) {
+	var item SyncGap
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT id, chain, source_sync_key, from_block, to_block, status, repair_owner, attempts, last_error, created_at, updated_at
+		FROM sync_gaps
+		WHERE chain = ?
+		  AND status = 'repairing'
+		  AND repair_owner = ?
+		ORDER BY from_block ASC, id ASC
+		LIMIT 1
+	`, strings.TrimSpace(chain), strings.TrimSpace(owner)).Scan(
+		&item.ID,
+		&item.Chain,
+		&item.SourceSyncKey,
+		&item.FromBlock,
+		&item.ToBlock,
+		&item.Status,
+		&item.RepairOwner,
+		&item.Attempts,
+		&item.LastError,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get repairing sync gap by owner chain=%s owner=%s: %w", chain, owner, err)
+	}
+	return &item, true, nil
+}
+
+func (d *DB) ClaimNextPendingSyncGap(ctx context.Context, chain, owner string) (*SyncGap, bool, error) {
+	chain = strings.TrimSpace(chain)
+	owner = strings.TrimSpace(owner)
+	if chain == "" {
+		return nil, false, fmt.Errorf("claim next pending sync gap: empty chain")
+	}
+	if owner == "" {
+		return nil, false, fmt.Errorf("claim next pending sync gap: empty owner")
+	}
+
+	for {
+		var item SyncGap
+		err := d.sql.QueryRowContext(ctx, `
+			SELECT id, chain, source_sync_key, from_block, to_block, status, repair_owner, attempts, last_error, created_at, updated_at
+			FROM sync_gaps
+			WHERE chain = ?
+			  AND status = 'pending'
+			ORDER BY from_block ASC, id ASC
+			LIMIT 1
+		`, chain).Scan(
+			&item.ID,
+			&item.Chain,
+			&item.SourceSyncKey,
+			&item.FromBlock,
+			&item.ToBlock,
+			&item.Status,
+			&item.RepairOwner,
+			&item.Attempts,
+			&item.LastError,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		)
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("select next pending sync gap chain=%s owner=%s: %w", chain, owner, err)
+		}
+
+		result, err := d.sql.ExecContext(ctx, `
+			UPDATE sync_gaps
+			SET status = 'repairing',
+			    repair_owner = ?,
+			    attempts = attempts + 1,
+			    last_error = NULL,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+			  AND status = 'pending'
+		`, owner, item.ID)
+		if err != nil {
+			return nil, false, fmt.Errorf("claim pending sync gap id=%d chain=%s owner=%s: %w", item.ID, chain, owner, err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return nil, false, fmt.Errorf("claim pending sync gap rows affected id=%d chain=%s owner=%s: %w", item.ID, chain, owner, err)
+		}
+		if rowsAffected == 0 {
+			continue
+		}
+
+		item.Status = "repairing"
+		item.RepairOwner = owner
+		item.Attempts++
+		item.LastError = sql.NullString{}
+		item.UpdatedAt = time.Now()
+		return &item, true, nil
+	}
+}
+
+func (d *DB) HasOpenSyncGap(ctx context.Context, chain string) (bool, error) {
+	var exists int
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT 1
+		FROM sync_gaps
+		WHERE chain = ?
+		  AND status IN ('repairing', 'pending')
+		LIMIT 1
+	`, strings.TrimSpace(chain)).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has open sync gap chain=%s: %w", chain, err)
+	}
+	return true, nil
 }
 
 func (d *DB) CreateTronSyncGap(ctx context.Context, sourceSyncKey string, fromBlock, toBlock int64) error {

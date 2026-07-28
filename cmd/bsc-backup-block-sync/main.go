@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -81,23 +80,6 @@ func main() {
 	defer db.Close()
 
 	repo := repository.New(db)
-	lockName := repository.BuildProcessLockName("tron:bsc:backup:", opts.SyncKey)
-	processLock, err := repo.AcquireNamedLock(ctx, lockName)
-	if err != nil {
-		if errors.Is(err, repository.ErrNamedLockBusy) {
-			log.Fatalf("another bsc backup block sync is already running: sync_key=%s lock=%s", opts.SyncKey, lockName)
-		}
-		log.Fatalf("acquire bsc backup process lock failed: sync_key=%s lock=%s err=%v", opts.SyncKey, lockName, err)
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := processLock.Release(releaseCtx); err != nil {
-			log.Printf("release bsc backup process lock failed: sync_key=%s lock=%s err=%v", opts.SyncKey, lockName, err)
-		}
-	}()
-	log.Printf("bsc backup process lock acquired: sync_key=%s lock=%s", opts.SyncKey, lockName)
-
 	if err := alignBackupSyncCursor(ctx, repo, opts); err != nil {
 		log.Fatalf("align backup sync cursor failed: %v", err)
 	}
@@ -123,18 +105,26 @@ func main() {
 	scanner.SetLogger(terminalLogger)
 	scanner.SetDeferBalanceRefreshInCatchUp(true)
 	scanner.SetFastCatchUpThreshold(opts.FastCatchUpLag)
+	repairOwner := buildBSCRepairOwner(opts.SyncKey)
 	var (
 		modeMu        sync.Mutex
 		lastModeLabel string
 	)
 	scanner.SetMaxScanBlockResolver(func(ctx context.Context, chainLatest int64) (int64, bool, error) {
 		for {
-			gap, gapExists, err := repo.GetNextOpenSyncGap(ctx, "bsc")
+			gap, gapExists, err := repo.GetRepairingSyncGapByOwner(ctx, "bsc", repairOwner)
 			if err != nil {
-				return 0, false, fmt.Errorf("load bsc sync gaps: %w", err)
+				return 0, false, fmt.Errorf("load owned bsc repairing gap: %w", err)
 			}
 			if !gapExists {
-				break
+				gap, gapExists, err = repo.ClaimNextPendingSyncGap(ctx, "bsc", repairOwner)
+				if err != nil {
+					return 0, false, fmt.Errorf("claim pending bsc sync gap: %w", err)
+				}
+				if !gapExists {
+					break
+				}
+				log.Printf("bsc backup claimed sync gap: owner=%s gap_id=%d gap_from=%d gap_to=%d", repairOwner, gap.ID, gap.FromBlock, gap.ToBlock)
 			}
 
 			backupBlock, backupExists, err := repo.GetLastBlock(ctx, opts.SyncKey)
@@ -145,14 +135,8 @@ func main() {
 				if err := repo.MarkSyncGapDone(ctx, gap.ID); err != nil {
 					return 0, false, fmt.Errorf("mark repaired bsc sync gap done id=%d: %w", gap.ID, err)
 				}
-				log.Printf("bsc backup gap repair finished: gap_id=%d gap_from=%d gap_to=%d backup_block=%d", gap.ID, gap.FromBlock, gap.ToBlock, backupBlock)
+				log.Printf("bsc backup gap repair finished: owner=%s gap_id=%d gap_from=%d gap_to=%d backup_block=%d", repairOwner, gap.ID, gap.FromBlock, gap.ToBlock, backupBlock)
 				continue
-			}
-
-			if gap.Status != "repairing" {
-				if err := repo.MarkSyncGapRepairing(ctx, gap.ID); err != nil {
-					return 0, false, fmt.Errorf("mark bsc sync gap repairing id=%d: %w", gap.ID, err)
-				}
 			}
 
 			if !backupExists || backupBlock < gap.FromBlock-1 || backupBlock > gap.ToBlock {
@@ -165,8 +149,17 @@ func main() {
 				}
 			}
 
-			logBackupModeChange(&modeMu, &lastModeLabel, "repair-gap", "backup sync is repairing main gap: gap_id=%d gap_from=%d gap_to=%d", gap.ID, gap.FromBlock, gap.ToBlock)
+			logBackupModeChange(&modeMu, &lastModeLabel, "repair-gap", "backup sync is repairing owned gap: owner=%s gap_id=%d gap_from=%d gap_to=%d", repairOwner, gap.ID, gap.FromBlock, gap.ToBlock)
 			return gap.ToBlock, true, nil
+		}
+
+		hasOpenGap, err := repo.HasOpenSyncGap(ctx, "bsc")
+		if err != nil {
+			return 0, false, fmt.Errorf("check open bsc sync gaps: %w", err)
+		}
+		if hasOpenGap {
+			logBackupModeChange(&modeMu, &lastModeLabel, "idle-other-repairing", "other backup worker owns current bsc sync gap, skip and stay idle: owner=%s", repairOwner)
+			return 0, false, nil
 		}
 
 		_, updatedAt, exists, err := repo.GetSyncState(ctx, opts.MainSyncKey)
@@ -194,6 +187,7 @@ func main() {
 	log.Printf("note: backup sync is driven by bsc websocket newHeads events, not by timer polling")
 	log.Printf("note: backup sync also uses a small periodic trigger as a safety net when websocket events are delayed or silent")
 	log.Printf("note: backup sync is gap-first: when no skipped main gap exists, it will not actively follow the main cursor")
+	log.Printf("note: each backup process only continues its own repairing gap and will claim the next pending gap in order")
 	log.Printf("note: if main sync cursor is stale for longer than the configured duration, backup sync will switch to takeover mode and catch up to chain latest")
 	log.Printf("note: when the main scanner skips lagging block ranges, backup sync will prioritize repairing pending sync_gaps rows before returning to idle mode")
 	log.Printf("note: during each catch-up run, backup sync records transfers first and defers matched address balance refresh until the end of the run")
@@ -226,6 +220,18 @@ func main() {
 		log.Fatalf("bsc backup block sync stopped with error: %v", err)
 	}
 	log.Printf("bsc backup block sync stopped")
+}
+
+func buildBSCRepairOwner(syncKey string) string {
+	syncKey = strings.TrimSpace(syncKey)
+	if syncKey == "" {
+		syncKey = "bsc_backup_scanner"
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "unknown-host"
+	}
+	return fmt.Sprintf("%s@%s:%d:%d", syncKey, hostname, os.Getpid(), time.Now().UnixNano())
 }
 
 func resolveOptions(cfg *config.Config) syncOptions {
