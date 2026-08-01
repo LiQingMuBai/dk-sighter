@@ -269,6 +269,33 @@ func (c *Client) GetUSDTBalance(ctx context.Context, address string) (decimal.De
 	return decimal.NewFromBigInt(value, -18), nil
 }
 
+func (c *Client) GetUSDTBalanceUnits(ctx context.Context, address string) (*big.Int, error) {
+	address = normalizeHexAddress(address)
+	if address == "" {
+		return nil, fmt.Errorf("empty address")
+	}
+	if c.usdtContract == "" {
+		return nil, fmt.Errorf("usdt contract not configured")
+	}
+
+	data, err := buildERC20BalanceOfData(address)
+	if err != nil {
+		return nil, err
+	}
+
+	callObj := map[string]any{
+		"to":   c.usdtContract,
+		"data": data,
+	}
+
+	var out string
+	if err := c.call(ctx, "eth_call", []any{callObj, "latest"}, &out); err != nil {
+		return nil, err
+	}
+
+	return parseHexBigInt(out)
+}
+
 func (c *Client) GasPrice(ctx context.Context) (*big.Int, error) {
 	var out string
 	if err := c.call(ctx, "eth_gasPrice", []any{}, &out); err != nil {

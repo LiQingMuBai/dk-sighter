@@ -392,11 +392,15 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 		return "", "", fmt.Errorf("skip: 地址存在 pending 交易")
 	}
 
-	usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, wallet.Address)
+	thresholdUnits, err := decimalToTokenUnits(threshold, bscTokenPrecision)
 	if err != nil {
 		return "", "", err
 	}
-	if usdtBalance.LessThan(threshold) {
+	usdtBalanceUnits, err := s.bscClient.GetUSDTBalanceUnits(ctx, wallet.Address)
+	if err != nil {
+		return "", "", err
+	}
+	if usdtBalanceUnits.Cmp(thresholdUnits) < 0 {
 		return "", "", fmt.Errorf("skip: 当前 USDT 余额低于阈值")
 	}
 
@@ -429,9 +433,9 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	if bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
 		return "", "", fmt.Errorf("skip: bnb 余额需大于等于 0.001")
 	}
-	amountUnits, err := decimalToTokenUnits(usdtBalance, bscTokenPrecision)
-	if err != nil {
-		return "", "", err
+	amountUnits := new(big.Int).Sub(usdtBalanceUnits, big.NewInt(1))
+	if amountUnits.Sign() <= 0 {
+		return "", "", fmt.Errorf("skip: 当前 USDT 余额不足")
 	}
 	gasPrice, err := s.bscClient.GasPrice(ctx)
 	if err != nil {
