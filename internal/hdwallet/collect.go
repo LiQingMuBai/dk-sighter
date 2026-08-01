@@ -380,6 +380,18 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	defer cancel()
 	statusNotes := make([]string, 0, 2)
 
+	latestNonce, err := s.bscClient.LatestNonceAt(ctx, wallet.Address)
+	if err != nil {
+		return "", "", err
+	}
+	pendingNonce, err := s.bscClient.PendingNonceAt(ctx, wallet.Address)
+	if err != nil {
+		return "", "", err
+	}
+	if pendingNonce > latestNonce {
+		return "", "", fmt.Errorf("skip: 地址存在 pending 交易")
+	}
+
 	usdtBalance, err := s.bscClient.GetUSDTBalance(ctx, wallet.Address)
 	if err != nil {
 		return "", "", err
@@ -444,6 +456,9 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	}
 	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
 	if err != nil {
+		if isBSCTransferAmountExceedsBalanceError(err) {
+			return "", "", fmt.Errorf("skip: usdt 余额不足或存在 pending 交易")
+		}
 		return "", "", err
 	}
 	gasLimit = gasLimit + gasLimit/5 + 5_000
@@ -505,6 +520,10 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 	if err != nil {
 		return "", err
 	}
+	fromBalance, err := s.bscClient.GetBNBBalance(ctx, fromAddress)
+	if err != nil {
+		return "", fmt.Errorf("get balance: %w", err)
+	}
 	gasPrice, err := s.bscClient.GasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("get gas price: %w", err)
@@ -521,17 +540,18 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 	if err != nil {
 		return "", fmt.Errorf("convert amount to wei: %w", err)
 	}
-	to := common.HexToAddress(toAddress)
-	callObj := map[string]any{
-		"from":  fromAddress,
-		"to":    toAddress,
-		"value": "0x" + amountWei.Text(16),
-	}
-	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
+	fromBalanceWei, err := decimalToTokenUnits(fromBalance, 18)
 	if err != nil {
-		return "", fmt.Errorf("estimate gas: %w", err)
+		return "", fmt.Errorf("convert balance to wei: %w", err)
 	}
+	to := common.HexToAddress(toAddress)
+	gasLimit := uint64(21_000)
 	gasLimit = gasLimit + gasLimit/5 + 5_000
+	estimatedFeeWei := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
+	estimatedTotalWei := new(big.Int).Add(amountWei, estimatedFeeWei)
+	if fromBalanceWei.Cmp(estimatedTotalWei) < 0 {
+		return "", fmt.Errorf("bsc gas 补充地址余额不足")
+	}
 	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
 		Nonce:    nonce,
 		To:       &to,
@@ -552,6 +572,16 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 		return "", fmt.Errorf("send raw transaction: %w", err)
 	}
 	return txHash, nil
+}
+
+func isBSCTransferAmountExceedsBalanceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "transfer amount exceeds balance") ||
+		strings.Contains(message, "bep20:transfer amount exceeds balance") ||
+		strings.Contains(message, "exceeds balance")
 }
 
 func parseBSCGasTopupPrivateKey(value string) (*ecdsa.PrivateKey, string, error) {

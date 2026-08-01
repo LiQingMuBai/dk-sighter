@@ -234,7 +234,7 @@ func (c *Client) GetBNBBalance(ctx context.Context, address string) (decimal.Dec
 	if err != nil {
 		return decimal.Zero, err
 	}
-	return decimal.NewFromBigInt(value, 0).Div(decimal.NewFromInt(weiPrecision)), nil
+	return decimal.NewFromBigInt(value, -18), nil
 }
 
 func (c *Client) GetUSDTBalance(ctx context.Context, address string) (decimal.Decimal, error) {
@@ -266,7 +266,7 @@ func (c *Client) GetUSDTBalance(ctx context.Context, address string) (decimal.De
 		return decimal.Zero, err
 	}
 
-	return decimal.NewFromBigInt(value, 0).Div(decimal.NewFromInt(weiPrecision)), nil
+	return decimal.NewFromBigInt(value, -18), nil
 }
 
 func (c *Client) GasPrice(ctx context.Context) (*big.Int, error) {
@@ -293,6 +293,19 @@ func (c *Client) PendingNonceAt(ctx context.Context, address string) (uint64, er
 
 	var out string
 	if err := c.call(ctx, "eth_getTransactionCount", []any{address, "pending"}, &out); err != nil {
+		return 0, err
+	}
+	return parseHexUint64(out)
+}
+
+func (c *Client) LatestNonceAt(ctx context.Context, address string) (uint64, error) {
+	address = normalizeHexAddress(address)
+	if address == "" {
+		return 0, fmt.Errorf("empty address")
+	}
+
+	var out string
+	if err := c.call(ctx, "eth_getTransactionCount", []any{address, "latest"}, &out); err != nil {
 		return 0, err
 	}
 	return parseHexUint64(out)

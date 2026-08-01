@@ -784,6 +784,10 @@ func (s *Server) sendBSCGasTopup(ctx context.Context, toAddress string, amount d
 	if err != nil {
 		return "", "config.bsc.gas_transfer_private_key", "", err
 	}
+	fromBalance, err := s.bscClient.GetBNBBalance(ctx, fromAddress)
+	if err != nil {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("get balance: %w", err)
+	}
 	gasPrice, err := s.bscClient.GasPrice(ctx)
 	if err != nil {
 		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("get gas price: %w", err)
@@ -800,17 +804,18 @@ func (s *Server) sendBSCGasTopup(ctx context.Context, toAddress string, amount d
 	if err != nil {
 		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("convert amount to wei: %w", err)
 	}
-	to := common.HexToAddress(toAddress)
-	callObj := map[string]any{
-		"from":  fromAddress,
-		"to":    toAddress,
-		"value": "0x" + amountWei.Text(16),
-	}
-	gasLimit, err := s.bscClient.EstimateGas(ctx, callObj)
+	fromBalanceWei, err := webDecimalToTokenUnits(fromBalance, 18)
 	if err != nil {
-		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("estimate gas: %w", err)
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("convert balance to wei: %w", err)
 	}
+	to := common.HexToAddress(toAddress)
+	gasLimit := uint64(21_000)
 	gasLimit = gasLimit + gasLimit/5 + 5_000
+	estimatedFeeWei := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
+	estimatedTotalWei := new(big.Int).Add(amountWei, estimatedFeeWei)
+	if fromBalanceWei.Cmp(estimatedTotalWei) < 0 {
+		return fromAddress, "config.bsc.gas_transfer_private_key", "", fmt.Errorf("bsc gas 补充地址余额不足")
+	}
 
 	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
 		Nonce:    nonce,
