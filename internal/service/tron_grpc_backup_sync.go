@@ -62,7 +62,7 @@ func NewTronGRPCBackupSync(client *tron.GRPCBackupClient, repo *repository.DB, c
 		startBlock:        startBlock,
 		txWorkers:         txWorkers,
 		blockSource:       blockSource,
-		logger:            tronLogger(),
+		logger:            tronGRPCBackupLogger(),
 		mainStaleDuration: mainStaleDuration,
 		skipToLatest:      true,
 		triggerCh:         make(chan struct{}, 1),

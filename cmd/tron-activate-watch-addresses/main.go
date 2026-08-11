@@ -21,8 +21,7 @@ import (
 const activateDelay = 1 * time.Second
 
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	service.SetupCmdLogger("tron-activate-watch-addresses")
 
 	cfgPath := os.Getenv("TRON_WATCHER_CONFIG")
 	if cfgPath == "" {

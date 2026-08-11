@@ -25,6 +25,7 @@ import (
 	"tron_watcher/internal/config"
 	"tron_watcher/internal/database"
 	"tron_watcher/internal/repository"
+	"tron_watcher/internal/service"
 )
 
 const (
@@ -44,8 +45,7 @@ type bscWatchAddress struct {
 }
 
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	service.SetupCmdLogger("bsc-transfer-gas")
 
 	cfgPath := os.Getenv("TRON_WATCHER_CONFIG")
 	if cfgPath == "" {

@@ -44,8 +44,7 @@ type syncOptions struct {
 }
 
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	service.SetupCmdLogger("bsc-backup-block-sync")
 
 	loadDotEnvIfExists()
 
@@ -84,7 +83,7 @@ func main() {
 		log.Fatalf("align backup sync cursor failed: %v", err)
 	}
 
-	terminalLogger := log.New(os.Stdout, "BSC ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	terminalLogger := service.TaskLogger("bsc-backup-block-sync")
 
 	cache := service.NewBSCAddressCache(repo)
 	cache.SetLogger(terminalLogger)

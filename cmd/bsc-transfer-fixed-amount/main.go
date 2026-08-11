@@ -41,7 +41,7 @@ type bscWatchAddress struct {
 }
 
 func main() {
-	logger := service.BSCLogger()
+	logger := service.SetupCmdLogger("bsc-transfer-fixed-amount")
 
 	cfgPath := os.Getenv("TRON_WATCHER_CONFIG")
 	if cfgPath == "" {

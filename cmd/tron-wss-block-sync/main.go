@@ -28,8 +28,7 @@ const (
 )
 
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	service.SetupCmdLogger("tron-wss-block-sync")
 
 	loadDotEnvIfExists()
 

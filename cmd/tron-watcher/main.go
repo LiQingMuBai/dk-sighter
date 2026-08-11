@@ -14,14 +14,14 @@ import (
 	"time"
 
 	"tron_watcher/internal/app"
+	"tron_watcher/internal/service"
 )
 
 var buildBranch = "unknown"
 var buildCommit = "unknown"
 
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	service.SetupTronWatcherCmdLogger()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("fatal panic recovered in main: %v\n%s", r, string(debug.Stack()))
