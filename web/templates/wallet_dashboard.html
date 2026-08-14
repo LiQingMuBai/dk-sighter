@@ -867,6 +867,8 @@
       document.getElementById("chainHintExtra").textContent = `当前页面只展示 ${chainName} 链资产与地址结果`
       document.getElementById("assetColumn1").textContent = asset1
       document.getElementById("assetColumn2").textContent = "USDT"
+      const sweepBtn = document.getElementById("sweepBtn")
+      if (sweepBtn) sweepBtn.textContent = `${chainName} 一键归集`
       if (data.config) {
         tronMnemonicInput.value = data.config.tron_mnemonic || ""
         bscMnemonicInput.value = data.config.bsc_mnemonic || ""
