@@ -6,7 +6,7 @@ cd "$ROOT"
 
 GOOS="${GOOS:-darwin}"
 GOARCH="${GOARCH:-arm64}"
-APP_NAME="${APP_NAME:-Cookie}"
+APP_NAME="${APP_NAME:-Meee}"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
 STAGE_DIR="$OUT_DIR/${APP_NAME}_${GOOS}_${GOARCH}"
 APP_BUNDLE="$STAGE_DIR/$APP_NAME.app"
@@ -19,7 +19,7 @@ LOG_DIR="$APP_BUNDLE/Contents/Resources/logs"
 DATA_DIR="$APP_BUNDLE/Contents/Resources/data"
 
 VERSION="${VERSION:-dev}"
-BUNDLE_ID="${BUNDLE_ID:-com.tronsight.cookie}"
+BUNDLE_ID="${BUNDLE_ID:-com.tronsight.meee}"
 BINARY_NAME="tron-watcher-desktop"
 
 rm -rf "$STAGE_DIR"

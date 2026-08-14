@@ -14,8 +14,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.tronsight.cookie",
-    "productName": "Cookie",
+    "appId": "com.tronsight.meee",
+    "productName": "Meee",
     "directories": {
       "output": "dist",
       "buildResources": "build"

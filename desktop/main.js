@@ -242,7 +242,7 @@ app.whenReady().then(async () => {
     await createMainWindow()
   } catch (err) {
     const msg = err && err.message ? err.message : String(err)
-    dialog.showErrorBox("Cookie 启动失败", msg)
+    dialog.showErrorBox("Meee 启动失败", msg)
     killGoServer()
     app.quit()
   }

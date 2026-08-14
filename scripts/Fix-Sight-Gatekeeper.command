@@ -14,16 +14,16 @@ resolve_app_path() {
   fi
 
   local candidates=(
-    "/Applications/Cookie.app"
+    "/Applications/Meee.app"
   )
   while IFS= read -r -d '' path; do
     candidates+=("$path")
-  done < <(find /Applications -maxdepth 2 -name 'Cookie*.app' -type d -print0 2>/dev/null | sort -z)
+  done < <(find /Applications -maxdepth 2 -name 'Meee*.app' -type d -print0 2>/dev/null | sort -z)
 
   local chosen=""
   for p in "${candidates[@]}"; do
     if [ -d "$p" ]; then
-      if [ -z "$chosen" ] || [ "$p" = "/Applications/Cookie.app" ]; then
+      if [ -z "$chosen" ] || [ "$p" = "/Applications/Meee.app" ]; then
         chosen="$p"
       fi
     fi
@@ -40,18 +40,18 @@ APP="$(resolve_app_path "${1:-}")" || true
 
 clear
 echo "========================================"
-echo " Cookie Gatekeeper Fix Tool"
+echo " Meee Gatekeeper Fix Tool"
 echo "========================================"
 echo
 
 if [ -z "$APP" ] || [ ! -d "$APP" ]; then
-  echo "X No Cookie*.app bundle found in /Applications"
+  echo "X No Meee*.app bundle found in /Applications"
   echo
   if [ -n "${1:-}" ]; then
     echo "  provided path did not exist: $1"
     echo
   fi
-  echo "Please drag-and-drop your Cookie app (e.g. Cookie 2.app)"
+  echo "Please drag-and-drop your Meee app (e.g. Meee 2.app)"
   echo "onto this .command file, or install it into /Applications first."
   echo
   read -rp "Press Enter to exit... "
