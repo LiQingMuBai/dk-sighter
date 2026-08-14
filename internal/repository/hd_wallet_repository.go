@@ -162,7 +162,7 @@ func (d *DB) ListHDTronDashboardRows(ctx context.Context, source, mnemonicTag st
 		WHERE w.status = 1
 		  AND w.source = ?
 		  AND w.mnemonic_tag = ?
-		ORDER BY w.wallet_index ASC, w.id ASC
+		ORDER BY usdt_balance DESC, w.wallet_index ASC, w.id ASC
 		LIMIT ? OFFSET ?
 	`, source, mnemonicTag, limit, offset)
 	if err != nil {
@@ -229,7 +229,7 @@ func (d *DB) ListHDBSCDashboardRows(ctx context.Context, source, mnemonicTag str
 		WHERE w.status = 1
 		  AND w.source = ?
 		  AND w.mnemonic_tag = ?
-		ORDER BY w.wallet_index ASC, w.id ASC
+		ORDER BY usdt_balance DESC, w.wallet_index ASC, w.id ASC
 		LIMIT ? OFFSET ?
 	`, source, mnemonicTag, limit, offset)
 	if err != nil {
