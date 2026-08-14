@@ -433,7 +433,7 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	if bnbBalance.LessThan(minimumBSCSweepBNBBalance) {
 		return "", "", fmt.Errorf("skip: bnb 余额需大于等于 0.001")
 	}
-	amountUnits := new(big.Int).Sub(usdtBalanceUnits, big.NewInt(1))
+	amountUnits := new(big.Int).Set(usdtBalanceUnits)
 	if amountUnits.Sign() <= 0 {
 		return "", "", fmt.Errorf("skip: 当前 USDT 余额不足")
 	}
