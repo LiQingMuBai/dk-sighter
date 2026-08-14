@@ -14,8 +14,12 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.tronsight.tronwatcher",
-    "productName": "TronSight",
+    "appId": "com.tronsight.sight",
+    "productName": "Sight",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
     "files": [
       "**/*",
       "!bin/**"
@@ -32,10 +36,15 @@
       {
         "from": "bin",
         "to": "bin"
+      },
+      {
+        "from": "../migrations",
+        "to": "migrations"
       }
     ],
     "mac": {
       "target": [
+        "zip",
         "dmg"
       ]
     },

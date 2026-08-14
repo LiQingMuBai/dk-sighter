@@ -392,6 +392,9 @@ func resolveDataDir() string {
 	if value := strings.TrimSpace(os.Getenv("TRON_WATCHER_DATA_DIR")); value != "" {
 		return value
 	}
+	if base := strings.TrimSpace(os.Getenv("TRON_WATCHER_BASE_DIR")); base != "" {
+		return filepath.Join(base, "data", "hd_wallet")
+	}
 	return filepath.Join("data", "hd_wallet")
 }
 

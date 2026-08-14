@@ -3,9 +3,19 @@
 .idea/
 .dbg/
 
+.env
+*.png
+*.jpg
+*.jpeg
+*.gif
+
 configs/config.yaml
 data/
 logs/
+bin/
+dist/
+cmd/tron-watcher-desktop/
+debug-*.md
 
 desktop/node_modules/
 desktop/dist/

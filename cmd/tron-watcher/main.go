@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -119,6 +120,17 @@ func runGit(args ...string) string {
 }
 
 func defaultConfigPath() string {
+	if base := strings.TrimSpace(os.Getenv("TRON_WATCHER_BASE_DIR")); base != "" {
+		for _, rel := range []string{
+			filepath.Join(base, "configs", "config.yaml"),
+			filepath.Join(base, "config.yaml"),
+			filepath.Join(base, "configs", "config.example.yaml"),
+		} {
+			if st, err := os.Stat(rel); err == nil && !st.IsDir() {
+				return rel
+			}
+		}
+	}
 	candidates := []string{
 		"configs/config.yaml",
 		"config.yaml",

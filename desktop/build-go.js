@@ -28,19 +28,29 @@ function run() {
   fs.mkdirSync(outDir, { recursive: true })
 
   const outPath = path.join(outDir, binaryName())
+  if (fs.existsSync(outPath)) {
+    try { fs.rmSync(outPath, { force: true }) } catch (_) {}
+  }
+
   const env = { ...process.env, CGO_ENABLED: process.env.CGO_ENABLED || "0" }
 
   const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]) || "unknown"
   const commit = git(["rev-parse", "--short", "HEAD"]) || "unknown"
   const ldflags = `-X main.buildBranch=${branch} -X main.buildCommit=${commit}`
 
-  const r = spawnSync("go", ["build", "-ldflags", ldflags, "-o", outPath, "./cmd/tron-watcher"], {
+  const r = spawnSync("go", ["build", "-trimpath", "-ldflags", ldflags, "-o", outPath, "./cmd/tron-watcher"], {
     cwd: repoRoot(),
     env,
     stdio: "inherit"
   })
   if (r.error) throw r.error
   if (typeof r.status === "number" && r.status !== 0) process.exit(r.status)
+
+  try {
+    fs.accessSync(outPath, fs.constants.X_OK)
+  } catch (_) {
+    try { fs.chmodSync(outPath, 0o755) } catch (_) {}
+  }
 }
 
 run()

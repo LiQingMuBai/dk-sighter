@@ -11,6 +11,26 @@ import (
 )
 
 var (
+	baseLogDirOnce sync.Once
+	baseLogDirVal  string
+)
+
+func resolveBaseLogDir() string {
+	baseLogDirOnce.Do(func() {
+		if v := strings.TrimSpace(os.Getenv("TRON_WATCHER_LOG_DIR")); v != "" {
+			if abs, err := filepath.Abs(v); err == nil {
+				baseLogDirVal = abs
+				return
+			}
+			baseLogDirVal = v
+			return
+		}
+		baseLogDirVal = "logs"
+	})
+	return baseLogDirVal
+}
+
+var (
 	tronLoggerOnce sync.Once
 	tronLoggerInst *log.Logger
 
@@ -157,10 +177,11 @@ func taskWriter(name string) io.Writer {
 }
 
 func taskLogWriter(name string) (io.Writer, error) {
-	if err := os.MkdirAll("logs", 0o755); err != nil {
+	dir := resolveBaseLogDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	filePath := filepath.Join("logs", strings.ToLower(name)+".log")
+	filePath := filepath.Join(dir, strings.ToLower(name)+".log")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, err
@@ -169,10 +190,11 @@ func taskLogWriter(name string) (io.Writer, error) {
 }
 
 func rawTaskLogWriter(name string) (io.Writer, *os.File, error) {
-	if err := os.MkdirAll("logs", 0o755); err != nil {
+	dir := resolveBaseLogDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, nil, err
 	}
-	filePath := filepath.Join("logs", strings.ToLower(name)+".log")
+	filePath := filepath.Join(dir, strings.ToLower(name)+".log")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, nil, err

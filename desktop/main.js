@@ -31,7 +31,8 @@ function resolveGoCommand() {
 
   if (app.isPackaged) {
     const binPath = path.join(process.resourcesPath, "bin", platformDir(), binaryName())
-    return { command: binPath, args: [], cwd: path.dirname(binPath) }
+    const resourcesDir = process.resourcesPath
+    return { command: binPath, args: [], cwd: resourcesDir }
   }
 
   return { command: "go", args: ["run", "./cmd/tron-watcher"], cwd: repoRoot() }
@@ -40,18 +41,46 @@ function resolveGoCommand() {
 function ensureUserConfig() {
   const userDir = app.getPath("userData")
   const cfgPath = path.join(userDir, "config.yaml")
-  if (fs.existsSync(cfgPath)) return cfgPath
+  const versionFile = path.join(userDir, "bundled-config.version")
 
   const bundledConfigPath = app.isPackaged
     ? path.join(process.resourcesPath, "config.yaml")
     : path.join(repoRoot(), "configs", "config.yaml")
 
   if (!fs.existsSync(bundledConfigPath)) {
+    if (fs.existsSync(cfgPath)) return cfgPath
     throw new Error(`桌面版启动失败：缺少 config.yaml (${bundledConfigPath})`)
   }
 
-  fs.mkdirSync(userDir, { recursive: true })
-  fs.copyFileSync(bundledConfigPath, cfgPath)
+  let bundledMtime = 0
+  try {
+    bundledMtime = Math.floor(fs.statSync(bundledConfigPath).mtimeMs)
+  } catch (_) {
+    bundledMtime = 0
+  }
+  let installedMtime = -1
+  if (fs.existsSync(versionFile)) {
+    try {
+      installedMtime = parseInt(String(fs.readFileSync(versionFile, "utf8") || "-1").trim(), 10) || -1
+    } catch (_) {
+      installedMtime = -1
+    }
+  }
+
+  const needInstall = !fs.existsSync(cfgPath) || bundledMtime > installedMtime
+  if (needInstall) {
+    fs.mkdirSync(userDir, { recursive: true })
+    // preserve previous config by renaming to .bak on upgrade collision
+    if (fs.existsSync(cfgPath) && bundledMtime > installedMtime) {
+      try {
+        fs.copyFileSync(cfgPath, path.join(userDir, `config.yaml.bak-${Date.now()}`))
+      } catch (_) {}
+    }
+    fs.copyFileSync(bundledConfigPath, cfgPath)
+    try {
+      fs.writeFileSync(versionFile, String(bundledMtime), "utf8")
+    } catch (_) {}
+  }
   return cfgPath
 }
 
@@ -99,6 +128,14 @@ async function startGoServer() {
   const port = await getFreePort()
   const cfgPath = ensureUserConfig()
   const cmd = resolveGoCommand()
+  const userDir = app.getPath("userData")
+  const logsDir = path.join(userDir, "logs")
+  const migrationsDir = app.isPackaged
+    ? path.join(process.resourcesPath, "migrations")
+    : path.join(repoRoot(), "migrations")
+  const templateDir = app.isPackaged
+    ? path.join(process.resourcesPath, "web", "templates")
+    : path.join(repoRoot(), "web", "templates")
 
   const env = {
     ...process.env,
@@ -106,10 +143,11 @@ async function startGoServer() {
     TRON_WATCHER_APP_MODE: "hd_wallet",
     TRON_WATCHER_WEB_LISTEN: `127.0.0.1:${port}`,
     TRON_WATCHER_CONFIG: cfgPath,
-    TRON_WATCHER_DATA_DIR: path.join(app.getPath("userData"), "hd_wallet"),
-    TRON_WATCHER_TEMPLATE_DIR: app.isPackaged
-      ? path.join(process.resourcesPath, "web", "templates")
-      : path.join(repoRoot(), "web", "templates")
+    TRON_WATCHER_BASE_DIR: app.isPackaged ? process.resourcesPath : repoRoot(),
+    TRON_WATCHER_DATA_DIR: path.join(userDir, "hd_wallet"),
+    TRON_WATCHER_LOG_DIR: logsDir,
+    TRON_WATCHER_TEMPLATE_DIR: templateDir,
+    TRON_WATCHER_MIGRATIONS_DIR: migrationsDir
   }
 
   goProcess = spawn(cmd.command, cmd.args, {
@@ -204,7 +242,7 @@ app.whenReady().then(async () => {
     await createMainWindow()
   } catch (err) {
     const msg = err && err.message ? err.message : String(err)
-    dialog.showErrorBox("TronSight 启动失败", msg)
+    dialog.showErrorBox("Sight 启动失败", msg)
     killGoServer()
     app.quit()
   }
