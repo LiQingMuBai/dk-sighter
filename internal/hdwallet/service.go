@@ -401,70 +401,7 @@ func (s *Service) runFullSync() {
 }
 
 func (s *Service) runScheduledSync(ctx context.Context, chain string) error {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			panic(recovered)
-		}
-	}()
-
-	if s.repo != nil {
-		return s.runScheduledSyncFromDB(ctx, chain)
-	}
-
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return err
-	}
-
-	switch chain {
-	case "tron":
-		if cfg.TronMnemonic == "" {
-			return nil
-		}
-		if s.tronClient == nil {
-			return nil
-		}
-
-		hdBlockSyncState.tronMu.Lock()
-		defer hdBlockSyncState.tronMu.Unlock()
-
-		file, err := s.ensureTronFile(cfg)
-		if err != nil {
-			return err
-		}
-		if err := s.refreshTronBalances(ctx, file, 0, true); err != nil {
-			return err
-		}
-		file.LastScheduledSyncAt = nowString()
-		if err := s.writeJSON(s.chainPath("tron"), file); err != nil {
-			return err
-		}
-	case "bsc":
-		if cfg.BSCMnemonic == "" {
-			return nil
-		}
-		if s.bscClient == nil {
-			return nil
-		}
-
-		hdBlockSyncState.bscMu.Lock()
-		defer hdBlockSyncState.bscMu.Unlock()
-
-		file, err := s.ensureBSCFile(cfg)
-		if err != nil {
-			return err
-		}
-		if err := s.refreshBSCBalances(ctx, file, 0); err != nil {
-			return err
-		}
-		file.LastScheduledSyncAt = nowString()
-		if err := s.writeJSON(s.chainPath("bsc"), file); err != nil {
-			return err
-		}
-	default:
-		return nil
-	}
-
+	log.Printf("hd wallet scheduled balance sync paused (chain=%s): skipped per current configuration", strings.TrimSpace(chain))
 	return nil
 }
 

@@ -436,69 +436,8 @@ func (s *Service) refreshScheduledTronAddressFromDBWithContext(ctx context.Conte
 }
 
 func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) error {
-	cfg, err := s.loadConfig()
-	if err != nil {
-		return err
-	}
-
-	switch chain {
-	case "tron":
-		if cfg.TronMnemonic == "" || s.tronClient == nil {
-			return nil
-		}
-		s.setChainSyncRunning("tron", true)
-		defer s.setChainSyncRunning("tron", false)
-
-		tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
-		summary, err := s.repo.GetHDTronSummary(ctx, s.hdSource, tronTag)
-		if err != nil {
-			return err
-		}
-		if summary.Count == 0 {
-			s.setChainLastScheduledSyncAt("tron", nowString())
-			return nil
-		}
-		rows, _, err := s.repo.ListHDTronDashboardRows(ctx, s.hdSource, tronTag, summary.Count, 0)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if err := s.refreshScheduledTronAddressFromDBWithContext(ctx, row.Address); err != nil {
-				return err
-			}
-		}
-		s.setChainLastScheduledSyncAt("tron", nowString())
-		return nil
-	case "bsc":
-		if cfg.BSCMnemonic == "" || s.bscClient == nil {
-			return nil
-		}
-		s.setChainSyncRunning("bsc", true)
-		defer s.setChainSyncRunning("bsc", false)
-
-		bscTag := mnemonicTagFromValue(cfg.BSCMnemonic)
-		summary, err := s.repo.GetHDBSCSummary(ctx, s.hdSource, bscTag)
-		if err != nil {
-			return err
-		}
-		if summary.Count == 0 {
-			s.setChainLastScheduledSyncAt("bsc", nowString())
-			return nil
-		}
-		rows, _, err := s.repo.ListHDBSCDashboardRows(ctx, s.hdSource, bscTag, summary.Count, 0)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if _, err := s.refreshAddressFromDBWithContext(ctx, "bsc", row.Address); err != nil {
-				return err
-			}
-		}
-		s.setChainLastScheduledSyncAt("bsc", nowString())
-		return nil
-	default:
-		return nil
-	}
+	log.Printf("hd wallet scheduled balance sync paused (chain=%s): skipped per current configuration", strings.TrimSpace(chain))
+	return nil
 }
 
 func (s *Service) loadSweepContextFromDB(chain string) (ConfigFile, *ChainFile, decimal.Decimal, error) {
