@@ -130,9 +130,10 @@ func (d *DB) insertHDBSCWatchAddresses(ctx context.Context, source string, items
 	return nil
 }
 
-func (d *DB) ListHDTronDashboardRows(ctx context.Context, source string, limit, offset int) ([]HDDashboardRow, int, error) {
+func (d *DB) ListHDTronDashboardRows(ctx context.Context, source, mnemonicTag string, limit, offset int) ([]HDDashboardRow, int, error) {
 	source = normalizeHDSource(source)
-	total, err := d.countWatchAddressesBySource(ctx, "watch_addresses", source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
+	total, err := d.countWatchAddressesBySource(ctx, "watch_addresses", source, mnemonicTag)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -160,9 +161,10 @@ func (d *DB) ListHDTronDashboardRows(ctx context.Context, source string, limit, 
 			AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
+		  AND w.mnemonic_tag = ?
 		ORDER BY w.wallet_index ASC, w.id ASC
 		LIMIT ? OFFSET ?
-	`, source, limit, offset)
+	`, source, mnemonicTag, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list hd tron dashboard rows: %w", err)
 	}
@@ -194,9 +196,10 @@ func (d *DB) ListHDTronDashboardRows(ctx context.Context, source string, limit, 
 	return result, total, nil
 }
 
-func (d *DB) ListHDBSCDashboardRows(ctx context.Context, source string, limit, offset int) ([]HDDashboardRow, int, error) {
+func (d *DB) ListHDBSCDashboardRows(ctx context.Context, source, mnemonicTag string, limit, offset int) ([]HDDashboardRow, int, error) {
 	source = normalizeHDSource(source)
-	total, err := d.countWatchAddressesBySource(ctx, "bsc_watch_addresses", source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
+	total, err := d.countWatchAddressesBySource(ctx, "bsc_watch_addresses", source, mnemonicTag)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -225,9 +228,10 @@ func (d *DB) ListHDBSCDashboardRows(ctx context.Context, source string, limit, o
 			ON LOWER(usdt.address) = LOWER(w.address) AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
+		  AND w.mnemonic_tag = ?
 		ORDER BY w.wallet_index ASC, w.id ASC
 		LIMIT ? OFFSET ?
-	`, source, limit, offset)
+	`, source, mnemonicTag, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list hd bsc dashboard rows: %w", err)
 	}
@@ -261,8 +265,9 @@ func (d *DB) ListHDBSCDashboardRows(ctx context.Context, source string, limit, o
 	return result, total, nil
 }
 
-func (d *DB) GetHDTronDashboardRowByAddress(ctx context.Context, source, address string) (*HDDashboardRow, bool, error) {
+func (d *DB) GetHDTronDashboardRowByAddress(ctx context.Context, source, mnemonicTag, address string) (*HDDashboardRow, bool, error) {
 	source = normalizeHDSource(source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
 	address = strings.TrimSpace(address)
 	if address == "" {
 		return nil, false, fmt.Errorf("address is required")
@@ -295,9 +300,10 @@ func (d *DB) GetHDTronDashboardRowByAddress(ctx context.Context, source, address
 			AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
+		  AND w.mnemonic_tag = ?
 		  AND w.address_base58 = ?
 		LIMIT 1
-	`, source, address).Scan(&item.WalletIndex, &item.MnemonicTag, &item.Address, &trxBalance, &usdtBalance, &updatedAt)
+	`, source, mnemonicTag, address).Scan(&item.WalletIndex, &item.MnemonicTag, &item.Address, &trxBalance, &usdtBalance, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -316,8 +322,9 @@ func (d *DB) GetHDTronDashboardRowByAddress(ctx context.Context, source, address
 	return &item, true, nil
 }
 
-func (d *DB) GetHDBSCDashboardRowByAddress(ctx context.Context, source, address string) (*HDDashboardRow, bool, error) {
+func (d *DB) GetHDBSCDashboardRowByAddress(ctx context.Context, source, mnemonicTag, address string) (*HDDashboardRow, bool, error) {
 	source = normalizeHDSource(source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
 	address = strings.ToLower(strings.TrimSpace(address))
 	if address == "" {
 		return nil, false, fmt.Errorf("address is required")
@@ -351,9 +358,10 @@ func (d *DB) GetHDBSCDashboardRowByAddress(ctx context.Context, source, address 
 			ON LOWER(usdt.address) = LOWER(w.address) AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
+		  AND w.mnemonic_tag = ?
 		  AND LOWER(w.address) = ?
 		LIMIT 1
-	`, source, address).Scan(&item.WalletIndex, &item.MnemonicTag, &item.Address, &bnbBalance, &usdtBalance, &updatedAt)
+	`, source, mnemonicTag, address).Scan(&item.WalletIndex, &item.MnemonicTag, &item.Address, &bnbBalance, &usdtBalance, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -374,8 +382,9 @@ func (d *DB) GetHDBSCDashboardRowByAddress(ctx context.Context, source, address 
 	return &item, true, nil
 }
 
-func (d *DB) GetHDTronSummary(ctx context.Context, source string) (HDSummary, error) {
+func (d *DB) GetHDTronSummary(ctx context.Context, source, mnemonicTag string) (HDSummary, error) {
 	source = normalizeHDSource(source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
 	var summary HDSummary
 	var trxTotal string
 	var usdtTotal string
@@ -402,7 +411,8 @@ func (d *DB) GetHDTronSummary(ctx context.Context, source string) (HDSummary, er
 			AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
-	`, source).Scan(&summary.Count, &trxTotal, &usdtTotal, &summary.LastUpdated)
+		  AND w.mnemonic_tag = ?
+	`, source, mnemonicTag).Scan(&summary.Count, &trxTotal, &usdtTotal, &summary.LastUpdated)
 	if err != nil {
 		return HDSummary{}, fmt.Errorf("get hd tron summary: %w", err)
 	}
@@ -417,8 +427,9 @@ func (d *DB) GetHDTronSummary(ctx context.Context, source string) (HDSummary, er
 	return summary, nil
 }
 
-func (d *DB) GetHDBSCSummary(ctx context.Context, source string) (HDSummary, error) {
+func (d *DB) GetHDBSCSummary(ctx context.Context, source, mnemonicTag string) (HDSummary, error) {
 	source = normalizeHDSource(source)
+	mnemonicTag = strings.TrimSpace(mnemonicTag)
 	var summary HDSummary
 	var bnbTotal string
 	var usdtTotal string
@@ -447,7 +458,8 @@ func (d *DB) GetHDBSCSummary(ctx context.Context, source string) (HDSummary, err
 			ON LOWER(usdt.address) = LOWER(w.address) AND usdt.asset_code = 'USDT'
 		WHERE w.status = 1
 		  AND w.source = ?
-	`, source).Scan(&summary.Count, &bnbTotal, &usdtTotal, &updatedAt)
+		  AND w.mnemonic_tag = ?
+	`, source, mnemonicTag).Scan(&summary.Count, &bnbTotal, &usdtTotal, &updatedAt)
 	if err != nil {
 		return HDSummary{}, fmt.Errorf("get hd bsc summary: %w", err)
 	}
@@ -465,15 +477,16 @@ func (d *DB) GetHDBSCSummary(ctx context.Context, source string) (HDSummary, err
 	return summary, nil
 }
 
-func (d *DB) countWatchAddressesBySource(ctx context.Context, table, source string) (int, error) {
+func (d *DB) countWatchAddressesBySource(ctx context.Context, table, source, mnemonicTag string) (int, error) {
 	query := fmt.Sprintf(`
 		SELECT COUNT(1)
 		FROM %s
 		WHERE status = 1
 		  AND source = ?
+		  AND mnemonic_tag = ?
 	`, table)
 	var total int
-	if err := d.sql.QueryRowContext(ctx, query, source).Scan(&total); err != nil {
+	if err := d.sql.QueryRowContext(ctx, query, source, strings.TrimSpace(mnemonicTag)).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count watch addresses by source: %w", err)
 	}
 	return total, nil

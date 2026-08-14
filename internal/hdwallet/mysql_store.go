@@ -152,6 +152,8 @@ func collectMissingWalletIndexes(existingIndexes []int, maxCount, batchSize int)
 
 func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 	cfg, _ := s.loadConfig()
+	tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
+	bscTag := mnemonicTagFromValue(cfg.BSCMnemonic)
 
 	s.mu.Lock()
 	job := s.job
@@ -166,11 +168,11 @@ func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 		normalizedChain = "tron"
 	}
 
-	tronSummary, err := s.repo.GetHDTronSummary(context.Background(), s.hdSource)
+	tronSummary, err := s.repo.GetHDTronSummary(context.Background(), s.hdSource, tronTag)
 	if err != nil {
 		return State{}, err
 	}
-	bscSummary, err := s.repo.GetHDBSCSummary(context.Background(), s.hdSource)
+	bscSummary, err := s.repo.GetHDBSCSummary(context.Background(), s.hdSource, bscTag)
 	if err != nil {
 		return State{}, err
 	}
@@ -178,7 +180,7 @@ func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 	tronLastBlock, _, _ := s.repo.GetLastBlock(context.Background(), "tron_solid_scanner")
 	bscLastBlock, _, _ := s.repo.GetLastBlock(context.Background(), "bsc_scanner")
 
-	pageData, err := s.pageDataFromDB(normalizedChain, page, pageSize)
+	pageData, err := s.pageDataFromDB(normalizedChain, page, pageSize, tronTag, bscTag)
 	if err != nil {
 		return State{}, err
 	}
@@ -209,7 +211,7 @@ func (s *Service) stateFromDB(chain string, page, pageSize int) (State, error) {
 	}, nil
 }
 
-func (s *Service) pageDataFromDB(chain string, page, pageSize int) (PageData, error) {
+func (s *Service) pageDataFromDB(chain string, page, pageSize int, tronMnemonicTag, bscMnemonicTag string) (PageData, error) {
 	if pageSize <= 0 {
 		pageSize = defaultPageSize
 	}
@@ -223,7 +225,7 @@ func (s *Service) pageDataFromDB(chain string, page, pageSize int) (PageData, er
 
 	switch chain {
 	case "bsc":
-		rows, totalCount, err := s.repo.ListHDBSCDashboardRows(context.Background(), s.hdSource, pageSize, offset)
+		rows, totalCount, err := s.repo.ListHDBSCDashboardRows(context.Background(), s.hdSource, bscMnemonicTag, pageSize, offset)
 		if err != nil {
 			return PageData{}, err
 		}
@@ -251,7 +253,7 @@ func (s *Service) pageDataFromDB(chain string, page, pageSize int) (PageData, er
 			TotalPages: totalPages,
 		}, nil
 	default:
-		rows, totalCount, err := s.repo.ListHDTronDashboardRows(context.Background(), s.hdSource, pageSize, offset)
+		rows, totalCount, err := s.repo.ListHDTronDashboardRows(context.Background(), s.hdSource, tronMnemonicTag, pageSize, offset)
 		if err != nil {
 			return PageData{}, err
 		}
@@ -286,13 +288,20 @@ func (s *Service) refreshAddressFromDB(chain, address string) (AddressRecord, er
 }
 
 func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, address string) (AddressRecord, error) {
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return AddressRecord{}, err
+	}
+	tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
+	bscTag := mnemonicTagFromValue(cfg.BSCMnemonic)
+
 	normalizedChain := strings.ToLower(strings.TrimSpace(chain))
 	switch normalizedChain {
 	case "tron":
 		if s.tronClient == nil {
 			return AddressRecord{}, fmt.Errorf("tron client not configured")
 		}
-		row, exists, err := s.repo.GetHDTronDashboardRowByAddress(context.Background(), s.hdSource, address)
+		row, exists, err := s.repo.GetHDTronDashboardRowByAddress(ctx, s.hdSource, tronTag, address)
 		if err != nil {
 			return AddressRecord{}, err
 		}
@@ -339,7 +348,7 @@ func (s *Service) refreshAddressFromDBWithContext(ctx context.Context, chain, ad
 		if s.bscClient == nil {
 			return AddressRecord{}, fmt.Errorf("bsc client not configured")
 		}
-		row, exists, err := s.repo.GetHDBSCDashboardRowByAddress(context.Background(), s.hdSource, address)
+		row, exists, err := s.repo.GetHDBSCDashboardRowByAddress(ctx, s.hdSource, bscTag, address)
 		if err != nil {
 			return AddressRecord{}, err
 		}
@@ -383,7 +392,12 @@ func (s *Service) refreshScheduledTronAddressFromDBWithContext(ctx context.Conte
 	if s.tronClient == nil {
 		return fmt.Errorf("tron client not configured")
 	}
-	row, exists, err := s.repo.GetHDTronDashboardRowByAddress(context.Background(), s.hdSource, address)
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return err
+	}
+	tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
+	row, exists, err := s.repo.GetHDTronDashboardRowByAddress(ctx, s.hdSource, tronTag, address)
 	if err != nil {
 		return err
 	}
@@ -435,7 +449,8 @@ func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) erro
 		s.setChainSyncRunning("tron", true)
 		defer s.setChainSyncRunning("tron", false)
 
-		summary, err := s.repo.GetHDTronSummary(ctx, s.hdSource)
+		tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
+		summary, err := s.repo.GetHDTronSummary(ctx, s.hdSource, tronTag)
 		if err != nil {
 			return err
 		}
@@ -443,7 +458,7 @@ func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) erro
 			s.setChainLastScheduledSyncAt("tron", nowString())
 			return nil
 		}
-		rows, _, err := s.repo.ListHDTronDashboardRows(ctx, s.hdSource, summary.Count, 0)
+		rows, _, err := s.repo.ListHDTronDashboardRows(ctx, s.hdSource, tronTag, summary.Count, 0)
 		if err != nil {
 			return err
 		}
@@ -461,7 +476,8 @@ func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) erro
 		s.setChainSyncRunning("bsc", true)
 		defer s.setChainSyncRunning("bsc", false)
 
-		summary, err := s.repo.GetHDBSCSummary(ctx, s.hdSource)
+		bscTag := mnemonicTagFromValue(cfg.BSCMnemonic)
+		summary, err := s.repo.GetHDBSCSummary(ctx, s.hdSource, bscTag)
 		if err != nil {
 			return err
 		}
@@ -469,7 +485,7 @@ func (s *Service) runScheduledSyncFromDB(ctx context.Context, chain string) erro
 			s.setChainLastScheduledSyncAt("bsc", nowString())
 			return nil
 		}
-		rows, _, err := s.repo.ListHDBSCDashboardRows(ctx, s.hdSource, summary.Count, 0)
+		rows, _, err := s.repo.ListHDBSCDashboardRows(ctx, s.hdSource, bscTag, summary.Count, 0)
 		if err != nil {
 			return err
 		}
@@ -504,13 +520,14 @@ func (s *Service) loadSweepContextFromDB(chain string) (ConfigFile, *ChainFile, 
 		if err != nil {
 			return ConfigFile{}, nil, decimal.Zero, err
 		}
-		summary, err := s.repo.GetHDTronSummary(context.Background(), s.hdSource)
+		tronTag := mnemonicTagFromValue(cfg.TronMnemonic)
+		summary, err := s.repo.GetHDTronSummary(context.Background(), s.hdSource, tronTag)
 		if err != nil {
 			return ConfigFile{}, nil, decimal.Zero, err
 		}
 		file.Count = summary.Count
 		if summary.Count > 0 {
-			rows, _, err := s.repo.ListHDTronDashboardRows(context.Background(), s.hdSource, summary.Count, 0)
+			rows, _, err := s.repo.ListHDTronDashboardRows(context.Background(), s.hdSource, tronTag, summary.Count, 0)
 			if err != nil {
 				return ConfigFile{}, nil, decimal.Zero, err
 			}
@@ -538,13 +555,14 @@ func (s *Service) loadSweepContextFromDB(chain string) (ConfigFile, *ChainFile, 
 		if err != nil {
 			return ConfigFile{}, nil, decimal.Zero, err
 		}
-		summary, err := s.repo.GetHDBSCSummary(context.Background(), s.hdSource)
+		bscTag := mnemonicTagFromValue(cfg.BSCMnemonic)
+		summary, err := s.repo.GetHDBSCSummary(context.Background(), s.hdSource, bscTag)
 		if err != nil {
 			return ConfigFile{}, nil, decimal.Zero, err
 		}
 		file.Count = summary.Count
 		if summary.Count > 0 {
-			rows, _, err := s.repo.ListHDBSCDashboardRows(context.Background(), s.hdSource, summary.Count, 0)
+			rows, _, err := s.repo.ListHDBSCDashboardRows(context.Background(), s.hdSource, bscTag, summary.Count, 0)
 			if err != nil {
 				return ConfigFile{}, nil, decimal.Zero, err
 			}

@@ -2,7 +2,41 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
-APP="${1:-/Applications/Sight.app}"
+
+resolve_app_path() {
+  local explicit="$1"
+  if [ -n "$explicit" ]; then
+    if [ -d "$explicit" ]; then
+      echo "$explicit"
+      return 0
+    fi
+    return 1
+  fi
+
+  local candidates=(
+    "/Applications/Sight.app"
+  )
+  while IFS= read -r -d '' path; do
+    candidates+=("$path")
+  done < <(find /Applications -maxdepth 2 -name 'Sight*.app' -type d -print0 2>/dev/null | sort -z)
+
+  local chosen=""
+  for p in "${candidates[@]}"; do
+    if [ -d "$p" ]; then
+      if [ -z "$chosen" ] || [ "$p" = "/Applications/Sight.app" ]; then
+        chosen="$p"
+      fi
+    fi
+  done
+
+  if [ -n "$chosen" ]; then
+    echo "$chosen"
+    return 0
+  fi
+  return 1
+}
+
+APP="$(resolve_app_path "${1:-}")" || true
 
 clear
 echo "========================================"
@@ -10,11 +44,15 @@ echo " Sight Gatekeeper Fix Tool"
 echo "========================================"
 echo
 
-if [ ! -d "$APP" ]; then
-  echo "X App bundle not found: $APP"
+if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+  echo "X No Sight*.app bundle found in /Applications"
   echo
-  echo "Please make sure Sight.app is installed into /Applications"
-  echo "or drag-and-drop Sight.app onto this .command file."
+  if [ -n "${1:-}" ]; then
+    echo "  provided path did not exist: $1"
+    echo
+  fi
+  echo "Please drag-and-drop your Sight app (e.g. Sight 2.app)"
+  echo "onto this .command file, or install it into /Applications first."
   echo
   read -rp "Press Enter to exit... "
   exit 1
@@ -45,7 +83,7 @@ fi
 
 echo
 echo "========================================"
-echo " Done! You can now open Sight.app."
+echo " Done! You can now open $(basename "$APP")."
 echo " (Right-click -> Open the first launch.)"
 echo "========================================"
 echo

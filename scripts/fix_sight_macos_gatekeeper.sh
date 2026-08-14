@@ -1,20 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP="${1:-/Applications/Sight.app}"
+resolve_app_path() {
+  local explicit="$1"
+  if [ -n "$explicit" ]; then
+    if [ -d "$explicit" ]; then
+      echo "$explicit"
+      return 0
+    fi
+    return 1
+  fi
 
-if [ ! -d "$APP" ]; then
-  echo "Error: app bundle not found at $APP"
+  local candidates=(
+    "/Applications/Sight.app"
+  )
+  while IFS= read -r -d '' path; do
+    candidates+=("$path")
+  done < <(find /Applications -maxdepth 2 -name 'Sight*.app' -type d -print0 2>/dev/null | sort -z)
+
+  local chosen=""
+  for p in "${candidates[@]}"; do
+    if [ -d "$p" ]; then
+      if [ -z "$chosen" ] || [ "$p" = "/Applications/Sight.app" ]; then
+        chosen="$p"
+      fi
+    fi
+  done
+
+  if [ -n "$chosen" ]; then
+    echo "$chosen"
+    return 0
+  fi
+  return 1
+}
+
+APP_PATH="$(resolve_app_path "${1:-}")" || true
+if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+  echo "Error: no Sight*.app bundle found."
+  if [ -n "${1:-}" ]; then
+    echo "  provided path did not exist: $1"
+  fi
+  echo
   echo "Usage: $0 [path/to/Sight.app]"
-  echo "  default path: /Applications/Sight.app"
+  echo "  default lookup: /Applications/Sight.app and any /Applications/**/Sight*.app"
   exit 1
 fi
 
-echo "[1/2] Removing quarantine attribute from $APP ..."
-xattr -dr com.apple.quarantine "$APP"
+echo "Target app: $APP_PATH"
+echo
 
-echo "[2/2] Ad-hoc deep signing $APP ..."
-codesign --force --deep --sign - "$APP"
+echo "[1/2] Removing quarantine attribute ..."
+xattr -dr com.apple.quarantine "$APP_PATH"
+
+echo "[2/2] Ad-hoc deep signing ..."
+codesign --force --deep --sign - "$APP_PATH"
 
 echo
-echo "Done. You can now open Sight normally (right-click -> Open the first time)."
+echo "Done. You can now open $(basename "$APP_PATH") normally (right-click -> Open the first time)."
