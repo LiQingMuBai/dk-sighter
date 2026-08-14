@@ -12,16 +12,16 @@ resolve_app_path() {
   fi
 
   local candidates=(
-    "/Applications/Sight.app"
+    "/Applications/Cookie.app"
   )
   while IFS= read -r -d '' path; do
     candidates+=("$path")
-  done < <(find /Applications -maxdepth 2 -name 'Sight*.app' -type d -print0 2>/dev/null | sort -z)
+  done < <(find /Applications -maxdepth 2 -name 'Cookie*.app' -type d -print0 2>/dev/null | sort -z)
 
   local chosen=""
   for p in "${candidates[@]}"; do
     if [ -d "$p" ]; then
-      if [ -z "$chosen" ] || [ "$p" = "/Applications/Sight.app" ]; then
+      if [ -z "$chosen" ] || [ "$p" = "/Applications/Cookie.app" ]; then
         chosen="$p"
       fi
     fi
@@ -36,13 +36,13 @@ resolve_app_path() {
 
 APP_PATH="$(resolve_app_path "${1:-}")" || true
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-  echo "Error: no Sight*.app bundle found."
+  echo "Error: no Cookie*.app bundle found."
   if [ -n "${1:-}" ]; then
     echo "  provided path did not exist: $1"
   fi
   echo
-  echo "Usage: $0 [path/to/Sight.app]"
-  echo "  default lookup: /Applications/Sight.app and any /Applications/**/Sight*.app"
+  echo "Usage: $0 [path/to/Cookie.app]"
+  echo "  default lookup: /Applications/Cookie.app and any /Applications/**/Cookie*.app"
   exit 1
 fi
 
