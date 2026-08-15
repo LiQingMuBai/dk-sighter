@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -50,6 +51,7 @@ type chainDispatchWriter struct {
 	mainOut  io.Writer
 	tronOut  io.Writer
 	bscOut   io.Writer
+	stdout   io.Writer
 }
 
 func (w *chainDispatchWriter) Write(p []byte) (int, error) {
@@ -64,17 +66,29 @@ func (w *chainDispatchWriter) Write(p []byte) (int, error) {
 	case bytes.Contains(lower, []byte("tron")):
 		side = w.tronOut
 	}
+	nw := 0
 	if w.mainOut != nil {
-		if _, err := w.mainOut.Write(p); err != nil {
+		n, err := w.mainOut.Write(p)
+		if err != nil {
 			return 0, err
+		}
+		if n > nw {
+			nw = n
 		}
 	}
 	if side != nil {
-		if _, err := side.Write(p); err != nil {
+		n, err := side.Write(p)
+		if err != nil {
 			return 0, err
 		}
+		if n > nw {
+			nw = n
+		}
 	}
-	return len(p), nil
+	if nw == 0 {
+		nw = len(p)
+	}
+	return nw, nil
 }
 
 func (w *chainDispatchWriter) Close() error {
@@ -87,9 +101,73 @@ func (w *chainDispatchWriter) Close() error {
 	return nil
 }
 
+type multiWriterUnwrapper struct {
+	writers []io.Writer
+}
+
+func (m *multiWriterUnwrapper) Write(p []byte) (int, error) {
+	maxN := 0
+	for _, w := range m.writers {
+		n, err := w.Write(p)
+		if err != nil {
+			return 0, err
+		}
+		if n > maxN {
+			maxN = n
+		}
+	}
+	if maxN == 0 {
+		maxN = len(p)
+	}
+	return maxN, nil
+}
+
+func (m *multiWriterUnwrapper) contains(target io.Writer) bool {
+	for _, w := range m.writers {
+		if w == target {
+			return true
+		}
+	}
+	return false
+}
+
+func newDedupMultiWriter(writers ...io.Writer) io.Writer {
+	seen := make(map[interface{}]struct{}, len(writers))
+	dedup := make([]io.Writer, 0, len(writers))
+	for _, w := range writers {
+		if w == nil {
+			continue
+		}
+		key := writerKey(w)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		dedup = append(dedup, w)
+	}
+	if len(dedup) == 0 {
+		return io.Discard
+	}
+	if len(dedup) == 1 {
+		return dedup[0]
+	}
+	return &multiWriterUnwrapper{writers: dedup}
+}
+
+func writerKey(w io.Writer) interface{} {
+	switch v := w.(type) {
+	case *os.File:
+		return fmt.Sprintf("file:%s", v.Name())
+	case *multiWriterUnwrapper:
+		return w
+	default:
+		return fmt.Sprintf("ptr:%p", w)
+	}
+}
+
 func tronLogger() *log.Logger {
 	tronLoggerOnce.Do(func() {
-		tronLoggerInst = buildChainLogger("tron")
+		tronLoggerInst = buildChainLoggerNoStdout("tron")
 	})
 	return tronLoggerInst
 }
@@ -100,7 +178,7 @@ func TronLogger() *log.Logger {
 
 func bscLogger() *log.Logger {
 	bscLoggerOnce.Do(func() {
-		bscLoggerInst = buildChainLogger("bsc")
+		bscLoggerInst = buildChainLoggerNoStdout("bsc")
 	})
 	return bscLoggerInst
 }
@@ -111,7 +189,7 @@ func BSCLogger() *log.Logger {
 
 func tronGRPCBackupLogger() *log.Logger {
 	tronGRPCBackupLoggerOnce.Do(func() {
-		tronGRPCBackupLoggerInst = buildChainLogger("tron-grpc-backup")
+		tronGRPCBackupLoggerInst = buildChainLoggerNoStdout("tron-grpc-backup")
 	})
 	return tronGRPCBackupLoggerInst
 }
@@ -123,7 +201,7 @@ func TaskLogger(taskName string) *log.Logger {
 	if l, ok := taskLoggers[taskName]; ok {
 		return l
 	}
-	l := buildTaskLogger(taskName)
+	l := buildTaskLoggerNoStdout(taskName)
 	taskLoggers[taskName] = l
 	return l
 }
@@ -154,14 +232,36 @@ func buildChainLogger(chain string) *log.Logger {
 	return buildLoggerWithPrefix(chain, strings.ToUpper(chain)+" ")
 }
 
+func buildChainLoggerNoStdout(chain string) *log.Logger {
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		chain = "app"
+	}
+	return buildLoggerWithPrefixNoStdout(chain, strings.ToUpper(chain)+" ")
+}
+
 func buildTaskLogger(taskName string) *log.Logger {
 	taskName = normalizeTaskName(taskName)
 	return buildLoggerWithPrefix(taskName, "["+taskName+"] ")
 }
 
+func buildTaskLoggerNoStdout(taskName string) *log.Logger {
+	taskName = normalizeTaskName(taskName)
+	return buildLoggerWithPrefixNoStdout(taskName, "["+taskName+"] ")
+}
+
 func buildLoggerWithPrefix(name, prefix string) *log.Logger {
 	flags := log.LstdFlags | log.Lmicroseconds | log.Lshortfile
 	writer, err := taskLogWriter(name)
+	if err != nil {
+		return log.New(os.Stdout, prefix, flags)
+	}
+	return log.New(writer, prefix, flags)
+}
+
+func buildLoggerWithPrefixNoStdout(name, prefix string) *log.Logger {
+	flags := log.LstdFlags | log.Lmicroseconds | log.Lshortfile
+	writer, _, err := rawTaskLogWriterNoStdout(name)
 	if err != nil {
 		return log.New(os.Stdout, prefix, flags)
 	}
@@ -186,7 +286,7 @@ func taskLogWriter(name string) (io.Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return io.MultiWriter(os.Stdout, f), nil
+	return newDedupMultiWriter(os.Stdout, f), nil
 }
 
 func rawTaskLogWriter(name string) (io.Writer, *os.File, error) {
@@ -199,7 +299,20 @@ func rawTaskLogWriter(name string) (io.Writer, *os.File, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return io.MultiWriter(os.Stdout, f), f, nil
+	return newDedupMultiWriter(os.Stdout, f), f, nil
+}
+
+func rawTaskLogWriterNoStdout(name string) (io.Writer, *os.File, error) {
+	dir := resolveBaseLogDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, nil, err
+	}
+	filePath := filepath.Join(dir, strings.ToLower(name)+".log")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, f, nil
 }
 
 func newChainDispatchWriter(taskName string) io.Writer {
@@ -207,14 +320,15 @@ func newChainDispatchWriter(taskName string) io.Writer {
 	if err != nil {
 		return os.Stdout
 	}
-	tronOut := taskWriter("tron")
-	bscOut := taskWriter("bsc")
+	tronOut, _, _ := rawTaskLogWriterNoStdout("tron")
+	bscOut, _, _ := rawTaskLogWriterNoStdout("bsc")
 	return &chainDispatchWriter{
 		name:     normalizeTaskName(taskName),
 		mainFile: mainFile,
 		mainOut:  mainOut,
 		tronOut:  tronOut,
 		bscOut:   bscOut,
+		stdout:   os.Stdout,
 	}
 }
 
