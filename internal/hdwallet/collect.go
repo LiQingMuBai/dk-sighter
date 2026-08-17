@@ -269,7 +269,27 @@ func (s *Service) collectTronUSDT(cfg ConfigFile, file *ChainFile, threshold dec
 		if provider == nil || !provider.IsConfigured() {
 			return "", "", fmt.Errorf("未配置发能通道")
 		}
-		if _, err := provider.OrderEnergy(wallet.Address, int(requiredTronSweepEnergy)); err != nil {
+		respBody, err := provider.OrderEnergy(wallet.Address, int(requiredTronSweepEnergy))
+		if s.repo != nil {
+			logItem := repository.EnergyActionLog{
+				ActionName:    "发能一次",
+				AddressBase58: wallet.Address,
+				Provider:      providerName,
+				EnergyAmount:  int(requiredTronSweepEnergy),
+				ActionScore:   1,
+				Status:        "SUCCESS",
+				ResponseBody:  respBody,
+				ErrorMessage:  "",
+			}
+			if err != nil {
+				logItem.Status = "FAILED"
+				logItem.ErrorMessage = err.Error()
+			}
+			if insertErr := s.repo.InsertEnergyActionLog(ctx, logItem); insertErr != nil {
+				s.setProgress("sweep", "tron", progressCurrent, fmt.Sprintf("TRON 地址 %s 写入发能日志失败: %v", candidate.Address, insertErr))
+			}
+		}
+		if err != nil {
 			return "", "", fmt.Errorf("发能一次失败(provider=%s): %w", providerName, err)
 		}
 		energyStatusMessage = "地址能量不足，已自动发能一次"
@@ -413,7 +433,7 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 			return "", "", fmt.Errorf("未配置 bsc gas 补充私钥")
 		}
 		s.setProgress("sweep", "bsc", progressCurrent, fmt.Sprintf("BSC 地址 %s BNB 不足，正在自动补充 gas", candidate.Address))
-		gasTxHash, topupErr := s.sendBSCGasTopup(ctx, wallet.Address, manualBSCGasTopupAmount)
+		_, gasTxHash, _, topupErr := s.sendBSCGasTopup(ctx, wallet.Address, manualBSCGasTopupAmount)
 		if topupErr != nil {
 			return "", "", fmt.Errorf("补充 bsc gas 失败: %w", topupErr)
 		}
@@ -516,37 +536,74 @@ func (s *Service) collectBSCUSDT(cfg ConfigFile, file *ChainFile, threshold deci
 	return txHash, strings.Join(statusNotes, "，"), nil
 }
 
-func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount decimal.Decimal) (string, error) {
+func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount decimal.Decimal) (fromAddress string, txHash string, amountBNB string, sendErr error) {
 	if s.bscClient == nil {
-		return "", fmt.Errorf("bsc client not configured")
+		return "", "", "", fmt.Errorf("bsc client not configured")
 	}
-	privateKey, fromAddress, err := parseBSCGasTopupPrivateKey(s.bscGasTopupPrivateKey)
+	privateKey, fromAddr, err := parseBSCGasTopupPrivateKey(s.bscGasTopupPrivateKey)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
+	fromAddress = fromAddr
+	amountBNB = amount.StringFixed(18)
+	defer func() {
+		if s.repo != nil {
+			logItem := repository.BSCGasTopupLog{
+				Address:      strings.ToLower(strings.TrimSpace(toAddress)),
+				FromAddress:  strings.ToLower(fromAddress),
+				AmountBNB:    strings.TrimSpace(amountBNB),
+				CurrentBNB:   "",
+				CurrentUSDT:  "",
+				TxHash:       strings.TrimSpace(txHash),
+				KeySource:    "hd_sweep",
+				Status:       "SUCCESS",
+				ResponseBody: "",
+				ErrorMessage: "",
+			}
+			if sendErr != nil {
+				logItem.Status = "FAILED"
+				logItem.ErrorMessage = sendErr.Error()
+			}
+			payload := map[string]any{
+				"address":      toAddress,
+				"from_address": fromAddress,
+				"amount_bnb":   amountBNB,
+				"key_source":   "hd_sweep",
+				"tx_hash":      txHash,
+			}
+			body, marshalErr := json.Marshal(payload)
+			if marshalErr != nil {
+				body = []byte(fmt.Sprintf(`{"marshal_error":%q}`, marshalErr.Error()))
+			}
+			logItem.ResponseBody = string(body)
+			if insertErr := s.repo.InsertBSCGasTopupLog(ctx, logItem); insertErr != nil {
+				s.setProgress("sweep", "bsc", 0, fmt.Sprintf("BSC 写入 gas topup 日志失败: address=%s err=%v", toAddress, insertErr))
+			}
+		}
+	}()
 	fromBalance, err := s.bscClient.GetBNBBalance(ctx, fromAddress)
 	if err != nil {
-		return "", fmt.Errorf("get balance: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("get balance: %w", err)
 	}
 	gasPrice, err := s.bscClient.GasPrice(ctx)
 	if err != nil {
-		return "", fmt.Errorf("get gas price: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("get gas price: %w", err)
 	}
 	nonce, err := s.bscClient.PendingNonceAt(ctx, fromAddress)
 	if err != nil {
-		return "", fmt.Errorf("get nonce: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("get nonce: %w", err)
 	}
 	chainID, err := s.bscClient.ChainID(ctx)
 	if err != nil {
-		return "", fmt.Errorf("get chain id: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("get chain id: %w", err)
 	}
 	amountWei, err := decimalToTokenUnits(amount, 18)
 	if err != nil {
-		return "", fmt.Errorf("convert amount to wei: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("convert amount to wei: %w", err)
 	}
 	fromBalanceWei, err := decimalToTokenUnits(fromBalance, 18)
 	if err != nil {
-		return "", fmt.Errorf("convert balance to wei: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("convert balance to wei: %w", err)
 	}
 	to := common.HexToAddress(toAddress)
 	gasLimit := uint64(21_000)
@@ -554,7 +611,7 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 	estimatedFeeWei := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
 	estimatedTotalWei := new(big.Int).Add(amountWei, estimatedFeeWei)
 	if fromBalanceWei.Cmp(estimatedTotalWei) < 0 {
-		return "", fmt.Errorf("bsc gas 补充地址余额不足")
+		return fromAddress, "", amountBNB, fmt.Errorf("bsc gas 补充地址余额不足")
 	}
 	tx := ethTypes.NewTx(&ethTypes.LegacyTx{
 		Nonce:    nonce,
@@ -565,17 +622,18 @@ func (s *Service) sendBSCGasTopup(ctx context.Context, toAddress string, amount 
 	})
 	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privateKey)
 	if err != nil {
-		return "", fmt.Errorf("sign bsc tx: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("sign bsc tx: %w", err)
 	}
 	rawTx, err := signedTx.MarshalBinary()
 	if err != nil {
-		return "", fmt.Errorf("marshal bsc tx: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("marshal bsc tx: %w", err)
 	}
-	txHash, err := s.bscClient.SendRawTransaction(ctx, hex.EncodeToString(rawTx))
+	gotTxHash, err := s.bscClient.SendRawTransaction(ctx, hex.EncodeToString(rawTx))
 	if err != nil {
-		return "", fmt.Errorf("send raw transaction: %w", err)
+		return fromAddress, "", amountBNB, fmt.Errorf("send raw transaction: %w", err)
 	}
-	return txHash, nil
+	txHash = gotTxHash
+	return fromAddress, txHash, amountBNB, nil
 }
 
 func isBSCTransferAmountExceedsBalanceError(err error) bool {

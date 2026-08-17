@@ -739,7 +739,9 @@
       sweepModalSubtitle.textContent = state.sweepSourceAddress
         ? `当前只会归集地址 ${state.sweepSourceAddress}。请输入目标地址后，系统会先预览这条记录是否符合条件，再执行归集。`
         : (state.chain === "tron"
-          ? "请输入归集地址，系统会先预览 TRX 大于等于 1 且 USDT 达到阈值的地址数量，执行时会先发能一次，再发起 USDT 归集。"
+          ? (desktopMode
+            ? "请输入归集地址，系统会先预览 TRX 大于等于 1 且 USDT 达到阈值的地址数量，确认后执行 USDT 归集。"
+            : "请输入归集地址，系统会先预览 TRX 大于等于 1 且 USDT 达到阈值的地址数量，执行时会先发能一次，再发起 USDT 归集。")
           : "请输入归集地址，系统会先预览符合阈值的地址数量和预计归集总额，确认后再执行。")
       sweepDestinationLabel.textContent = `${chainName} 归集地址`
       sweepDestinationInput.placeholder = `请输入 ${chainName} 归集地址`
@@ -986,6 +988,9 @@
     }
 
     async function triggerEnergy(action, address) {
+      if (desktopMode) {
+        return
+      }
       if (state.chain !== "tron") {
         return
       }
@@ -1105,6 +1110,9 @@
 
       const energyButton = event.target.closest("[data-energy-action]")
       if (!energyButton) {
+        return
+      }
+      if (desktopMode) {
         return
       }
       const action = energyButton.getAttribute("data-energy-action") || ""

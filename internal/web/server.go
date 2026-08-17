@@ -808,6 +808,15 @@ func (s *Server) handleActionPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == "发能一次" || action == "发能两次" {
+		if s.desktopMode {
+			s.writeJSON(w, http.StatusBadRequest, actionPreviewResponse{
+				Success:   false,
+				Message:   "桌面模式下不支持手动发能操作",
+				Action:    action,
+				Addresses: addresses,
+			})
+			return
+		}
 		providerName, provider := s.resolveEnergyProvider(r.Context())
 		if provider == nil || !provider.IsConfigured() {
 			s.writeJSON(w, http.StatusBadRequest, actionPreviewResponse{
