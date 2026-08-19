@@ -21,6 +21,7 @@ import (
 	"tron_watcher/internal/database"
 	"tron_watcher/internal/repository"
 	"tron_watcher/internal/service"
+	"tron_watcher/internal/ushield_trace"
 )
 
 const (
@@ -85,6 +86,16 @@ func main() {
 
 	terminalLogger := service.TaskLogger("bsc-backup-block-sync")
 
+	ushieldTraceSvc, err := ushield_trace.NewService(cfg.UShieldMySQL, "bsc")
+	if err != nil {
+		log.Fatalf("init ushield trace service failed: %v", err)
+	}
+	defer ushieldTraceSvc.Close()
+	ushieldTraceSvc.SetLogger(terminalLogger)
+
+	tgNotifier := service.NewTelegramNotifier(cfg.Telegram)
+	tgNotifier.SetLogger(terminalLogger)
+
 	cache := service.NewBSCAddressCache(repo)
 	cache.SetLogger(terminalLogger)
 
@@ -104,6 +115,8 @@ func main() {
 	scanner.SetLogger(terminalLogger)
 	scanner.SetDeferBalanceRefreshInCatchUp(true)
 	scanner.SetFastCatchUpThreshold(opts.FastCatchUpLag)
+	scanner.SetUShieldTrace(ushieldTraceSvc)
+	scanner.SetTelegramDirectSender(tgNotifier)
 	repairOwner := buildBSCRepairOwner(opts.SyncKey)
 	var (
 		modeMu        sync.Mutex
@@ -196,6 +209,20 @@ func main() {
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error {
 		err := cache.Run(groupCtx, cfg.AddressReloadInterval())
+		if err != nil && err != context.Canceled {
+			return err
+		}
+		return nil
+	})
+	group.Go(func() error {
+		err := ushieldTraceSvc.Run(groupCtx)
+		if err != nil && err != context.Canceled {
+			return err
+		}
+		return nil
+	})
+	group.Go(func() error {
+		err := tgNotifier.Run(groupCtx)
 		if err != nil && err != context.Canceled {
 			return err
 		}

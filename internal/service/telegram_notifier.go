@@ -17,6 +17,11 @@ import (
 	"tron_watcher/internal/repository"
 )
 
+type telegramChatMessage struct {
+	chatID string
+	text   string
+}
+
 type TelegramNotifier struct {
 	enabled    bool
 	baseURL    string
@@ -28,6 +33,7 @@ type TelegramNotifier struct {
 	minAmount  decimal.Decimal
 
 	queue chan string
+	directQueue chan telegramChatMessage
 
 	mu       sync.Mutex
 	recent   map[string]time.Time
@@ -44,6 +50,10 @@ func NewTelegramNotifier(cfg config.TelegramConfig) *TelegramNotifier {
 	queueSize := cfg.QueueSize
 	if queueSize <= 0 {
 		queueSize = 256
+	}
+	directQueueSize := queueSize * 4
+	if directQueueSize <= 0 {
+		directQueueSize = 1024
 	}
 	baseURL := strings.TrimSpace(cfg.APIBaseURL)
 	if baseURL == "" {
@@ -71,6 +81,7 @@ func NewTelegramNotifier(cfg config.TelegramConfig) *TelegramNotifier {
 		},
 		logger: tronLogger(),
 		queue:  make(chan string, queueSize),
+		directQueue: make(chan telegramChatMessage, directQueueSize),
 		recent: make(map[string]time.Time),
 		retain: 10 * time.Minute,
 		cleanN: 256,
@@ -116,6 +127,13 @@ func (n *TelegramNotifier) NotifyTransfer(ctx context.Context, chain string, dir
 	}
 }
 
+func (n *TelegramNotifier) SetLogger(logger *log.Logger) {
+	if n == nil || logger == nil {
+		return
+	}
+	n.logger = logger
+}
+
 func (n *TelegramNotifier) Run(ctx context.Context) error {
 	if !n.enabled {
 		<-ctx.Done()
@@ -127,7 +145,12 @@ func (n *TelegramNotifier) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case msg := <-n.queue:
-			n.send(ctx, msg)
+			n.send(ctx, n.chatID, msg)
+		case direct := <-n.directQueue:
+			if strings.TrimSpace(direct.chatID) == "" {
+				continue
+			}
+			n.send(ctx, direct.chatID, direct.text)
 		}
 	}
 }
@@ -154,9 +177,9 @@ func (n *TelegramNotifier) format(chain string, direction string, record reposit
 	return formatTransferText(chain, direction, record)
 }
 
-func (n *TelegramNotifier) send(ctx context.Context, text string) {
+func (n *TelegramNotifier) send(ctx context.Context, chatID string, text string) {
 	reqBody := map[string]any{
-		"chat_id": n.chatID,
+		"chat_id": chatID,
 		"text":    text,
 	}
 	data, _ := json.Marshal(reqBody)
@@ -171,13 +194,32 @@ func (n *TelegramNotifier) send(ctx context.Context, text string) {
 
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
-		n.logger.Printf("telegram send failed: %v", err)
+		n.logger.Printf("telegram send failed: chat_id=%s err=%v", chatID, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		n.logger.Printf("telegram send non-2xx: %s", resp.Status)
+		n.logger.Printf("telegram send non-2xx: chat_id=%s status=%s", chatID, resp.Status)
+	}
+}
+
+func (n *TelegramNotifier) SendToChatID(ctx context.Context, chatID string, text string) {
+	if !n.enabled {
+		return
+	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" || strings.TrimSpace(text) == "" {
+		return
+	}
+	msg := telegramChatMessage{
+		chatID: chatID,
+		text:   text,
+	}
+	select {
+	case n.directQueue <- msg:
+	default:
+		n.logger.Printf("telegram direct queue full, drop message: chat_id=%s", chatID)
 	}
 }
 

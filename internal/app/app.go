@@ -22,6 +22,7 @@ import (
 	"tron_watcher/internal/repository"
 	"tron_watcher/internal/service"
 	"tron_watcher/internal/tron"
+	"tron_watcher/internal/ushield_trace"
 	"tron_watcher/internal/web"
 )
 
@@ -35,12 +36,14 @@ type App struct {
 	scheduledRefreshTracker *service.ScheduledRefreshStateTracker
 	manualRefreshTracker    *service.ScheduledRefreshStateTracker
 	notifier                service.TransferNotifier
+	telegramNotifier        *service.TelegramNotifier
 	tronClient              *tron.Client
 	bscClient               *bsc.Client
 	bscCache                *service.BSCAddressCache
 	bscScanner              *service.BSCScanner
 	scheduledBSCScanner     *service.BSCScanner
 	bscEnabled              bool
+	ushieldTrace            *ushield_trace.Service
 	webServer               *web.Server
 	wallets                 *hdwallet.Service
 	activator               *service.TronAddressActivator
@@ -79,8 +82,9 @@ func New(cfgPath string) (*App, error) {
 		cache := service.NewAddressCache(repo)
 		cache.ConfigureSource(repository.HDWalletSource)
 		balanceService := service.NewBalanceService(tronClient, repo, cache)
+		tgNotifier := service.NewTelegramNotifier(cfg.Telegram)
 		notifier := service.NewMultiTransferNotifier(
-			service.NewTelegramNotifier(cfg.Telegram),
+			tgNotifier,
 			service.NewCallbackNotifier(cfg.Callback),
 		)
 		scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
@@ -97,6 +101,15 @@ func New(cfgPath string) (*App, error) {
 			bscScanner.SetDisableUSDTRepair(true)
 		}
 
+		ushieldTraceSvc, err := ushield_trace.NewService(cfg.UShieldMySQL, "bsc")
+		if err != nil {
+			return nil, err
+		}
+		if bscScanner != nil {
+			bscScanner.SetUShieldTrace(ushieldTraceSvc)
+			bscScanner.SetTelegramDirectSender(tgNotifier)
+		}
+
 		energyProviders := buildEnergyProviders(cfg)
 		activator, err := service.NewTronAddressActivator(tronClient, repo, cfg.TronActivator)
 		if err != nil {
@@ -111,20 +124,22 @@ func New(cfgPath string) (*App, error) {
 			return nil, err
 		}
 		return &App{
-			cfg:        cfg,
-			db:         db,
-			cache:      cache,
-			scanner:    scanner,
-			balances:   balanceService,
-			notifier:   notifier,
-			tronClient: tronClient,
-			bscClient:  bscClient,
-			bscCache:   bscCache,
-			bscScanner: bscScanner,
-			bscEnabled: bscEnabled,
-			webServer:  webServer,
-			wallets:    walletService,
-			activator:  activator,
+			cfg:            cfg,
+			db:             db,
+			cache:          cache,
+			scanner:        scanner,
+			balances:       balanceService,
+			notifier:       notifier,
+			telegramNotifier: tgNotifier,
+			tronClient:     tronClient,
+			bscClient:      bscClient,
+			bscCache:       bscCache,
+			bscScanner:     bscScanner,
+			bscEnabled:     bscEnabled,
+			ushieldTrace:   ushieldTraceSvc,
+			webServer:      webServer,
+			wallets:        walletService,
+			activator:      activator,
 		}, nil
 	}
 
@@ -148,8 +163,9 @@ func New(cfgPath string) (*App, error) {
 	manualRefreshTracker := service.NewScheduledRefreshStateTracker()
 	refreshTronClient := tron.NewClient(cfg.QuickNodeRefreshHTTPURL(), cfg.QuickNodeRefreshWSSURL(), cfg.QuickNode.USDT, cfg.QuickNodeRefreshMinRequestInterval())
 	refreshBalanceService := service.NewBalanceService(refreshTronClient, repo, cache)
+	tgNotifier := service.NewTelegramNotifier(cfg.Telegram)
 	notifier := service.NewMultiTransferNotifier(
-		service.NewTelegramNotifier(cfg.Telegram),
+		tgNotifier,
 		service.NewCallbackNotifier(cfg.Callback),
 	)
 	scanner := service.NewScanner(tronClient, repo, cache, balanceService, notifier, cfg.Watcher.StartBlock, cfg.Watcher.TXWorkers, cfg.TronBlockSource())
@@ -167,6 +183,19 @@ func New(cfgPath string) (*App, error) {
 		refreshBSCClient := bsc.NewClient(cfg.BSCRefreshHTTPURL(), cfg.BSCRefreshWSSURL(), cfg.BSC.USDTContract)
 		refreshBSCClient.SetMinRequestInterval(cfg.BSCRefreshMinRequestInterval())
 		refreshBSCScanner = service.NewBSCScanner(refreshBSCClient, repo, bscCache, notifier, cfg.BSC.StartBlock, cfg.BSC.Confirmations)
+	}
+
+	ushieldTraceSvc, err := ushield_trace.NewService(cfg.UShieldMySQL, "bsc")
+	if err != nil {
+		return nil, err
+	}
+	if bscScanner != nil {
+		bscScanner.SetUShieldTrace(ushieldTraceSvc)
+		bscScanner.SetTelegramDirectSender(tgNotifier)
+	}
+	if refreshBSCScanner != nil {
+		refreshBSCScanner.SetUShieldTrace(ushieldTraceSvc)
+		refreshBSCScanner.SetTelegramDirectSender(tgNotifier)
 	}
 
 	energyProviders := buildEnergyProviders(cfg)
@@ -204,12 +233,14 @@ func New(cfgPath string) (*App, error) {
 		scheduledRefreshTracker: scheduledRefreshTracker,
 		manualRefreshTracker:    manualRefreshTracker,
 		notifier:                notifier,
+		telegramNotifier:        tgNotifier,
 		tronClient:              tronClient,
 		bscClient:               bscClient,
 		bscCache:                bscCache,
 		bscScanner:              bscScanner,
 		scheduledBSCScanner:     refreshBSCScanner,
 		bscEnabled:              bscEnabled,
+		ushieldTrace:            ushieldTraceSvc,
 		webServer:               webServer,
 		activator:               activator,
 	}, nil
@@ -218,6 +249,9 @@ func New(cfgPath string) (*App, error) {
 func (a *App) Run(ctx context.Context) error {
 	if a.db != nil {
 		defer a.db.Close()
+	}
+	if a.ushieldTrace != nil {
+		defer a.ushieldTrace.Close()
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -330,6 +364,16 @@ func (a *App) Run(ctx context.Context) error {
 	if a.notifier != nil {
 		group.Go(a.safeGo("telegram-notifier", func() error {
 			err := a.notifier.Run(groupCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				return err
+			}
+			return nil
+		}))
+	}
+
+	if a.ushieldTrace != nil {
+		group.Go(a.safeGo("ushield-trace", func() error {
+			err := a.ushieldTrace.Run(groupCtx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}

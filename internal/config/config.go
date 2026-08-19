@@ -12,6 +12,7 @@ import (
 type Config struct {
 	App           AppConfig           `yaml:"app"`
 	MySQL         MySQLConfig         `yaml:"mysql"`
+	UShieldMySQL  MySQLConfig         `yaml:"ushield_mysql"`
 	QuickNode     QuickNodeConfig     `yaml:"quicknode"`
 	Watcher       WatcherConfig       `yaml:"watcher"`
 	Web           WebConfig           `yaml:"web"`

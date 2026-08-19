@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -14,6 +15,16 @@ import (
 	"tron_watcher/internal/bsc"
 	"tron_watcher/internal/repository"
 )
+
+type ushieldTraceService interface {
+	Enabled() bool
+	FindChatID(address string) (string, bool)
+	FindChatIDsDirect(addresses []string) (map[string]string, error)
+}
+
+type telegramDirectSender interface {
+	SendToChatID(ctx context.Context, chatID string, text string)
+}
 
 const bscSyncKey = "bsc_scanner"
 const bscBalanceWorkers = 10
@@ -48,6 +59,9 @@ type BSCScanner struct {
 	disableUSDTRepair          bool
 	fastCatchUpThreshold       int64
 	fastCatchUpActive          bool
+
+	ushieldTrace               ushieldTraceService
+	telegramSender             telegramDirectSender
 
 	triggerCh chan struct{}
 	runMu     sync.Mutex
@@ -136,6 +150,20 @@ func (s *BSCScanner) SetFastCatchUpThreshold(threshold int64) {
 		threshold = 0
 	}
 	s.fastCatchUpThreshold = threshold
+}
+
+func (s *BSCScanner) SetUShieldTrace(trace ushieldTraceService) {
+	if s == nil {
+		return
+	}
+	s.ushieldTrace = trace
+}
+
+func (s *BSCScanner) SetTelegramDirectSender(sender telegramDirectSender) {
+	if s == nil {
+		return
+	}
+	s.telegramSender = sender
 }
 
 func (s *BSCScanner) RefreshAllBalances(ctx context.Context) {
@@ -481,11 +509,24 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfe
 		to := strings.ToLower(strings.TrimSpace(tx.To))
 		hitFrom := from != "" && s.cache.Has(from)
 		hitTo := to != "" && s.cache.Has(to)
+
+		bnbAmount := decimal.NewFromBigInt(tx.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+		go s.notifyUShieldAddressIfMatched(
+			tx.From,
+			tx.To,
+			"BNB",
+			bnbAmount,
+			tx.Hash,
+			int64(blockNum),
+			block.Timestamp,
+			0,
+		)
+
 		if !hitFrom && !hitTo {
 			continue
 		}
 
-		amount := decimal.NewFromBigInt(tx.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+		amount := bnbAmount
 		baseRecord := repository.TransferRecord{
 			TxHash:          tx.Hash,
 			BlockNumber:     int64(blockNum),
@@ -527,11 +568,24 @@ func (s *BSCScanner) scanBlock(ctx context.Context, blockNum uint64, usdtTransfe
 		to := strings.ToLower(strings.TrimSpace(transfer.To))
 		hitFrom := from != "" && s.cache.Has(from)
 		hitTo := to != "" && s.cache.Has(to)
+
+		usdtAmount := decimal.NewFromBigInt(transfer.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+		go s.notifyUShieldAddressIfMatched(
+			transfer.From,
+			transfer.To,
+			"USDT",
+			usdtAmount,
+			transfer.TxHash,
+			int64(blockNum),
+			block.Timestamp,
+			int(transfer.LogIndex),
+		)
+
 		if !hitFrom && !hitTo {
 			continue
 		}
 
-		amount := decimal.NewFromBigInt(transfer.Value, 0).Div(decimal.NewFromInt(1_000_000_000_000_000_000))
+		amount := usdtAmount
 		baseRecord := repository.TransferRecord{
 			TxHash:      transfer.TxHash,
 			BlockNumber: int64(blockNum),
@@ -694,6 +748,138 @@ func (s *BSCScanner) insertTransferOut(ctx context.Context, record repository.Tr
 		s.notifier.NotifyTransfer(ctx, "bsc", "OUT", record)
 	}
 	return true
+}
+
+func (s *BSCScanner) notifyUShieldAddressIfMatched(
+	fromAddress string,
+	toAddress string,
+	assetCode string,
+	amount decimal.Decimal,
+	txHash string,
+	blockNumber int64,
+	blockTimestamp uint64,
+	logIndex int,
+) {
+	if s.ushieldTrace == nil || !s.ushieldTrace.Enabled() || s.telegramSender == nil {
+		return
+	}
+	asset := strings.ToUpper(strings.TrimSpace(assetCode))
+	if asset == "" {
+		asset = "USDT"
+	}
+	var minAmount decimal.Decimal
+	switch asset {
+	case "BNB":
+		minAmount = decimal.NewFromFloat(0.001)
+	default:
+		minAmount = decimal.NewFromInt(1)
+	}
+	if amount.IsNegative() {
+		amount = amount.Abs()
+	}
+	if amount.LessThan(minAmount) {
+		return
+	}
+
+	baseRecord := repository.TransferRecord{
+		TxHash:          txHash,
+		BlockNumber:     blockNumber,
+		BlockTime:       int64(blockTimestamp) * 1000,
+		AssetCode:       asset,
+		ContractAddress: sql.NullString{},
+		FromAddress:     strings.ToLower(strings.TrimSpace(fromAddress)),
+		ToAddress:       strings.ToLower(strings.TrimSpace(toAddress)),
+		Amount:          amount,
+		LogIndex:        logIndex,
+		Status:          "CONFIRMED",
+	}
+
+	from := strings.ToLower(strings.TrimSpace(fromAddress))
+	to := strings.ToLower(strings.TrimSpace(toAddress))
+
+	var lookupAddrs []string
+	if from != "" {
+		lookupAddrs = append(lookupAddrs, from)
+	}
+	if to != "" && to != from {
+		lookupAddrs = append(lookupAddrs, to)
+	}
+	if len(lookupAddrs) == 0 {
+		return
+	}
+	chatMap, err := s.ushieldTrace.FindChatIDsDirect(lookupAddrs)
+	if err != nil {
+		s.logger.Printf("ushield find chat_id direct failed: tx=%s err=%v", txHash, err)
+		return
+	}
+	fromChatID, fromOK := chatMap[from]
+	toChatID, toOK := chatMap[to]
+	if !fromOK && !toOK {
+		return
+	}
+
+	if fromOK {
+		rec := baseRecord
+		rec.WatchAddress = from
+		go s.sendUShieldTransferNotify(context.Background(), fromChatID, "OUT", rec)
+	}
+	if toOK {
+		rec := baseRecord
+		rec.WatchAddress = to
+		go s.sendUShieldTransferNotify(context.Background(), toChatID, "IN", rec)
+	}
+}
+
+func (s *BSCScanner) sendUShieldTransferNotify(ctx context.Context, chatID string, direction string, record repository.TransferRecord) {
+	asset := strings.ToUpper(strings.TrimSpace(record.AssetCode))
+	if asset == "" {
+		asset = "USDT"
+	}
+	dirUpper := strings.ToUpper(strings.TrimSpace(direction))
+
+	var emoji string
+	var headerSign string
+	var amountStr string
+	switch dirUpper {
+	case "IN":
+		emoji = "🟢"
+		headerSign = "+"
+		amountStr = "+" + record.Amount.String()
+	default:
+		emoji = "🔴"
+		headerSign = "-"
+		amountStr = "-" + record.Amount.String()
+	}
+
+	t := time.UnixMilli(record.BlockTime).In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+
+	usdtBalance, bnbBalance, err := s.getCurrentBSCBalances(ctx, record.WatchAddress)
+	if err != nil {
+		s.logger.Printf("ushield notify load balances failed: address=%s err=%v", record.WatchAddress, err)
+		usdtBalance = decimal.Zero
+		bnbBalance = decimal.Zero
+	}
+
+	header := fmt.Sprintf("%s收入%s提醒 %s%s %s", emoji, asset, headerSign, record.Amount.String(), asset)
+	if dirUpper != "IN" {
+		header = fmt.Sprintf("%s支出%s提醒 %s%s %s", emoji, asset, headerSign, record.Amount.String(), asset)
+	}
+
+	text := fmt.Sprintf(
+		"%s\n\n付款地址:  %s\n收款地址:  %s\n交易时间:    %s\n交易金额:    %s %s\n\nUSDT余额:%s USDT\nBNB余额: %s BNB",
+		header,
+		record.FromAddress,
+		record.ToAddress,
+		t,
+		amountStr,
+		asset,
+		usdtBalance.String(),
+		bnbBalance.String(),
+	)
+
+	s.logger.Printf("ushield notify -> telegram: chat_id=%s direction=%s asset=%s amount=%s address=%s",
+		chatID, dirUpper, asset, record.Amount.String(), record.WatchAddress)
+	s.telegramSender.SendToChatID(ctx, chatID, text)
 }
 
 func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, includeZero bool) {
