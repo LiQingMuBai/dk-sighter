@@ -19,7 +19,8 @@ import (
 type ushieldTraceService interface {
 	Enabled() bool
 	FindChatID(address string) (string, bool)
-	FindChatIDsDirect(addresses []string) (map[string]string, error)
+	FindChatIDs(address string) ([]string, bool)
+	FindChatIDsDirect(addresses []string) (map[string][]string, error)
 }
 
 type telegramDirectSender interface {
@@ -826,8 +827,8 @@ func (s *BSCScanner) notifyUShieldAddressIfMatched(
 		s.logger.Printf("ushield find chat_id direct failed: tx=%s err=%v", txHash, err)
 		return
 	}
-	fromChatID, fromOK := chatMap[from]
-	toChatID, toOK := chatMap[to]
+	fromChatList, fromOK := chatMap[from]
+	toChatList, toOK := chatMap[to]
 	if !fromOK && !toOK {
 		return
 	}
@@ -835,12 +836,18 @@ func (s *BSCScanner) notifyUShieldAddressIfMatched(
 	if fromOK {
 		rec := baseRecord
 		rec.WatchAddress = from
-		go s.sendUShieldTransferNotify(context.Background(), fromChatID, "OUT", rec)
+		for _, chatID := range fromChatList {
+			chatID := chatID
+			go s.sendUShieldTransferNotify(context.Background(), chatID, "OUT", rec)
+		}
 	}
 	if toOK {
 		rec := baseRecord
 		rec.WatchAddress = to
-		go s.sendUShieldTransferNotify(context.Background(), toChatID, "IN", rec)
+		for _, chatID := range toChatList {
+			chatID := chatID
+			go s.sendUShieldTransferNotify(context.Background(), chatID, "IN", rec)
+		}
 	}
 }
 

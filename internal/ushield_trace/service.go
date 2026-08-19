@@ -28,7 +28,7 @@ type Service struct {
 	reloadInterval time.Duration
 
 	mu     sync.RWMutex
-	byAddr map[string]string
+	byAddr map[string][]string
 }
 
 func NewService(cfg config.MySQLConfig, network string) (*Service, error) {
@@ -60,7 +60,7 @@ func NewService(cfg config.MySQLConfig, network string) (*Service, error) {
 		logger:         log.New(log.Writer(), "[ushield-trace] ", log.LstdFlags),
 		enabled:        true,
 		reloadInterval: 15 * time.Second,
-		byAddr:         make(map[string]string),
+		byAddr:         make(map[string][]string),
 	}, nil
 }
 
@@ -123,7 +123,7 @@ func (s *Service) Reload(ctx context.Context) error {
 		return nil
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	q := `
 		SELECT LOWER(TRIM(address)), TRIM(chat_id)
 		FROM user_address_trace
 		WHERE network = ?
@@ -131,18 +131,23 @@ func (s *Service) Reload(ctx context.Context) error {
 		  AND chat_id IS NOT NULL
 		  AND LENGTH(TRIM(address)) > 0
 		  AND LENGTH(TRIM(chat_id)) > 0
-	`, s.network)
+		ORDER BY id ASC
+	`
+	rows, err := s.db.QueryContext(ctx, q, s.network)
 	if err != nil {
 		return fmt.Errorf("query user_address_trace: %w", err)
 	}
 	defer rows.Close()
 
-	next := make(map[string]string)
+	next := make(map[string][]string)
+	uniq := make(map[string]map[string]struct{})
 	var (
 		addr   string
 		chatID string
 	)
+	totalRows := 0
 	for rows.Next() {
+		totalRows++
 		if err := rows.Scan(&addr, &chatID); err != nil {
 			return fmt.Errorf("scan user_address_trace: %w", err)
 		}
@@ -151,7 +156,14 @@ func (s *Service) Reload(ctx context.Context) error {
 		if addr == "" || chatID == "" {
 			continue
 		}
-		next[addr] = chatID
+		if _, ok := uniq[addr]; !ok {
+			uniq[addr] = make(map[string]struct{})
+		}
+		if _, ok := uniq[addr][chatID]; ok {
+			continue
+		}
+		uniq[addr][chatID] = struct{}{}
+		next[addr] = append(next[addr], chatID)
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("rows err: %w", err)
@@ -162,7 +174,7 @@ func (s *Service) Reload(ctx context.Context) error {
 	s.byAddr = next
 	s.mu.Unlock()
 
-	s.logger.Printf("cache reloaded: network=%s old=%d new=%d", s.network, old, len(next))
+	s.logger.Printf("cache reloaded: network=%s old_addrs=%d new_addrs=%d total_rows=%d", s.network, old, len(next), totalRows)
 	return nil
 }
 
@@ -176,11 +188,30 @@ func (s *Service) FindChatID(address string) (string, bool) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	chatID, ok := s.byAddr[address]
-	if !ok || strings.TrimSpace(chatID) == "" {
+	list, ok := s.byAddr[address]
+	if !ok || len(list) == 0 {
 		return "", false
 	}
-	return chatID, true
+	return list[len(list)-1], true
+}
+
+func (s *Service) FindChatIDs(address string) ([]string, bool) {
+	if !s.Enabled() {
+		return nil, false
+	}
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list, ok := s.byAddr[address]
+	if !ok || len(list) == 0 {
+		return nil, false
+	}
+	out := make([]string, len(list))
+	copy(out, list)
+	return out, true
 }
 
 func placeholders(n int) string {
@@ -194,8 +225,8 @@ func placeholders(n int) string {
 	return b.String()
 }
 
-func (s *Service) FindChatIDsDirect(addresses []string) (map[string]string, error) {
-	result := make(map[string]string)
+func (s *Service) FindChatIDsDirect(addresses []string) (map[string][]string, error) {
+	result := make(map[string][]string)
 	if !s.Enabled() {
 		return result, nil
 	}
@@ -218,10 +249,16 @@ func (s *Service) FindChatIDsDirect(addresses []string) (map[string]string, erro
 	if len(lowerAddrs) == 0 {
 		return result, nil
 	}
-	q := fmt.Sprintf(
-		"SELECT LOWER(TRIM(address)), TRIM(chat_id) FROM user_address_trace WHERE network = ? AND LOWER(TRIM(address)) IN (%s)",
-		placeholders(len(lowerAddrs)),
-	)
+	q := fmt.Sprintf(`
+		SELECT LOWER(TRIM(address)), TRIM(chat_id)
+		FROM user_address_trace
+		WHERE network = ? AND LOWER(TRIM(address)) IN (%s)
+		  AND address IS NOT NULL
+		  AND chat_id IS NOT NULL
+		  AND LENGTH(TRIM(address)) > 0
+		  AND LENGTH(TRIM(chat_id)) > 0
+		ORDER BY id ASC
+	`, placeholders(len(lowerAddrs)))
 	args := make([]interface{}, 0, 1+len(lowerAddrs))
 	args = append(args, s.network)
 	for _, a := range lowerAddrs {
@@ -234,15 +271,25 @@ func (s *Service) FindChatIDsDirect(addresses []string) (map[string]string, erro
 		return result, err
 	}
 	defer rows.Close()
+	uniq := make(map[string]map[string]struct{})
 	for rows.Next() {
 		var addr, chatID string
 		if err := rows.Scan(&addr, &chatID); err != nil {
 			continue
 		}
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		chatID = strings.TrimSpace(chatID)
 		if addr == "" || chatID == "" {
 			continue
 		}
-		result[strings.ToLower(strings.TrimSpace(addr))] = strings.TrimSpace(chatID)
+		if _, ok := uniq[addr]; !ok {
+			uniq[addr] = make(map[string]struct{})
+		}
+		if _, ok := uniq[addr][chatID]; ok {
+			continue
+		}
+		uniq[addr][chatID] = struct{}{}
+		result[addr] = append(result[addr], chatID)
 	}
 	return result, nil
 }
