@@ -17,9 +17,15 @@ import (
 	"tron_watcher/internal/repository"
 )
 
+type telegramInlineButton struct {
+	Text string `json:"text"`
+	URL  string `json:"url,omitempty"`
+}
+
 type telegramChatMessage struct {
-	chatID string
-	text   string
+	chatID  string
+	text    string
+	buttons [][]telegramInlineButton
 }
 
 type TelegramNotifier struct {
@@ -61,7 +67,7 @@ func NewTelegramNotifier(cfg config.TelegramConfig) *TelegramNotifier {
 	}
 
 	enabled := cfg.Enabled
-	if strings.TrimSpace(cfg.BotToken) == "" || strings.TrimSpace(cfg.ChatID) == "" {
+	if strings.TrimSpace(cfg.BotToken) == "" {
 		enabled = false
 	}
 	minAmount, err := decimal.NewFromString(strings.TrimSpace(cfg.MinAmount))
@@ -145,12 +151,12 @@ func (n *TelegramNotifier) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case msg := <-n.queue:
-			n.send(ctx, n.chatID, msg)
+			n.send(ctx, n.chatID, msg, nil)
 		case direct := <-n.directQueue:
 			if strings.TrimSpace(direct.chatID) == "" {
 				continue
 			}
-			n.send(ctx, direct.chatID, direct.text)
+			n.send(ctx, direct.chatID, direct.text, direct.buttons)
 		}
 	}
 }
@@ -177,10 +183,14 @@ func (n *TelegramNotifier) format(chain string, direction string, record reposit
 	return formatTransferText(chain, direction, record)
 }
 
-func (n *TelegramNotifier) send(ctx context.Context, chatID string, text string) {
+func (n *TelegramNotifier) send(ctx context.Context, chatID string, text string, buttons [][]telegramInlineButton) {
 	reqBody := map[string]any{
-		"chat_id": chatID,
-		"text":    text,
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	if len(buttons) > 0 {
+		reqBody["reply_markup"] = map[string]any{"inline_keyboard": buttons}
 	}
 	data, _ := json.Marshal(reqBody)
 
@@ -204,7 +214,7 @@ func (n *TelegramNotifier) send(ctx context.Context, chatID string, text string)
 	}
 }
 
-func (n *TelegramNotifier) SendToChatID(ctx context.Context, chatID string, text string) {
+func (n *TelegramNotifier) SendToChatID(ctx context.Context, chatID string, text string, buttons ...[][]telegramInlineButton) {
 	if !n.enabled {
 		return
 	}
@@ -215,6 +225,9 @@ func (n *TelegramNotifier) SendToChatID(ctx context.Context, chatID string, text
 	msg := telegramChatMessage{
 		chatID: chatID,
 		text:   text,
+	}
+	if len(buttons) > 0 && buttons[0] != nil {
+		msg.buttons = buttons[0]
 	}
 	select {
 	case n.directQueue <- msg:

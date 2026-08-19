@@ -23,7 +23,7 @@ type ushieldTraceService interface {
 }
 
 type telegramDirectSender interface {
-	SendToChatID(ctx context.Context, chatID string, text string)
+	SendToChatID(ctx context.Context, chatID string, text string, buttons ...[][]telegramInlineButton)
 }
 
 const bscSyncKey = "bsc_scanner"
@@ -891,9 +891,41 @@ func (s *BSCScanner) sendUShieldTransferNotify(ctx context.Context, chatID strin
 		bnbBalance.String(),
 	)
 
+	var buttons [][]telegramInlineButton
+	row1 := []telegramInlineButton{}
+	if txHash := strings.TrimSpace(record.TxHash); txHash != "" {
+		row1 = append(row1, telegramInlineButton{
+			Text: "查看交易",
+			URL:  "https://bscscan.com/tx/" + txHash,
+		})
+	}
+	row2 := []telegramInlineButton{}
+	if from := strings.TrimSpace(record.FromAddress); from != "" {
+		row2 = append(row2, telegramInlineButton{
+			Text: "付款地址",
+			URL:  "https://bscscan.com/address/" + from,
+		})
+	}
+	if to := strings.TrimSpace(record.ToAddress); to != "" {
+		row2 = append(row2, telegramInlineButton{
+			Text: "收款地址",
+			URL:  "https://bscscan.com/address/" + to,
+		})
+	}
+	if len(row1) > 0 {
+		buttons = append(buttons, row1)
+	}
+	if len(row2) > 0 {
+		buttons = append(buttons, row2)
+	}
+
 	s.logger.Printf("ushield notify -> telegram: chat_id=%s direction=%s asset=%s amount=%s address=%s",
 		chatID, dirUpper, asset, record.Amount.String(), record.WatchAddress)
-	s.telegramSender.SendToChatID(ctx, chatID, text)
+	if len(buttons) > 0 {
+		s.telegramSender.SendToChatID(ctx, chatID, text, buttons)
+	} else {
+		s.telegramSender.SendToChatID(ctx, chatID, text)
+	}
 }
 
 func (s *BSCScanner) refreshBalances(ctx context.Context, addresses []string, includeZero bool) {
@@ -979,47 +1011,55 @@ func (s *BSCScanner) refreshAddressBalances(ctx context.Context, address string,
 }
 
 func (s *BSCScanner) getCurrentBSCBalances(ctx context.Context, address string) (decimal.Decimal, decimal.Decimal, error) {
-	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
-	if err != nil {
-		return decimal.Zero, decimal.Zero, err
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("empty address")
 	}
-	if !ok || record == nil {
-		return decimal.Zero, decimal.Zero, nil
+	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
+	if err == nil && ok && record != nil {
+		var bnb, usdt decimal.Decimal
+		if v := strings.TrimSpace(record.BNB); v != "" {
+			if parsed, perr := decimal.NewFromString(v); perr == nil {
+				bnb = parsed
+			}
+		}
+		if v := strings.TrimSpace(record.USDT); v != "" {
+			if parsed, perr := decimal.NewFromString(v); perr == nil {
+				usdt = parsed
+			}
+		}
+		return usdt, bnb, nil
 	}
 
-	bnb := decimal.Zero
-	if value := strings.TrimSpace(record.BNB); value != "" {
-		parsed, err := decimal.NewFromString(value)
-		if err != nil {
-			return decimal.Zero, decimal.Zero, err
-		}
-		bnb = parsed
+	if s.client == nil {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("bsc client is nil")
 	}
-	usdt := decimal.Zero
-	if value := strings.TrimSpace(record.USDT); value != "" {
-		parsed, err := decimal.NewFromString(value)
-		if err != nil {
-			return decimal.Zero, decimal.Zero, err
-		}
-		usdt = parsed
+	bnb, err := s.client.GetBNBBalance(ctx, address)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("rpc get bnb balance: %w", err)
 	}
-	return bnb, usdt, nil
+	usdt, err := s.client.GetUSDTBalance(ctx, address)
+	if err != nil {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("rpc get usdt balance: %w", err)
+	}
+	return usdt, bnb, nil
 }
 
 func (s *BSCScanner) getCurrentUSDTBalance(ctx context.Context, address string) (decimal.Decimal, error) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return decimal.Zero, fmt.Errorf("empty address")
+	}
 	record, ok, err := repository.GetBSCDashboardRecordByAddress(ctx, s.repo, address)
-	if err != nil {
-		return decimal.Zero, err
-	}
-
-	if ok && record != nil {
-		value, err := decimal.NewFromString(strings.TrimSpace(record.USDT))
-		if err != nil {
-			return decimal.Zero, err
+	if err == nil && ok && record != nil {
+		if value, perr := decimal.NewFromString(strings.TrimSpace(record.USDT)); perr == nil {
+			return value, nil
 		}
-		return value, nil
 	}
-	return decimal.Zero, nil
+	if s.client == nil {
+		return decimal.Zero, fmt.Errorf("bsc client is nil")
+	}
+	return s.client.GetUSDTBalance(ctx, address)
 }
 
 func (s *BSCScanner) syncRecentUSDTTransfersIfNeeded(ctx context.Context, address string, currentDBBalance, latestBalance decimal.Decimal) {
