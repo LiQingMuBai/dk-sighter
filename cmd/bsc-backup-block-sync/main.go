@@ -115,6 +115,7 @@ func main() {
 	scanner.SetLogger(terminalLogger)
 	scanner.SetDeferBalanceRefreshInCatchUp(true)
 	scanner.SetFastCatchUpThreshold(opts.FastCatchUpLag)
+	scanner.SetDisableBookkeeping(true)
 	scanner.SetUShieldTrace(ushieldTraceSvc)
 	scanner.SetTelegramDirectSender(tgNotifier)
 	repairOwner := buildBSCRepairOwner(opts.SyncKey)

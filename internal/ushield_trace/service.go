@@ -219,7 +219,7 @@ func (s *Service) FindChatIDsDirect(addresses []string) (map[string]string, erro
 		return result, nil
 	}
 	q := fmt.Sprintf(
-		"SELECT LOWER(TRIM(address)), TRIM(chat_id) FROM user_address_trace WHERE network = ? AND address IN (%s)",
+		"SELECT LOWER(TRIM(address)), TRIM(chat_id) FROM user_address_trace WHERE network = ? AND LOWER(TRIM(address)) IN (%s)",
 		placeholders(len(lowerAddrs)),
 	)
 	args := make([]interface{}, 0, 1+len(lowerAddrs))

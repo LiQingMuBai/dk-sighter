@@ -59,6 +59,7 @@ type BSCScanner struct {
 	disableUSDTRepair          bool
 	fastCatchUpThreshold       int64
 	fastCatchUpActive          bool
+	disableBookkeeping         bool
 
 	ushieldTrace               ushieldTraceService
 	telegramSender             telegramDirectSender
@@ -150,6 +151,13 @@ func (s *BSCScanner) SetFastCatchUpThreshold(threshold int64) {
 		threshold = 0
 	}
 	s.fastCatchUpThreshold = threshold
+}
+
+func (s *BSCScanner) SetDisableBookkeeping(disable bool) {
+	if s == nil {
+		return
+	}
+	s.disableBookkeeping = disable
 }
 
 func (s *BSCScanner) SetUShieldTrace(trace ushieldTraceService) {
@@ -699,6 +707,9 @@ func (s *BSCScanner) takeImmediateBalanceRefresh(address string) (bscImmediateBa
 }
 
 func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.TransferRecord) bool {
+	if s.disableBookkeeping {
+		return false
+	}
 	if s.insertIfAbsent {
 		inserted, err := s.repo.InsertBSCTransferInIfAbsent(ctx, record)
 		if err != nil {
@@ -725,6 +736,9 @@ func (s *BSCScanner) insertTransferIn(ctx context.Context, record repository.Tra
 }
 
 func (s *BSCScanner) insertTransferOut(ctx context.Context, record repository.TransferRecord) bool {
+	if s.disableBookkeeping {
+		return false
+	}
 	if s.insertIfAbsent {
 		inserted, err := s.repo.InsertBSCTransferOutIfAbsent(ctx, record)
 		if err != nil {
