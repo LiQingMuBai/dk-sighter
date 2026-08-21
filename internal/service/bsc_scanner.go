@@ -909,13 +909,13 @@ func (s *BSCScanner) sendUShieldTransferNotify(ctx context.Context, chatID strin
 	row2 := []telegramInlineButton{}
 	if from := strings.TrimSpace(record.FromAddress); from != "" {
 		row2 = append(row2, telegramInlineButton{
-			Text: "BSCSCAN 付款地址",
+			Text: "付款地址",
 			URL:  "https://bscscan.com/address/" + from,
 		})
 	}
 	if to := strings.TrimSpace(record.ToAddress); to != "" {
 		row2 = append(row2, telegramInlineButton{
-			Text: "BSCSCAN 收款地址",
+			Text: "收款地址",
 			URL:  "https://bscscan.com/address/" + to,
 		})
 	}
