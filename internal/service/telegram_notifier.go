@@ -18,8 +18,9 @@ import (
 )
 
 type telegramInlineButton struct {
-	Text string `json:"text"`
-	URL  string `json:"url,omitempty"`
+	Text     string         `json:"text"`
+	URL      string         `json:"url,omitempty"`
+	CopyText map[string]any `json:"copy_text,omitempty"`
 }
 
 type telegramChatMessage struct {

@@ -887,7 +887,7 @@ func (s *BSCScanner) sendUShieldTransferNotify(ctx context.Context, chatID strin
 	}
 
 	text := fmt.Sprintf(
-		"%s\n\n付款地址:  %s\n收款地址:  %s\n交易时间:    %s\n交易金额:    %s %s\n\nUSDT余额:%s USDT\nBNB余额: %s BNB",
+		"%s\n\n付款地址:  <code>%s</code>\n收款地址:  <code>%s</code>\n交易时间:    %s\n交易金额:    %s %s\n\nUSDT余额:%s USDT\nBNB余额: %s BNB",
 		header,
 		record.FromAddress,
 		record.ToAddress,
@@ -909,13 +909,13 @@ func (s *BSCScanner) sendUShieldTransferNotify(ctx context.Context, chatID strin
 	row2 := []telegramInlineButton{}
 	if from := strings.TrimSpace(record.FromAddress); from != "" {
 		row2 = append(row2, telegramInlineButton{
-			Text: "付款地址",
+			Text: "BSCSCAN 付款地址",
 			URL:  "https://bscscan.com/address/" + from,
 		})
 	}
 	if to := strings.TrimSpace(record.ToAddress); to != "" {
 		row2 = append(row2, telegramInlineButton{
-			Text: "收款地址",
+			Text: "BSCSCAN 收款地址",
 			URL:  "https://bscscan.com/address/" + to,
 		})
 	}
